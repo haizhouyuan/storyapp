@@ -17,7 +17,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api
 // 创建axios实例
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // 30秒超时
+  timeout: 180000, // 3分钟超时 - 适应故事树生成需要的时间
   headers: {
     'Content-Type': 'application/json',
   }

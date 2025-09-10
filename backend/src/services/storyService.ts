@@ -150,7 +150,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
           { role: 'user', content: String(parsedResponse.storySegment) }
         ];
         const expandResp = await deepseekClient.post('/chat/completions', {
-          model: DEEPSEEK_CONFIG.MODEL,
+          model: DEEPSEEK_CONFIG.CHAT_MODEL,
           messages: expandMessages,
           max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS - 200, 800),
           temperature: 0.7,

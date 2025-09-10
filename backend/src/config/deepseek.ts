@@ -1,8 +1,14 @@
 import axios from 'axios';
+import dotenv from 'dotenv';
+
+// 确保加载环境变量
+dotenv.config();
 
 // DeepSeek API配置
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+
+console.log('🔑 DeepSeek API Key 加载状态:', DEEPSEEK_API_KEY ? `已加载 (${DEEPSEEK_API_KEY.substring(0, 10)}...)` : '未找到');
 
 if (!DEEPSEEK_API_KEY) {
   console.warn('⚠️  未配置DeepSeek API Key，将使用模拟数据进行测试');
@@ -11,12 +17,56 @@ if (!DEEPSEEK_API_KEY) {
 // 创建DeepSeek API客户端
 export const deepseekClient = axios.create({
   baseURL: DEEPSEEK_API_URL,
-  timeout: 30000, // 30秒超时
+  timeout: 60000, // 增加到60秒超时，适应AI推理时间
   headers: {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+  },
+  // 添加重试和连接配置
+  httpsAgent: false, // 禁用HTTPS代理避免连接问题
+  maxRedirects: 5,
+  // 添加请求重试配置
+  validateStatus: function (status) {
+    return status >= 200 && status < 300; // 只有2xx状态码才算成功
   }
 });
+
+// 添加请求重试拦截器
+deepseekClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    
+    // 设置默认重试次数
+    if (!config.__retryCount) {
+      config.__retryCount = 0;
+    }
+    
+    // 判断是否应该重试
+    const shouldRetry = 
+      config.__retryCount < 3 && // 最多重试3次
+      (
+        error.code === 'ECONNRESET' ||
+        error.code === 'ENOTFOUND' ||
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        (error.response && [502, 503, 504].includes(error.response.status))
+      );
+    
+    if (shouldRetry) {
+      config.__retryCount += 1;
+      console.log(`🔄 网络请求失败，正在进行第 ${config.__retryCount} 次重试...`);
+      
+      // 指数退避延迟：1秒、2秒、4秒
+      const delay = Math.pow(2, config.__retryCount - 1) * 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      
+      return deepseekClient(config);
+    }
+    
+    return Promise.reject(error);
+  }
+);
 
 // DeepSeek API参数配置
 export const DEEPSEEK_CONFIG = {
