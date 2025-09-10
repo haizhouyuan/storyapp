@@ -15,7 +15,7 @@
 
 - **前端**: React + TypeScript + Tailwind CSS + Framer Motion
 - **后端**: Node.js + Express + TypeScript
-- **数据库**: Supabase PostgreSQL
+- **数据库**: MongoDB (Docker Compose 内置)
 - **AI服务**: DeepSeek API
 - **测试**: Playwright MCP
 
@@ -36,28 +36,28 @@ npm run install:all
 
 ```bash
 # 复制环境变量文件
-cp .env.example backend/.env
+cp .env.example .env
 
-# 编辑 backend/.env 填入实际配置值
-# - DeepSeek API Key: sk-e1e17a8f005340b39240591f709d71d4
-# - Supabase 项目配置
+# 编辑根目录 .env 填入实际配置值
+# - DEEPSEEK_API_KEY=your_deepseek_api_key_here
+# - DEEPSEEK_API_URL=https://api.deepseek.com
 ```
 
 ### 3. 数据库设置
 
-在Supabase控制台执行以下SQL创建stories表：
+使用Docker Compose启动MongoDB：
 
-```sql
-CREATE TABLE stories (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+```bash
+# 启动MongoDB数据库服务
+docker compose up -d mongo
 
-CREATE INDEX idx_stories_created_at ON stories(created_at DESC);
+# 验证MongoDB是否启动成功
+docker compose ps
 ```
+
+数据库表结构会自动初始化，包含索引：
+- 集合名称：`stories`
+- 索引：`created_at` 降序、`title` 文本索引
 
 ### 4. 启动开发服务器
 
@@ -66,7 +66,7 @@ CREATE INDEX idx_stories_created_at ON stories(created_at DESC);
 npm run dev
 
 # 或分别启动
-npm run dev:backend  # 后端: http://localhost:5000
+npm run dev:backend  # 后端: http://localhost:5001
 npm run dev:frontend # 前端: http://localhost:3000
 ```
 
@@ -106,6 +106,7 @@ storyapp/
 - `POST /api/save-story` - 保存完整故事
 - `GET /api/get-stories` - 获取已保存故事列表
 - `GET /api/get-story/:id` - 获取单个故事详情
+- `DELETE /api/delete-story/:id` - 删除指定故事
 
 ### 语音服务（占位）
 - `GET /api/tts` - 文本转语音（待实现）
@@ -126,12 +127,23 @@ storyapp/
 
 ## 部署说明
 
-项目设计适配Figma Make/Supabase无服务器环境，支持一键部署到：
-- Vercel
-- Netlify  
-- Supabase Functions
+项目使用Docker Compose进行容器化部署，支持：
+- 本地开发环境
+- 云服务器部署（阿里云、腾讯云等）
+- Docker容器编排
 
-详细部署步骤请参考 `docs/deployment.md`
+### 生产部署
+```bash
+# 构建并启动生产环境
+docker compose -f docker-compose.yml build --no-cache app
+docker compose -f docker-compose.yml up -d mongo
+docker compose -f docker-compose.yml up -d app
+
+# 健康检查
+curl -fsS http://localhost:5001/api/health
+```
+
+详细部署步骤请参考 `CLAUDE.md`
 
 ## 贡献指南
 
