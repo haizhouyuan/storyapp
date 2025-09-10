@@ -147,16 +147,46 @@ CREATE TABLE stories (
 
 ## 部署信息
 
-### 推荐部署平台
-- **前端**: Vercel, Netlify, AWS S3 + CloudFront
-- **后端**: Railway, Render, AWS Lambda + API Gateway
-- **数据库**: Supabase (云托管)
+### 代码管理和部署流程
+
+#### 📋 远程仓库配置
+- **GitHub (主要开发)**: `https://github.com/haizhouyuan/storyapp.git`
+- **Gitee (生产部署)**: `https://gitee.com/yuanhaizhou123/storyapp.git`
+
+#### 🚀 部署工作流程
+```bash
+# 1. 本地开发 → 提交到GitHub
+# 2. 双推送到Gitee
+./scripts/push-to-all.sh
+
+# 3. 阿里云服务器拉取部署
+./scripts/server-deploy.sh
+```
+
+#### 🔧 部署命令
+```bash
+# 一键双推送
+git pa  # 或 ./scripts/push-to-all.sh
+
+# 服务器部署
+./scripts/server-deploy.sh
+
+# Docker部署
+./deploy.sh --rebuild production
+
+# 健康检查
+./deploy.sh --status
+curl http://localhost:5001/api/health
+```
+
+### 详细部署文档
+请参考 `docs/DEPLOYMENT_WORKFLOW.md` 和 `agents/deploy-agent.md`
 
 ### 生产环境配置
 - 设置 `NODE_ENV=production`
-- 使用生产数据库凭据
-- 配置CDN和缓存策略
-- 启用监控和日志记录
+- 使用生产环境API密钥
+- Docker容器化部署
+- 配置监控和日志记录
 
 ## 故障排除
 

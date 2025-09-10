@@ -24,6 +24,7 @@
   "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.55.0",
+    "axios": "^1.11.0",
     "concurrently": "^8.2.2"
   }
 }
