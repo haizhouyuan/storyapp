@@ -17,7 +17,7 @@ if (!DEEPSEEK_API_KEY) {
 // 创建DeepSeek API客户端
 export const deepseekClient = axios.create({
   baseURL: DEEPSEEK_API_URL,
-  timeout: 60000, // 增加到60秒超时，适应AI推理时间
+  timeout: 180000, // 增加到180秒超时，适应AI推理/生成
   headers: {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
