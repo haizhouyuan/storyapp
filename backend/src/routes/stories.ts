@@ -4,13 +4,14 @@ import {
   saveStoryService, 
   getStoriesService, 
   getStoryByIdService,
+  deleteStoryService,
   generateFullStoryTreeService
 } from '../services/storyService';
 import type { 
   GenerateStoryRequest, 
   SaveStoryRequest,
   GenerateFullStoryRequest
-} from '../types';
+} from '../../../shared/types';
 
 const router = Router();
 
@@ -181,6 +182,49 @@ router.get('/get-story/:id', async (req: Request, res: Response) => {
     
     res.status(500).json({
       error: '获取故事详情时发生错误，请稍后再试',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+// DELETE /api/delete-story/:id - 删除故事
+router.delete('/delete-story/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // 参数验证
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        error: '请提供有效的故事ID',
+        code: 'INVALID_STORY_ID'
+      });
+    }
+
+    console.log(`正在删除故事, ID: ${id}`);
+    
+    // 调用故事删除服务
+    const result = await deleteStoryService({ id });
+    
+    res.json(result);
+  } catch (error: any) {
+    console.error('删除故事失败:', error);
+    
+    if (error.code === 'STORY_NOT_FOUND') {
+      return res.status(404).json({
+        error: '要删除的故事不存在',
+        code: 'STORY_NOT_FOUND'
+      });
+    }
+    
+    if (error.code === 'DATABASE_ERROR') {
+      return res.status(503).json({
+        error: '数据库服务暂时不可用，请稍后再试',
+        code: 'SERVICE_UNAVAILABLE'
+      });
+    }
+    
+    res.status(500).json({
+      error: '删除故事时发生错误，请稍后再试',
       code: 'INTERNAL_ERROR'
     });
   }

@@ -61,6 +61,15 @@ export interface GetStoryResponse {
   created_at: string;
 }
 
+export interface DeleteStoryRequest {
+  id: string;
+}
+
+export interface DeleteStoryResponse {
+  success: boolean;
+  message: string;
+}
+
 // 前端状态管理类型
 export interface StoryPath {
   segment: string;

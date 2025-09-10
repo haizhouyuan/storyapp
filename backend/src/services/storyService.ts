@@ -25,11 +25,13 @@ import type {
   SaveStoryResponse,
   GetStoriesResponse,
   GetStoryResponse,
+  DeleteStoryRequest,
+  DeleteStoryResponse,
   GenerateFullStoryRequest,
   GenerateFullStoryResponse,
   StoryTree,
   StoryTreeNode
-} from '../types';
+} from '../../../shared/types';
 
 function extractJson(content: string): any {
   const cleaned = String(content || '')
@@ -332,6 +334,62 @@ export async function getStoryByIdService(id: string): Promise<GetStoryResponse 
     }
     
     const customError = new Error('获取故事详情失败');
+    (customError as any).code = 'DATABASE_ERROR';
+    throw customError;
+  }
+}
+
+/**
+ * 删除故事服务
+ */
+export async function deleteStoryService(params: DeleteStoryRequest): Promise<DeleteStoryResponse> {
+  try {
+    const { id } = params;
+    
+    console.log(`正在删除故事, ID: ${id}`);
+    
+    // 获取数据库实例
+    const db = getDatabase();
+    const storiesCollection = db.collection(TABLES.STORIES);
+    
+    // 先检查故事是否存在
+    const existingStory = await storiesCollection.findOne({ 
+      _id: new ObjectId(id) 
+    });
+
+    if (!existingStory) {
+      throw new Error('要删除的故事不存在');
+    }
+
+    // 从MongoDB删除故事
+    const result = await storiesCollection.deleteOne({ 
+      _id: new ObjectId(id) 
+    });
+
+    if (result.deletedCount === 0) {
+      throw new Error('故事删除失败');
+    }
+
+    console.log(`故事删除成功, ID: ${id}`);
+
+    return {
+      success: true,
+      message: '故事已成功删除'
+    };
+  } catch (error: any) {
+    console.error('删除故事服务错误:', error);
+    
+    if (error.message === '要删除的故事不存在') {
+      const customError = new Error('要删除的故事不存在');
+      (customError as any).code = 'STORY_NOT_FOUND';
+      throw customError;
+    }
+    
+    if (error.code === 'DATABASE_ERROR') {
+      throw error;
+    }
+    
+    const customError = new Error('删除故事失败');
     (customError as any).code = 'DATABASE_ERROR';
     throw customError;
   }

@@ -12,7 +12,7 @@ import { toast } from 'react-hot-toast';
 import Button from '../components/Button';
 import StoryCard from '../components/StoryCard';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { getStories } from '../utils/api';
+import { getStories, getStoryById, deleteStory } from '../utils/api';
 import type { Story } from '../../../shared/types';
 
 /**
@@ -26,8 +26,34 @@ export default function MyStoriesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedStory, setSelectedStory] = useState<Story | null>(null);
+  const [fullStoryContent, setFullStoryContent] = useState<string>('');
+  const [isLoadingStoryDetail, setIsLoadingStoryDetail] = useState(false);
   
   const navigate = useNavigate();
+
+  // 解析故事内容的辅助函数
+  const parseStoryContent = (content: string): string => {
+    try {
+      // 尝试解析JSON格式的内容
+      const parsed = JSON.parse(content);
+      
+      // 处理故事树格式 (fullStory)
+      if (parsed.fullStory) {
+        return parsed.fullStory;
+      }
+      
+      // 处理渐进式故事格式 (storySegment)
+      if (parsed.storySegment) {
+        return parsed.storySegment;
+      }
+      
+      // 如果有其他字段，返回整个JSON的字符串表示
+      return JSON.stringify(parsed, null, 2);
+    } catch (error) {
+      // 如果不是JSON格式，直接返回原始内容
+      return content;
+    }
+  };
 
   // 加载故事列表
   useEffect(() => {
@@ -73,20 +99,57 @@ export default function MyStoriesPage() {
   };
 
   // 查看故事详情
-  const handleViewStory = (story: Story) => {
+  const handleViewStory = async (story: Story) => {
     setSelectedStory(story);
+    setFullStoryContent('');
+    setIsLoadingStoryDetail(true);
+    
+    try {
+      const response = await getStoryById(story.id);
+      const parsedContent = parseStoryContent(response.content);
+      setFullStoryContent(parsedContent);
+    } catch (error: any) {
+      console.error('获取故事详情失败:', error);
+      toast.error('获取故事详情失败');
+      // 如果获取失败，使用预览内容作为后备
+      setFullStoryContent(story.content);
+    } finally {
+      setIsLoadingStoryDetail(false);
+    }
   };
 
   // 关闭故事详情
   const handleCloseStoryDetail = () => {
     setSelectedStory(null);
+    setFullStoryContent('');
+    setIsLoadingStoryDetail(false);
   };
 
-  // 删除故事（暂未实现后端接口）
-  const handleDeleteStory = (story: Story) => {
-    toast('删除功能即将上线！', {
-      icon: '🚧'
-    });
+  // 删除故事
+  const handleDeleteStory = async (story: Story) => {
+    // 确认删除
+    if (!window.confirm(`确定要删除故事"${story.title}"吗？此操作不可恢复。`)) {
+      return;
+    }
+
+    try {
+      // 调用删除API
+      await deleteStory(story.id);
+      
+      // 从列表中移除已删除的故事
+      const updatedStories = stories.filter(s => s.id !== story.id);
+      setStories(updatedStories);
+      setFilteredStories(updatedStories.filter(s => 
+        !searchTerm.trim() || 
+        s.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.content.toLowerCase().includes(searchTerm.toLowerCase())
+      ));
+      
+      toast.success('故事已成功删除');
+    } catch (error: any) {
+      console.error('删除故事失败:', error);
+      toast.error('删除故事失败，请稍后重试');
+    }
   };
 
   // 返回首页
@@ -451,8 +514,15 @@ export default function MyStoriesPage() {
                 text-gray-700 
                 leading-relaxed
                 whitespace-pre-wrap
+                min-h-[200px]
               ">
-                {selectedStory.content}
+                {isLoadingStoryDetail ? (
+                  <div className="flex flex-col items-center justify-center py-child-xl">
+                    <LoadingSpinner message="正在加载故事详情..." size="medium" />
+                  </div>
+                ) : (
+                  fullStoryContent || selectedStory.content
+                )}
               </div>
             </motion.div>
           </motion.div>
