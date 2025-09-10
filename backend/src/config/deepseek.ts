@@ -23,7 +23,6 @@ export const deepseekClient = axios.create({
     'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
   },
   // 添加重试和连接配置
-  httpsAgent: false, // 禁用HTTPS代理避免连接问题
   maxRedirects: 5,
   // 添加请求重试配置
   validateStatus: function (status) {

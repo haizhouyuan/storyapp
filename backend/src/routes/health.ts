@@ -11,7 +11,10 @@ router.get('/', async (req: Request, res: Response) => {
       server: true,
       timestamp: new Date().toISOString(),
       database: false,
-      deepseek: false
+      deepseek: {
+        available: false,
+        status: 'unknown' as 'ok' | 'missing' | 'unknown'
+      }
     };
 
     // 检查数据库连接
@@ -21,20 +24,36 @@ router.get('/', async (req: Request, res: Response) => {
       console.warn('数据库健康检查失败:', error);
     }
 
-    // 检查DeepSeek API连接（简单验证，不实际调用）
+    // 检查DeepSeek API配置（非关键依赖）
     try {
-      checks.deepseek = !!process.env.DEEPSEEK_API_KEY;
+      const hasApiKey = !!process.env.DEEPSEEK_API_KEY;
+      checks.deepseek = {
+        available: hasApiKey,
+        status: hasApiKey ? 'ok' : 'missing'
+      };
     } catch (error) {
       console.warn('DeepSeek API检查失败:', error);
+      checks.deepseek = {
+        available: false,
+        status: 'unknown'
+      };
     }
 
-    const allHealthy = checks.server && checks.database && checks.deepseek;
+    // 核心服务健康状态：只要服务器和数据库正常就是健康的
+    const coreHealthy = checks.server && checks.database;
     
-    res.status(allHealthy ? 200 : 503).json({
-      status: allHealthy ? 'healthy' : 'unhealthy',
+    // 服务状态说明
+    let statusMessage = '儿童故事App后端服务';
+    if (!checks.deepseek.available) {
+      statusMessage += ' (AI功能降级：使用模拟数据)';
+    }
+
+    res.status(coreHealthy ? 200 : 503).json({
+      status: coreHealthy ? 'healthy' : 'unhealthy',
       checks,
       version: '1.0.0',
-      message: '儿童故事App后端服务'
+      message: statusMessage,
+      warnings: !checks.deepseek.available ? ['DeepSeek API未配置，AI故事生成将使用模拟数据'] : []
     });
   } catch (error) {
     console.error('健康检查错误:', error);
