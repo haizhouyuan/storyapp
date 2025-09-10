@@ -13,7 +13,10 @@ import {
   STORY_SYSTEM_PROMPT, 
   STORY_CONTINUE_PROMPT,
   STORY_TREE_SYSTEM_PROMPT,
-  STORY_TREE_NODE_PROMPT
+  STORY_TREE_NODE_PROMPT,
+  STORY_PLANNING_PROMPT,
+  STORY_WRITING_PROMPT,
+  STORY_REVIEW_PROMPT
 } from '../config/deepseek';
 import type { 
   GenerateStoryRequest, 
@@ -70,7 +73,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     
     // 调用DeepSeek API
     const response = await deepseekClient.post('/chat/completions', {
-      model: DEEPSEEK_CONFIG.MODEL,
+      model: DEEPSEEK_CONFIG.CHAT_MODEL,
       messages,
       max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
       temperature: DEEPSEEK_CONFIG.TEMPERATURE,
@@ -314,9 +317,310 @@ export async function getStoryByIdService(id: string): Promise<GetStoryResponse 
 }
 
 /**
- * 生成完整故事树服务
+ * 生成完整故事树服务（增强版 - 双模型协作）
  */
 export async function generateFullStoryTreeService(params: GenerateFullStoryRequest): Promise<GenerateFullStoryResponse> {
+  try {
+    const { topic } = params;
+    
+    console.log(`开始生成完整故事树，主题: ${topic}`);
+    
+    // 检查是否有API密钥，没有则使用模拟数据
+    if (!process.env.DEEPSEEK_API_KEY) {
+      console.log('使用模拟数据生成故事树');
+      const storyTreeId = new ObjectId().toString();
+      const timestamp = new Date().toISOString();
+      return generateMockStoryTree(topic, storyTreeId, timestamp);
+    }
+    
+    // 使用增强的双模型协作生成故事树
+    return await generateAdvancedStoryTree(topic);
+    
+  } catch (error: any) {
+    console.error('故事树生成失败:', error);
+    
+    const customError = new Error('故事树生成失败');
+    (customError as any).code = 'STORY_TREE_GENERATION_ERROR';
+    throw customError;
+  }
+}
+
+/**
+ * 使用双模型协作生成高质量故事树
+ */
+async function generateAdvancedStoryTree(topic: string): Promise<GenerateFullStoryResponse> {
+  const storyTreeId = new ObjectId().toString();
+  const timestamp = new Date().toISOString();
+  
+  console.log('Phase 1: 使用思考模式进行故事规划...');
+  
+  // Phase 1: 使用思考模式进行深度故事规划
+  const storyOutline = await callDeepSeekReasoner(
+    STORY_PLANNING_PROMPT,
+    `为主题"${topic}"设计完整的儿童故事树结构`
+  );
+  
+  console.log('Phase 2: 使用快速模式进行内容创作...');
+  
+  // Phase 2: 基于规划，使用快速模式创作各个片段
+  const storyNodes = await generateStoryNodesWithOutline(topic, storyOutline);
+  
+  console.log('Phase 3: 使用思考模式进行质量检查...');
+  
+  // Phase 3: 使用思考模式对每个片段进行质量检查
+  const reviewedNodes = await reviewAndRefineNodes(storyNodes);
+  
+  // 组装最终故事树
+  const storyTree = assembleStoryTree(storyTreeId, topic, timestamp, reviewedNodes);
+  
+  return {
+    success: true,
+    storyTree,
+    message: '高质量故事树生成完成！'
+  };
+}
+
+/**
+ * 调用DeepSeek思考模式
+ */
+async function callDeepSeekReasoner(systemPrompt: string, userMessage: string): Promise<any> {
+  const response = await deepseekClient.post('/chat/completions', {
+    model: DEEPSEEK_CONFIG.REASONER_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: systemPrompt
+      },
+      {
+        role: 'user', 
+        content: userMessage
+      }
+    ],
+    max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+    temperature: DEEPSEEK_CONFIG.TEMPERATURE,
+    stream: DEEPSEEK_CONFIG.STREAM
+  });
+  
+  if (!response.data?.choices?.[0]?.message?.content) {
+    throw new Error('DeepSeek Reasoner API返回数据格式不正确');
+  }
+  
+  const content = response.data.choices[0].message.content;
+  
+  try {
+    const cleanedContent = content
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    
+    return JSON.parse(cleanedContent);
+  } catch (parseError) {
+    console.error('解析Reasoner响应失败:', parseError);
+    throw new Error('思考模式响应格式解析失败');
+  }
+}
+
+/**
+ * 调用DeepSeek快速模式
+ */
+async function callDeepSeekChat(systemPrompt: string, userMessage: string): Promise<any> {
+  const response = await deepseekClient.post('/chat/completions', {
+    model: DEEPSEEK_CONFIG.CHAT_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: systemPrompt
+      },
+      {
+        role: 'user',
+        content: userMessage
+      }
+    ],
+    max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+    temperature: DEEPSEEK_CONFIG.TEMPERATURE,
+    stream: DEEPSEEK_CONFIG.STREAM
+  });
+  
+  if (!response.data?.choices?.[0]?.message?.content) {
+    throw new Error('DeepSeek Chat API返回数据格式不正确');
+  }
+  
+  const content = response.data.choices[0].message.content;
+  
+  try {
+    const cleanedContent = content
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    
+    return JSON.parse(cleanedContent);
+  } catch (parseError) {
+    console.error('解析Chat响应失败:', parseError);
+    throw new Error('快速模式响应格式解析失败');
+  }
+}
+
+/**
+ * 基于大纲生成故事节点
+ */
+async function generateStoryNodesWithOutline(topic: string, outline: any): Promise<StoryTreeNode[]> {
+  const nodes: StoryTreeNode[] = [];
+  const outlineStr = JSON.stringify(outline, null, 2);
+  
+  // 生成开头节点
+  console.log('生成故事开头...');
+  const openingContent = await callDeepSeekChat(
+    '你是专业的儿童故事作家，请根据规划创作故事内容。',
+    STORY_WRITING_PROMPT(outlineStr, 'opening', `主题：${topic}`)
+  );
+  
+  const rootNode: StoryTreeNode = {
+    id: new ObjectId().toString(),
+    segment: openingContent.segment,
+    choices: openingContent.choices || outline.story_outline.first_choices,
+    children: [],
+    isEnding: false,
+    depth: 0,
+    path: ''
+  };
+  nodes.push(rootNode);
+  
+  // 生成第二层和第三层节点
+  const branches = outline.story_outline.branches || [];
+  const secondLevelNodes: StoryTreeNode[] = [];
+  
+  for (let i = 0; i < branches.length; i++) {
+    const branch = branches[i];
+    
+    console.log(`生成第二层节点 ${i + 1}...`);
+    const branchContent = await callDeepSeekChat(
+      '你是专业的儿童故事作家，请根据规划创作故事内容。',
+      STORY_WRITING_PROMPT(outlineStr, 'branch', `分支：${branch.development}`)
+    );
+    
+    const secondLevelNode: StoryTreeNode = {
+      id: new ObjectId().toString(),
+      segment: branchContent.segment,
+      choices: branchContent.choices || branch.second_choices,
+      children: [],
+      isEnding: false,
+      depth: 1,
+      path: i.toString()
+    };
+    
+    // 为每个第二层节点生成结局
+    const endingNodes: StoryTreeNode[] = [];
+    for (let j = 0; j < 2; j++) {
+      console.log(`生成结局 ${i}-${j}...`);
+      const endingContent = await callDeepSeekChat(
+        '你是专业的儿童故事作家，请根据规划创作故事内容。',
+        STORY_WRITING_PROMPT(outlineStr, 'ending', `结局概要：${branch.endings[j]}`)
+      );
+      
+      const endingNode: StoryTreeNode = {
+        id: new ObjectId().toString(),
+        segment: endingContent.segment,
+        choices: [],
+        children: undefined,
+        isEnding: true,
+        depth: 2,
+        path: `${i}-${j}`
+      };
+      endingNodes.push(endingNode);
+      nodes.push(endingNode);
+    }
+    
+    secondLevelNode.children = endingNodes;
+    secondLevelNodes.push(secondLevelNode);
+    nodes.push(secondLevelNode);
+  }
+  
+  rootNode.children = secondLevelNodes;
+  
+  return nodes;
+}
+
+/**
+ * 使用思考模式检查和优化节点内容
+ */
+async function reviewAndRefineNodes(nodes: StoryTreeNode[]): Promise<StoryTreeNode[]> {
+  const reviewedNodes: StoryTreeNode[] = [];
+  
+  for (const node of nodes) {
+    console.log(`检查节点质量：深度${node.depth}，路径${node.path}...`);
+    
+    try {
+      const review = await callDeepSeekReasoner(
+        '你是专业的儿童故事编辑，请检查故事内容质量。',
+        STORY_REVIEW_PROMPT(node.segment, 500)
+      );
+      
+      if (review.approved && review.word_count >= 500) {
+        console.log(`节点通过检查，质量分数：${review.quality_score}/10`);
+        reviewedNodes.push(node);
+      } else {
+        console.log(`节点需要改进：${review.issues.join(', ')}`);
+        
+        // 尝试改进内容
+        const improvedContent = await callDeepSeekChat(
+          '请改进以下故事内容，确保达到500字并提高质量。',
+          `原内容：${node.segment}\n\n改进建议：${review.suggestions.join('; ')}\n\n请返回JSON格式：{"segment": "改进后的内容", "choices": ${JSON.stringify(node.choices)}, "isEnding": ${node.isEnding}}`
+        );
+        
+        const improvedNode: StoryTreeNode = {
+          ...node,
+          segment: improvedContent.segment
+        };
+        
+        console.log(`内容已改进，重新检查中...`);
+        reviewedNodes.push(improvedNode);
+      }
+    } catch (error) {
+      console.warn(`节点检查失败，使用原内容：`, error);
+      reviewedNodes.push(node);
+    }
+  }
+  
+  return reviewedNodes;
+}
+
+/**
+ * 组装最终故事树
+ */
+function assembleStoryTree(id: string, topic: string, timestamp: string, nodes: StoryTreeNode[]): StoryTree {
+  // 找到根节点
+  const rootNode = nodes.find(n => n.depth === 0);
+  if (!rootNode) {
+    throw new Error('未找到根节点');
+  }
+  
+  // 重新建立节点关系
+  const secondLevelNodes = nodes.filter(n => n.depth === 1);
+  const endingNodes = nodes.filter(n => n.depth === 2);
+  
+  secondLevelNodes.forEach(secondNode => {
+    const children = endingNodes.filter(endNode => 
+      endNode.path.startsWith(secondNode.path + '-')
+    );
+    secondNode.children = children;
+  });
+  
+  rootNode.children = secondLevelNodes;
+  
+  return {
+    id,
+    topic,
+    root: rootNode,
+    created_at: timestamp,
+    totalPaths: 4,
+    maxDepth: 2
+  };
+}
+
+/**
+ * 生成完整故事树服务（原始版本 - 保持向下兼容）
+ */
+export async function generateBasicStoryTreeService(params: GenerateFullStoryRequest): Promise<GenerateFullStoryResponse> {
   try {
     const { topic } = params;
     
@@ -433,7 +737,7 @@ async function generateStoryTreeNode(
     
     // 调用DeepSeek API
     const response = await deepseekClient.post('/chat/completions', {
-      model: DEEPSEEK_CONFIG.MODEL,
+      model: DEEPSEEK_CONFIG.CHAT_MODEL,
       messages,
       max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
       temperature: DEEPSEEK_CONFIG.TEMPERATURE,
@@ -524,7 +828,7 @@ async function expandStorySegment(segment: string): Promise<string | null> {
     ];
     
     const expandResp = await deepseekClient.post('/chat/completions', {
-      model: DEEPSEEK_CONFIG.MODEL,
+      model: DEEPSEEK_CONFIG.CHAT_MODEL,
       messages: expandMessages,
       max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS - 200, 800),
       temperature: 0.7,

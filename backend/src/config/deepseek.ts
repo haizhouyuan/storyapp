@@ -20,7 +20,10 @@ export const deepseekClient = axios.create({
 
 // DeepSeek API参数配置
 export const DEEPSEEK_CONFIG = {
-  MODEL: 'deepseek-chat', // V3.1 非思考模式，适合故事生成
+  // V3.1 非思考模式 - 用于快速内容生成
+  CHAT_MODEL: 'deepseek-chat',
+  // V3.1 思考模式 - 用于深度推理和构思
+  REASONER_MODEL: 'deepseek-reasoner',
   // 每次至少500字的片段 + 3个选项的文本，增加最大token
   MAX_TOKENS: 2000,
   TEMPERATURE: 0.7,
@@ -147,4 +150,92 @@ ${isLastLevel
 ${isLastLevel 
   ? '{"segment": "结局内容...", "choices": [], "isEnding": true}'
   : '{"segment": "故事内容...", "choices": ["选择1", "选择2"], "isEnding": false}'
+}`;
+
+// 故事构思专用提示词（思考模式）
+export const STORY_PLANNING_PROMPT = `你是一个专业的儿童故事构思师，需要为给定主题设计完整的故事树结构。
+
+任务：为主题进行深度思考和规划，设计一个包含3轮选择的完整故事树：
+- 第1轮：根据主题设定，提供2个初始方向选择
+- 第2轮：每个分支再提供2个发展选择  
+- 第3轮：最终形成4个不同的温馨结局
+
+要求：
+1. 故事结构要逻辑清晰，每个分支都有独特的发展路径
+2. 所有结局都要积极正面，适合3-8岁儿童
+3. 确保每个故事片段都能达到500字以上
+4. 选择项要具体有趣，能够激发儿童想象力
+
+请深度思考后，返回JSON格式的故事结构规划：
+{
+  "theme_analysis": "主题分析和理解",
+  "story_outline": {
+    "opening": "开场设定描述",
+    "first_choices": ["选择A描述", "选择B描述"],
+    "branches": [
+      {
+        "path": "A",
+        "development": "A分支发展",
+        "second_choices": ["A1选择", "A2选择"],
+        "endings": ["A1结局概要", "A2结局概要"]
+      },
+      {
+        "path": "B", 
+        "development": "B分支发展",
+        "second_choices": ["B1选择", "B2选择"],
+        "endings": ["B1结局概要", "B2结局概要"]
+      }
+    ]
+  },
+  "content_guidelines": "内容创作指导原则"
+}`;
+
+// 故事写作专用提示词（非思考模式）
+export const STORY_WRITING_PROMPT = (
+  outline: string,
+  segment_type: 'opening' | 'branch' | 'ending',
+  context: string
+) => `你是一个专业的儿童故事作家，请根据已规划好的故事结构进行具体的内容创作。
+
+故事规划：
+${outline}
+
+当前任务：创作${segment_type === 'opening' ? '故事开头' : segment_type === 'branch' ? '中间发展片段' : '结局片段'}
+
+上下文：${context}
+
+写作要求：
+1. 内容不少于500字，生动有趣
+2. 语言适合3-8岁儿童，简单易懂
+3. 情节发展自然流畅，符合规划
+4. 描述要有画面感，激发想象力
+
+返回JSON格式：
+{
+  "segment": "故事内容（500+字）",
+  "choices": ${segment_type === 'ending' ? '[]' : '["选择1", "选择2"]'},
+  "isEnding": ${segment_type === 'ending' ? 'true' : 'false'}
+}`;
+
+// 故事质量检查提示词（思考模式）
+export const STORY_REVIEW_PROMPT = (content: string, expected_length: number = 500) => `你是一个专业的儿童故事编辑，请仔细检查以下故事内容的质量。
+
+故事内容：
+${content}
+
+检查标准：
+1. 内容是否适合3-8岁儿童（无暴力、恐怖内容）
+2. 字数是否达到${expected_length}字以上
+3. 语言是否简单易懂，有趣生动
+4. 情节是否合理，有教育意义
+5. 是否激发儿童想象力和好奇心
+
+请深度思考后返回检查结果：
+{
+  "approved": true/false,
+  "word_count": 实际字数,
+  "quality_score": 1-10分,
+  "issues": ["问题1", "问题2"] 或 [],
+  "suggestions": ["改进建议1", "改进建议2"] 或 [],
+  "summary": "总体评价"
 }`;
