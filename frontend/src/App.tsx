@@ -5,15 +5,17 @@ import { Toaster } from 'react-hot-toast';
 // 导入页面组件
 import HomePage from './pages/HomePage';
 import StoryPage from './pages/StoryPage';
+import StoryTreePage from './pages/StoryTreePage';
 import EndPage from './pages/EndPage';
 import MyStoriesPage from './pages/MyStoriesPage';
 
 // 导入类型
-import type { StorySession } from '../../shared/types';
+import type { StorySession, StoryTreeSession } from '../../shared/types';
 
 function App() {
   // 故事会话状态 - 在整个应用中共享
   const [storySession, setStorySession] = React.useState<StorySession | null>(null);
+  const [storyTreeSession, setStoryTreeSession] = React.useState<StoryTreeSession | null>(null);
 
   return (
     <Router>
@@ -56,12 +58,13 @@ function App() {
             path="/" 
             element={
               <HomePage 
-                onStartStory={setStorySession} 
+                onStartStory={setStorySession}
+                onStartStoryTree={setStoryTreeSession}
               />
             } 
           />
           
-          {/* 故事互动页 */}
+          {/* 故事互动页（传统模式） */}
           <Route 
             path="/story" 
             element={
@@ -70,6 +73,12 @@ function App() {
                 onUpdateSession={setStorySession}
               />
             } 
+          />
+
+          {/* 故事树互动页（新模式） */}
+          <Route 
+            path="/story-tree" 
+            element={<StoryTreePage />} 
           />
           
           {/* 故事结束页 */}

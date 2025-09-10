@@ -73,6 +73,39 @@ export interface StorySession {
   maxChoices: number;
 }
 
+// 故事树节点类型 - 支持预生成完整故事树
+export interface StoryTreeNode {
+  id: string;  // 节点唯一标识
+  segment: string;  // 故事片段内容(500+字)
+  choices: string[];  // 选择选项(最多2个，叶子节点为空)
+  children?: StoryTreeNode[];  // 子节点
+  isEnding: boolean;  // 是否为结尾节点
+  depth: number;  // 节点深度(0-3)
+  path: string;  // 路径标识，如 "0-1-0" 表示第一次选0，第二次选1，第三次选0
+}
+
+// 完整故事树
+export interface StoryTree {
+  id: string;  // 故事树ID
+  topic: string;  // 故事主题
+  root: StoryTreeNode;  // 根节点
+  created_at: string;
+  totalPaths: number;  // 总路径数(固定为8)
+  maxDepth: number;  // 最大深度(固定为3)
+}
+
+// 故事树生成请求
+export interface GenerateFullStoryRequest {
+  topic: string;
+}
+
+// 故事树生成响应
+export interface GenerateFullStoryResponse {
+  success: boolean;
+  storyTree: StoryTree;
+  message?: string;
+}
+
 // 错误类型
 export interface ApiError {
   message: string;

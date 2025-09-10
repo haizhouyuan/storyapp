@@ -3,11 +3,13 @@ import {
   generateStoryService, 
   saveStoryService, 
   getStoriesService, 
-  getStoryByIdService 
+  getStoryByIdService,
+  generateFullStoryTreeService
 } from '../services/storyService';
 import type { 
   GenerateStoryRequest, 
-  SaveStoryRequest 
+  SaveStoryRequest,
+  GenerateFullStoryRequest
 } from '../types';
 
 const router = Router();
@@ -179,6 +181,51 @@ router.get('/get-story/:id', async (req: Request, res: Response) => {
     
     res.status(500).json({
       error: '获取故事详情时发生错误，请稍后再试',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+// POST /api/generate-full-story - 生成完整故事树
+router.post('/generate-full-story', async (req: Request, res: Response) => {
+  try {
+    const { topic }: GenerateFullStoryRequest = req.body;
+
+    // 参数验证
+    if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
+      return res.status(400).json({
+        error: '请提供有效的故事主题',
+        code: 'INVALID_TOPIC'
+      });
+    }
+
+    if (topic.length > 100) {
+      return res.status(400).json({
+        error: '故事主题不能超过100个字符',
+        code: 'TOPIC_TOO_LONG'
+      });
+    }
+
+    console.log(`正在为主题"${topic}"生成完整故事树...`);
+    
+    // 调用故事树生成服务
+    const result = await generateFullStoryTreeService({
+      topic: topic.trim()
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('生成故事树失败:', error);
+    
+    if (error.code === 'STORY_TREE_GENERATION_ERROR') {
+      return res.status(503).json({
+        error: '故事树生成服务暂时不可用，请稍后再试',
+        code: 'SERVICE_UNAVAILABLE'
+      });
+    }
+    
+    res.status(500).json({
+      error: '生成故事树时发生错误，请稍后再试',
       code: 'INTERNAL_ERROR'
     });
   }

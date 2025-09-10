@@ -6,11 +6,13 @@ import type {
   SaveStoryResponse,
   GetStoriesResponse,
   GetStoryResponse,
+  GenerateFullStoryRequest,
+  GenerateFullStoryResponse,
   ApiError
 } from '../../../shared/types';
 
 // API基础配置
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
 // 创建axios实例
 const apiClient = axios.create({
@@ -122,6 +124,19 @@ export async function getStoryById(id: string): Promise<GetStoryResponse> {
     return response.data;
   } catch (error) {
     console.error('获取故事详情失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 生成完整故事树
+ */
+export async function generateFullStoryTree(params: GenerateFullStoryRequest): Promise<GenerateFullStoryResponse> {
+  try {
+    const response = await apiClient.post('/generate-full-story', params);
+    return response.data;
+  } catch (error) {
+    console.error('生成故事树失败:', error);
     throw error;
   }
 }

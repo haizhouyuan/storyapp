@@ -6,19 +6,23 @@ import { toast } from 'react-hot-toast';
 
 import Button from '../components/Button';
 import { validateStoryTopic } from '../utils/helpers';
-import type { StorySession } from '../../../shared/types';
+import type { StorySession, StoryTreeSession } from '../../../shared/types';
 
 interface HomePageProps {
   onStartStory: (session: StorySession) => void;
+  onStartStoryTree?: (session: StoryTreeSession) => void;
 }
+
+type StoryMode = 'progressive' | 'tree';
 
 /**
  * 故事主题输入页（首页）
- * 特点：温馨背景、大输入框、醒目按钮、"我的故事"入口
+ * 特点：温馨背景、大输入框、醒目按钮、"我的故事"入口、故事模式选择
  */
-export default function HomePage({ onStartStory }: HomePageProps) {
+export default function HomePage({ onStartStory, onStartStoryTree }: HomePageProps) {
   const [topic, setTopic] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [storyMode, setStoryMode] = useState<StoryMode>('tree');
   const navigate = useNavigate();
 
   // 处理开始故事
@@ -33,20 +37,23 @@ export default function HomePage({ onStartStory }: HomePageProps) {
     setIsLoading(true);
     
     try {
-      // 创建故事会话
-      const maxChoices = Math.floor(Math.random() * 6) + 5; // 5-10 次
-      const session: StorySession = {
-        topic: topic.trim(),
-        path: [],
-        isComplete: false,
-        startTime: Date.now(),
-        maxChoices
-      };
+      if (storyMode === 'tree') {
+        // 故事树模式：导航到故事树页面，让页面自己生成故事树
+        navigate('/story-tree', { state: { topic: topic.trim() } });
+      } else {
+        // 渐进模式：使用原有逻辑
+        const maxChoices = Math.floor(Math.random() * 6) + 5; // 5-10 次
+        const session: StorySession = {
+          topic: topic.trim(),
+          path: [],
+          isComplete: false,
+          startTime: Date.now(),
+          maxChoices
+        };
 
-      onStartStory(session);
-      
-      // 跳转到故事页面
-      navigate('/story');
+        onStartStory(session);
+        navigate('/story');
+      }
     } catch (error: any) {
       console.error('开始故事失败:', error);
       toast.error('故事启动失败，请稍后再试');
@@ -281,6 +288,62 @@ export default function HomePage({ onStartStory }: HomePageProps) {
         >
           告诉我你想听什么故事，我们一起创作一个神奇的冒险吧！
         </motion.p>
+
+        {/* 故事模式选择 */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.75 }}
+          className="mb-child-2xl"
+        >
+          <p className="text-child-base font-child font-medium text-gray-700 mb-child-md text-center">
+            选择故事体验模式
+          </p>
+          
+          <div className="flex justify-center gap-child-md">
+            {/* 故事树模式 */}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setStoryMode('tree')}
+              className={`
+                px-child-lg py-child-md rounded-child-lg border-2 transition-all duration-200
+                ${storyMode === 'tree' 
+                  ? 'bg-child-blue text-white border-child-blue shadow-child-lg' 
+                  : 'bg-white text-gray-700 border-gray-300 shadow-child hover:border-child-blue/50'
+                }
+              `}
+            >
+              <div className="text-center">
+                <div className="text-child-base font-semibold mb-1">故事树模式</div>
+                <div className="text-child-xs">
+                  {storyMode === 'tree' ? '✨ 推荐模式' : '3轮选择·预生成'}
+                </div>
+              </div>
+            </motion.button>
+
+            {/* 渐进模式 */}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setStoryMode('progressive')}
+              className={`
+                px-child-lg py-child-md rounded-child-lg border-2 transition-all duration-200
+                ${storyMode === 'progressive' 
+                  ? 'bg-child-green text-white border-child-green shadow-child-lg' 
+                  : 'bg-white text-gray-700 border-gray-300 shadow-child hover:border-child-green/50'
+                }
+              `}
+            >
+              <div className="text-center">
+                <div className="text-child-base font-semibold mb-1">经典模式</div>
+                <div className="text-child-xs">
+                  {storyMode === 'progressive' ? '🎯 传统体验' : '实时生成·灵活'}
+                </div>
+              </div>
+            </motion.button>
+          </div>
+        </motion.div>
 
         {/* 主题输入区域 */}
         <motion.div
