@@ -1,0 +1,105 @@
+import { MongoClient, Db } from 'mongodb';
+
+// MongoDB配置
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'storyapp';
+
+// 数据库集合名称常量
+export const COLLECTIONS = {
+  STORIES: 'stories'
+} as const;
+
+// MongoDB客户端实例
+let client: MongoClient;
+let db: Db;
+
+/**
+ * 连接到MongoDB数据库
+ */
+export async function connectToDatabase(): Promise<Db> {
+  if (db) {
+    return db;
+  }
+
+  try {
+    console.log('正在连接到MongoDB...');
+    
+    client = new MongoClient(MONGODB_URI, {
+      // 连接选项
+      maxPoolSize: 10,
+      minPoolSize: 2,
+      connectTimeoutMS: 30000,
+      socketTimeoutMS: 45000
+    });
+
+    await client.connect();
+    db = client.db(MONGODB_DB_NAME);
+    
+    console.log('✅ MongoDB连接成功');
+    console.log(`📍 数据库: ${MONGODB_DB_NAME}`);
+    console.log(`🔗 URI: ${MONGODB_URI}`);
+    
+    // 初始化数据库索引
+    await initializeDatabase();
+    
+    return db;
+  } catch (error) {
+    console.error('❌ MongoDB连接失败:', error);
+    throw new Error('MongoDB连接失败');
+  }
+}
+
+/**
+ * 初始化数据库索引
+ */
+async function initializeDatabase(): Promise<void> {
+  try {
+    const storiesCollection = db.collection(COLLECTIONS.STORIES);
+    
+    // 创建索引
+    await storiesCollection.createIndex({ created_at: -1 });
+    await storiesCollection.createIndex({ title: 'text' });
+    
+    console.log('✅ 数据库索引初始化完成');
+  } catch (error) {
+    console.error('数据库索引初始化失败:', error);
+  }
+}
+
+/**
+ * 获取数据库实例
+ */
+export function getDatabase(): Db {
+  if (!db) {
+    throw new Error('数据库未连接，请先调用 connectToDatabase()');
+  }
+  return db;
+}
+
+/**
+ * 关闭数据库连接
+ */
+export async function closeDatabase(): Promise<void> {
+  if (client) {
+    await client.close();
+    console.log('MongoDB连接已关闭');
+  }
+}
+
+/**
+ * 检查数据库连接状态
+ */
+export async function checkDatabaseHealth(): Promise<boolean> {
+  try {
+    if (!db) {
+      return false;
+    }
+    
+    // 执行简单的ping命令检查连接
+    await db.command({ ping: 1 });
+    return true;
+  } catch (error) {
+    console.error('数据库健康检查失败:', error);
+    return false;
+  }
+}
