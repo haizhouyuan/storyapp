@@ -1,0 +1,48 @@
+# 开发环境 - 简化配置
+name: storyapp-dev
+services:
+  # MongoDB数据库
+  mongo:
+    image: mongo:6.0
+    container_name: storyapp_mongo_dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: storyapp_dev
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_dev_data:/data/db
+    networks:
+      - storyapp_dev
+
+  # 应用服务
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: storyapp:dev
+    container_name: storyapp_dev
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongo:27017/storyapp_dev
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-https://api.deepseek.com}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    networks:
+      - storyapp_dev
+    depends_on:
+      - mongo
+
+networks:
+  storyapp_dev:
+    driver: bridge
+
+volumes:
+  mongo_dev_data:
+    driver: local
