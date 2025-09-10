@@ -164,6 +164,12 @@ git push origin $(git branch --show-current)
 git push gitee $(git branch --show-current)
 ```
 
+#### 🌐 生产环境域名和服务配置
+- **生产域名**: `https://storyapp.dandanbaba.xyz`
+- **服务端口**: 5001 (内部)
+- **代理配置**: Nginx反向代理到localhost:5001
+- **SSL配置**: 待配置HTTPS证书
+
 #### 🚀 分步部署（推荐，逐条命令执行）
 ```bash
 # 0) 服务器准备
@@ -171,6 +177,10 @@ git push gitee $(git branch --show-current)
 cat > .env << 'EOF'
 DEEPSEEK_API_KEY=your_deepseek_key
 DEEPSEEK_API_URL=https://api.deepseek.com
+MONGODB_URI=mongodb://localhost:27017
+MONGODB_DB_NAME=storyapp
+PORT=5001
+NODE_ENV=production
 EOF
 
 # 1) 构建镜像（只构建 app）
@@ -186,16 +196,21 @@ docker compose -f docker-compose.yml logs -f mongo
 docker compose -f docker-compose.yml up -d app
 docker compose -f docker-compose.yml logs -f app
 
-# 4) 健康检查
-curl -fsS http://localhost:5001/api/health
+# 4) 启动后端服务（非Docker方式，推荐生产环境）
+cd backend && npm run dev  # 或使用 pm2 进行进程管理
 
-# 5) （可选）启动Nginx反代
-docker compose -f docker-compose.yml --profile nginx up -d nginx
+# 5) 配置Nginx反向代理到域名
+# Nginx配置文件：/etc/nginx/sites-available/storyapp.dandanbaba.xyz
+sudo systemctl reload nginx
 
-# 6) 常用运维
-docker compose -f docker-compose.yml restart app
-docker compose -f docker-compose.yml logs -f app
-docker compose -f docker-compose.yml down   # 停止（谨慎）
+# 6) 健康检查
+curl -fsS http://localhost:5001/api/health           # 本地检查
+curl -fsS http://storyapp.dandanbaba.xyz/api/health  # 域名检查
+
+# 7) 常用运维
+pm2 restart storyapp          # 重启应用（如使用pm2）
+pm2 logs storyapp            # 查看日志
+systemctl status nginx       # 检查Nginx状态
 ```
 
 端口说明：容器内应用监听 `5000`，对外暴露为主机 `5001`，健康检查、E2E 和手工测试均使用 `http://localhost:5001`。
@@ -213,18 +228,24 @@ ssh <prod-user>@<prod-host>
 # 手工 API 验证（DeepSeek 必须配置正确）：
 
 # 1) 生成故事片段（在生产服务器上执行）
+# 本地API测试
 curl -fsS -X POST http://localhost:5001/api/generate-story \
   -H 'Content-Type: application/json' \
   -d '{"topic":"宇航员小熊","maxChoices":6}'
 
+# 域名API测试
+curl -fsS -X POST http://storyapp.dandanbaba.xyz/api/generate-story \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"宇航员小熊","maxChoices":6}'
+
 # 2) 保存故事（把上一步返回的片段包成 content 文本或JSON字符串）
-curl -fsS -X POST http://localhost:5001/api/save-story \
+curl -fsS -X POST http://storyapp.dandanbaba.xyz/api/save-story \
   -H 'Content-Type: application/json' \
   -d '{"title":"宇航员小熊的冒险","content":"{\\"storySegment\\":\\"...\\"}"}'
 
 # 3) 获取列表/详情
-curl -fsS http://localhost:5001/api/get-stories
-curl -fsS http://localhost:5001/api/get-story/<id>
+curl -fsS http://storyapp.dandanbaba.xyz/api/get-stories
+curl -fsS http://storyapp.dandanbaba.xyz/api/get-story/<id>
 ```
 
 注意：`generateFullStoryTreeService` 仅在缺失 `DEEPSEEK_API_KEY` 时回退到模拟数据。生产验证必须设置真实密钥，严禁走模拟路径。
