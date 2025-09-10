@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import path from 'path';
 
 // 导入路由
 import storyRoutes from './routes/stories';
@@ -60,6 +61,19 @@ app.use((req, res, next) => {
 app.use('/api/health', healthRoutes);
 app.use('/api', storyRoutes);
 
+// 静态文件服务（前端）
+if (process.env.NODE_ENV === 'production') {
+  // 服务React构建的静态文件
+  app.use(express.static(path.join(__dirname, '../public')));
+  
+  // 对于所有非API路由，返回React应用的index.html（用于React Router）
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(__dirname, '../public/index.html'));
+    }
+  });
+}
+
 // 404处理
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -80,17 +94,29 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// 启动服务器
-app.listen(PORT, () => {
-  console.log(`🚀 服务器启动成功！`);
-  console.log(`📍 端口: ${PORT}`);
-  console.log(`🌐 环境: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`🎨 前端地址: ${FRONTEND_URL}`);
+// 启动服务器并初始化数据库
+async function startServer() {
+  try {
+    // 初始化数据库连接
+    await connectToDatabase();
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 服务器启动成功！`);
+      console.log(`📍 端口: ${PORT}`);
+      console.log(`🌐 环境: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
+      
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`🎨 前端地址: ${FRONTEND_URL}`);
+      }
+    });
+  } catch (error) {
+    console.error('服务器启动失败:', error);
+    process.exit(1);
   }
-});
+}
+
+startServer();
 
 // 优雅关闭
 process.on('SIGTERM', () => {

@@ -28,7 +28,7 @@ router.get('/', async (req: Request, res: Response) => {
       console.warn('DeepSeek API检查失败:', error);
     }
 
-    const allHealthy = Object.values(checks).every(check => check === true);
+    const allHealthy = checks.server && checks.database && checks.deepseek;
     
     res.status(allHealthy ? 200 : 503).json({
       status: allHealthy ? 'healthy' : 'unhealthy',
