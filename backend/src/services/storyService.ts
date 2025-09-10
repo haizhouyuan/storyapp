@@ -31,6 +31,27 @@ import type {
   StoryTreeNode
 } from '../types';
 
+function extractJson(content: string): any {
+  const cleaned = String(content || '')
+    .replace(/```json\n?/gi, '')
+    .replace(/```\n?/g, '')
+    .trim();
+  // First try direct parse
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+  // Try to locate a JSON object within text
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+  throw new Error('无法从模型输出中解析有效JSON');
+}
+
 /**
  * 生成故事片段服务
  */
@@ -406,16 +427,10 @@ async function callDeepSeekReasoner(systemPrompt: string, userMessage: string): 
   }
   
   const content = response.data.choices[0].message.content;
-  
   try {
-    const cleanedContent = content
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim();
-    
-    return JSON.parse(cleanedContent);
+    return extractJson(content);
   } catch (parseError) {
-    console.error('解析Reasoner响应失败:', parseError);
+    console.error('解析Reasoner响应失败:', parseError, '原始输出片段:', String(content).slice(0, 200));
     throw new Error('思考模式响应格式解析失败');
   }
 }
@@ -446,16 +461,10 @@ async function callDeepSeekChat(systemPrompt: string, userMessage: string): Prom
   }
   
   const content = response.data.choices[0].message.content;
-  
   try {
-    const cleanedContent = content
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim();
-    
-    return JSON.parse(cleanedContent);
+    return extractJson(content);
   } catch (parseError) {
-    console.error('解析Chat响应失败:', parseError);
+    console.error('解析Chat响应失败:', parseError, '原始输出片段:', String(content).slice(0, 200));
     throw new Error('快速模式响应格式解析失败');
   }
 }

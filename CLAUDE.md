@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 技术栈
 - **前端**: React + TypeScript + Tailwind CSS + Framer Motion
 - **后端**: Node.js + Express + TypeScript
-- **数据库**: Supabase PostgreSQL
+- **数据库**: MongoDB（通过 Docker Compose 内置 `mongo` 服务）
 - **AI服务**: DeepSeek API
 - **测试**: Playwright E2E测试
 
@@ -93,42 +93,36 @@ storyapp/
 
 ### 环境变量配置
 
-**后端 (.env)**
+后端（根目录 `.env`，供 Docker Compose 读取）
 ```bash
-# DeepSeek API配置
+# DeepSeek API配置（必须）
 DEEPSEEK_API_KEY=your_deepseek_api_key
 DEEPSEEK_API_URL=https://api.deepseek.com
 
-# Supabase配置
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_KEY=your_supabase_service_role_key
-
-# 服务器配置
-PORT=5000
-NODE_ENV=development
-FRONTEND_URL=http://localhost:3000
+# MongoDB（通常使用 Compose 默认值即可）
+# MONGODB_URI=mongodb://mongo:27017/storyapp
+# MONGODB_DB_NAME=storyapp
 ```
 
-**前端 (.env)**
+前端（仅本地联调需要）
 ```bash
-REACT_APP_API_URL=http://localhost:5000/api
+REACT_APP_API_URL=http://localhost:5001/api
 REACT_APP_VERSION=1.0.0
 REACT_APP_DEBUG=true
 ```
 
-## 数据库结构
+## 数据库结构（MongoDB）
 
-### stories表
-```sql
-CREATE TABLE stories (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,  -- JSON格式存储完整故事内容
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-```
+集合：`stories`
+- `_id: ObjectId`
+- `title: string`（必填）
+- `content: string`（必填，通常为包含 `storySegment`/`choices` 的 JSON 字符串）
+- `created_at: Date`
+- `updated_at: Date`
+
+启动时初始化索引：
+- `created_at` 降序索引（列表排序）
+- `title` 文本索引（全文搜索）
 
 ## 开发注意事项
 
@@ -153,34 +147,86 @@ CREATE TABLE stories (
 - **GitHub (主要开发)**: `https://github.com/haizhouyuan/storyapp.git`
 - **Gitee (生产部署)**: `https://gitee.com/yuanhaizhou123/storyapp.git`
 
-#### 🚀 部署工作流程
+#### 🧭 代码管理流程（务必遵守）
 ```bash
-# 1. 本地开发 → 提交到GitHub
-# 2. 双推送到Gitee
+# 提交采用 Conventional Commits
+git add -A
+git commit -m "feat(backend): implement POST /api/generate-story"
+
+# 双仓库推送（推荐使用脚本，也可手动）
 ./scripts/push-to-all.sh
-
-# 3. 阿里云服务器拉取部署
-./scripts/server-deploy.sh
+# 或者手动：
+git push origin main
+git push gitee main
 ```
 
-#### 🔧 部署命令
+#### 🚀 分步部署（推荐，逐条命令执行）
 ```bash
-# 一键双推送
-git pa  # 或 ./scripts/push-to-all.sh
+# 0) 服务器准备
+# 在仓库根目录创建 .env，仅包含必要密钥（勿提交到仓库）
+cat > .env << 'EOF'
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_API_URL=https://api.deepseek.com
+EOF
 
-# 服务器部署
-./scripts/server-deploy.sh
+# 1) 构建镜像（只构建 app）
+docker compose -f docker-compose.yml build --no-cache app
 
-# Docker部署
-./deploy.sh --rebuild production
+# 2) 启动数据库
+docker compose -f docker-compose.yml up -d mongo
+docker compose -f docker-compose.yml ps
+# 可观察日志确保 healthy
+docker compose -f docker-compose.yml logs -f mongo
 
-# 健康检查
-./deploy.sh --status
-curl http://localhost:5001/api/health
+# 3) 启动应用（端口映射：容器5000 → 主机5001）
+docker compose -f docker-compose.yml up -d app
+docker compose -f docker-compose.yml logs -f app
+
+# 4) 健康检查
+curl -fsS http://localhost:5001/api/health
+
+# 5) （可选）启动Nginx反代
+docker compose -f docker-compose.yml --profile nginx up -d nginx
+
+# 6) 常用运维
+docker compose -f docker-compose.yml restart app
+docker compose -f docker-compose.yml logs -f app
+docker compose -f docker-compose.yml down   # 停止（谨慎）
 ```
+
+端口说明：容器内应用监听 `5000`，对外暴露为主机 `5001`，健康检查、E2E 和手工测试均使用 `http://localhost:5001`。
+
+#### ✅ 生产环境端到端业务验证（不使用假数据）
+```bash
+# 安装 Playwright 浏览器依赖（仅第一次）
+npx playwright install
+
+# 注意：务必通过 SSH 到生产服务器上执行生产验证，避免本地误判为生产
+ssh <prod-user>@<prod-host>
+  cd /path/to/storyapp
+  npx playwright test -c playwright.prod.config.ts
+
+# 手工 API 验证（DeepSeek 必须配置正确）：
+
+# 1) 生成故事片段（在生产服务器上执行）
+curl -fsS -X POST http://localhost:5001/api/generate-story \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"宇航员小熊","maxChoices":6}'
+
+# 2) 保存故事（把上一步返回的片段包成 content 文本或JSON字符串）
+curl -fsS -X POST http://localhost:5001/api/save-story \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"宇航员小熊的冒险","content":"{\\"storySegment\\":\\"...\\"}"}'
+
+# 3) 获取列表/详情
+curl -fsS http://localhost:5001/api/get-stories
+curl -fsS http://localhost:5001/api/get-story/<id>
+```
+
+注意：`generateFullStoryTreeService` 仅在缺失 `DEEPSEEK_API_KEY` 时回退到模拟数据。生产验证必须设置真实密钥，严禁走模拟路径。
 
 ### 详细部署文档
-请参考 `docs/DEPLOYMENT_WORKFLOW.md` 和 `agents/deploy-agent.md`
+更多细节参见 `docs/DEPLOYMENT_WORKFLOW.md` 与 `agents/deploy-agent.md`。本文件以“逐条命令执行”为准，不再推荐批处理式 `deploy.sh`。
 
 ### 生产环境配置
 - 设置 `NODE_ENV=production`
