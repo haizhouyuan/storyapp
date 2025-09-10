@@ -969,19 +969,43 @@ function generateMockStoryTree(topic: string, storyTreeId: string, timestamp: st
 
 /**
  * 生成故事预览文本
+ * 支持多种故事内容格式：
+ * 1. 渐进式故事：{ storySegment: "...", ... }
+ * 2. 故事树模式：{ fullStory: "...", mode: "story-tree", ... }
+ * 3. 纯文本格式
  */
-function generatePreview(content: string, maxLength: number = 50): string {
+function generatePreview(content: string, maxLength: number = 100): string {
   try {
     // 尝试解析JSON格式的故事内容
     const parsed = JSON.parse(content);
-    if (typeof parsed === 'object' && parsed.storySegment) {
-      const preview = parsed.storySegment.substring(0, maxLength);
-      return preview.length < parsed.storySegment.length ? preview + '...' : preview;
+    if (typeof parsed === 'object') {
+      // 故事树模式：使用 fullStory 字段
+      if (parsed.fullStory && typeof parsed.fullStory === 'string') {
+        const preview = parsed.fullStory.substring(0, maxLength);
+        return preview.length < parsed.fullStory.length ? preview + '...' : preview;
+      }
+      
+      // 渐进式故事模式：使用 storySegment 字段
+      if (parsed.storySegment && typeof parsed.storySegment === 'string') {
+        const preview = parsed.storySegment.substring(0, maxLength);
+        return preview.length < parsed.storySegment.length ? preview + '...' : preview;
+      }
+      
+      // 如果是对象但没有预期字段，尝试取第一个字符串值作为预览
+      const firstStringValue = Object.values(parsed).find(value => 
+        typeof value === 'string' && value.length > 10
+      ) as string;
+      
+      if (firstStringValue) {
+        const preview = firstStringValue.substring(0, maxLength);
+        return preview.length < firstStringValue.length ? preview + '...' : preview;
+      }
     }
   } catch {
     // 如果不是JSON格式，直接截取文本
   }
   
+  // 兜底：直接处理原始文本
   const preview = content.substring(0, maxLength);
   return preview.length < content.length ? preview + '...' : preview;
 }

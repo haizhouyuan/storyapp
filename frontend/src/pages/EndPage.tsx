@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   HeartIcon, 
   BookOpenIcon, 
@@ -12,39 +12,68 @@ import { toast } from 'react-hot-toast';
 import Button from '../components/Button';
 import { saveStory } from '../utils/api';
 import { generateStoryContent, extractStoryTitle } from '../utils/helpers';
-import type { StorySession } from '../../../shared/types';
+import type { StorySession, StoryTree } from '../../../shared/types';
 
 interface EndPageProps {
   storySession: StorySession | null;
   onResetSession: () => void;
 }
 
+// 故事树模式传入的数据接口
+interface StoryTreeEndState {
+  topic: string;
+  storyTree: StoryTree;
+  finalPath: number[];
+}
+
 /**
  * 故事结束页面
- * 特点：完结插画、庆祝动画、保存按钮、返回首页
+ * 支持两种模式：
+ * 1. 渐进式故事模式 (storySession)
+ * 2. 故事树模式 (location.state)
  */
 export default function EndPage({ storySession, onResetSession }: EndPageProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // 获取故事树模式传入的数据
+  const storyTreeData = location.state as StoryTreeEndState | undefined;
 
-  // 如果没有故事会话或故事未完成，重定向
+  // 检查数据有效性并处理重定向
   useEffect(() => {
-    if (!storySession || !storySession.isComplete) {
+    const hasValidSession = storySession && storySession.isComplete;
+    const hasValidTreeData = storyTreeData && storyTreeData.topic && storyTreeData.storyTree && storyTreeData.finalPath;
+    
+    if (!hasValidSession && !hasValidTreeData) {
       navigate('/');
       return;
     }
-  }, [storySession]);
+  }, [storySession, storyTreeData, navigate]);
 
-  // 保存故事
+  // 保存故事 - 支持两种模式
   const handleSaveStory = async () => {
-    if (!storySession || isSaving || isSaved) return;
+    if (isSaving || isSaved) return;
 
     setIsSaving(true);
     
     try {
-      const storyContent = generateStoryContent(storySession);
-      const storyTitle = extractStoryTitle(storyContent, storySession.topic);
+      let storyContent: string;
+      let storyTitle: string;
+
+      if (storySession) {
+        // 渐进式故事模式
+        storyContent = generateStoryContent(storySession);
+        storyTitle = extractStoryTitle(storyContent, storySession.topic);
+      } else if (storyTreeData) {
+        // 故事树模式 - 生成完整故事内容
+        const fullStoryContent = generateStoryTreeContent(storyTreeData);
+        storyContent = JSON.stringify(fullStoryContent);
+        storyTitle = extractStoryTitle(fullStoryContent.fullStory, storyTreeData.topic);
+      } else {
+        throw new Error('没有有效的故事数据');
+      }
 
       const response = await saveStory({
         title: storyTitle,
@@ -66,6 +95,35 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
     }
   };
 
+  // 从故事树生成完整故事内容
+  const generateStoryTreeContent = (treeData: StoryTreeEndState) => {
+    const { storyTree, finalPath, topic } = treeData;
+    let fullStorySegments: string[] = [];
+    let currentNode = storyTree.root;
+    
+    // 添加开始节点
+    fullStorySegments.push(currentNode.segment);
+    
+    // 根据选择路径收集故事片段
+    for (let i = 0; i < finalPath.length; i++) {
+      const choiceIndex = finalPath[i];
+      if (currentNode.children && currentNode.children[choiceIndex]) {
+        currentNode = currentNode.children[choiceIndex];
+        fullStorySegments.push(currentNode.segment);
+      }
+    }
+    
+    return {
+      topic,
+      mode: 'story-tree',
+      fullStory: fullStorySegments.join('\n\n'),
+      path: finalPath,
+      storyTreeId: storyTree.id,
+      totalSegments: fullStorySegments.length,
+      created_at: new Date().toISOString()
+    };
+  };
+
   // 返回首页
   const handleGoHome = () => {
     onResetSession();
@@ -84,13 +142,30 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
     navigate('/');
   };
 
-  if (!storySession || !storySession.isComplete) {
-    return null; // 会重定向
+  // 如果两种模式都没有有效数据，返回null等待重定向
+  if ((!storySession || !storySession.isComplete) && !storyTreeData) {
+    return null;
   }
 
-  // 计算故事统计信息
-  const storyDuration = Math.round((Date.now() - storySession.startTime) / 1000 / 60); // 分钟
-  const choiceCount = storySession.path.filter(p => p.choice).length;
+  // 计算故事统计信息 - 支持两种模式
+  let storyDuration = 0;
+  let choiceCount = 0;
+  let segmentCount = 0;
+  let currentTopic = '';
+
+  if (storySession) {
+    // 渐进式故事模式
+    storyDuration = Math.round((Date.now() - storySession.startTime) / 1000 / 60);
+    choiceCount = storySession.path.filter(p => p.choice).length;
+    segmentCount = storySession.path.length;
+    currentTopic = storySession.topic;
+  } else if (storyTreeData) {
+    // 故事树模式
+    storyDuration = 5; // 估算值，因为故事树模式通常较快
+    choiceCount = storyTreeData.finalPath.length;
+    segmentCount = storyTreeData.finalPath.length + 1; // 包含开始节点
+    currentTopic = storyTreeData.topic;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-child-gold/30 via-child-cream to-child-mint p-child-lg overflow-hidden">
@@ -312,7 +387,7 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
               </div>
               <div>
                 <div className="text-child-2xl font-bold text-child-orange">
-                  {storySession.path.length}
+                  {segmentCount}
                 </div>
                 <div className="text-child-sm text-gray-600">段落</div>
               </div>

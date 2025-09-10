@@ -82,7 +82,7 @@ export default defineConfig({
   webServer: process.env.TEST_WITHOUT_BACKEND ? undefined : [
     {
       command: 'cd backend && npm run dev',
-      url: 'http://localhost:5000/api/health',
+      url: 'http://localhost:5001/api/health',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
     },
