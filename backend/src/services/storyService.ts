@@ -84,11 +84,19 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
         )
       });
     } else {
-      // 开始新故事
+      // 开始新故事 - 使用更详细的提示确保足够长度
       messages.push({
         role: 'user',
-        content: `请为以下主题创作一个儿童睡前故事的开头（至少500字）：${topic}。
-为了确保互动在有限次数内自然结束，本故事计划的总互动次数为 ${Math.max(5, Math.min(10, maxChoices || 6))} 次。请注意承接关系，后续每次将根据选择继续发展。请使用JSON格式：{"storySegment":"...","choices":["...","...","..."],"isEnding":false}`
+        content: `请为以下主题创作一个儿童睡前故事的开头：${topic}。
+
+要求：
+1. 故事内容至少600字，语言温柔、生动，适合3-8岁儿童
+2. 包含详细的场景描述、人物情感和细节
+3. 为故事设定一个有趣的开头情境
+4. 提供3个吸引人的选择选项，让孩子参与故事发展
+5. 使用JSON格式返回：{"storySegment":"故事内容（至少600字）","choices":["选择1","选择2","选择3"],"isEnding":false}
+
+总互动次数预计为 ${Math.max(5, Math.min(10, maxChoices || 6))} 次，请设计好故事节奏。`
       });
     }
 
@@ -164,28 +172,12 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       parsedResponse.choices = [];
     }
 
-    // 保障片段长度：如小于500字，进行一次扩展调用（不改变情节，仅延展描述）
+    // 检查故事长度（仅记录日志，不进行二次调用避免超时）
     const plainLen = String(parsedResponse.storySegment || '').replace(/\s/g, '').length;
     if (plainLen < 500) {
-      try {
-        const expandMessages = [
-          { role: 'system', content: '你是一个擅长润色儿童故事的助手，请将给定文本保留情节不变地扩展为至少500字，语言温柔、适合3-8岁儿童。只返回扩展后的正文，不要任何额外说明。' },
-          { role: 'user', content: String(parsedResponse.storySegment) }
-        ];
-        const expandResp = await deepseekClient.post('/chat/completions', {
-          model: DEEPSEEK_CONFIG.CHAT_MODEL,
-          messages: expandMessages,
-          max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS - 200, 800),
-          temperature: 0.7,
-          stream: false
-        });
-        const expanded = expandResp?.data?.choices?.[0]?.message?.content?.trim();
-        if (expanded) {
-          parsedResponse.storySegment = expanded;
-        }
-      } catch (e) {
-        console.warn('扩展故事片段失败，使用原文返回:', e);
-      }
+      console.warn(`故事片段长度不足500字: ${plainLen}字，但跳过扩展避免超时`);
+    } else {
+      console.log(`故事片段长度: ${plainLen}字`);
     }
 
     return {
