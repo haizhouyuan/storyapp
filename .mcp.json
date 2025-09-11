@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "playwright": {
-      "command": "node",
-      "args": ["D:\\storyapp\\playwright-mcp\\cli.js"],
-      "cwd": "D:\\storyapp",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
       "env": {}
     }
   }
