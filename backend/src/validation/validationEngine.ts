@@ -25,7 +25,7 @@ import { getCharactersByProjectId } from '../../services/workflow/characterServi
 import { getScenesByProjectId } from '../../services/workflow/sceneService';
 import { getMisdirectionsByProjectId } from '../../services/workflow/misdirectionService';
 
-export class ValidationEngine {
+class ValidationEngine {
   private project: Project | null = null;
   private miracle: Miracle | null = null;
   private clues: Clue[] = [];
@@ -777,4 +777,6 @@ export class ValidationEngine {
   }
 }
 
+module.exports = { ValidationEngine };
+export { ValidationEngine };
 export default ValidationEngine;
