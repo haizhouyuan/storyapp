@@ -22,7 +22,7 @@ type StoryMode = 'progressive' | 'tree';
 export default function HomePage({ onStartStory, onStartStoryTree }: HomePageProps) {
   const [topic, setTopic] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [storyMode, setStoryMode] = useState<StoryMode>('tree');
+  const [storyMode, setStoryMode] = useState<StoryMode>('progressive');
   const navigate = useNavigate();
 
   // 处理开始故事

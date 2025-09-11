@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "node",
+      "args": ["D:\\storyapp\\playwright-mcp\\cli.js"],
+      "cwd": "D:\\storyapp",
+      "env": {}
+    }
+  }
+}

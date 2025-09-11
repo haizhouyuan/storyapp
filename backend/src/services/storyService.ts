@@ -412,8 +412,8 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
       return generateMockStoryTree(topic, storyTreeId, timestamp);
     }
     
-    // 使用增强的双模型协作生成故事树
-    return await generateAdvancedStoryTree(topic);
+    // 使用基础模式快速生成故事树，避免超时
+    return await generateBasicStoryTreeService({ topic });
     
   } catch (error: any) {
     console.error('故事树生成失败:', error);
