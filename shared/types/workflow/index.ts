@@ -210,6 +210,22 @@ export interface Clue {
   reliability: number; // 可靠度 1-10
   importance: number; // 重要性 1-10
   relatedClues: string[]; // 关联线索ID
+  supports: string[]; // 支持的结论ID列表
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ========== 结论实体 ==========
+
+export interface Conclusion {
+  _id?: ObjectId;
+  id: string;
+  projectId: string;
+  description: string;
+  revealPoint: string; // 揭示位置，如 "Ch8"
+  type: 'miracle' | 'revelation' | 'subplot'; // 结论类型
+  importance: number; // 重要性 1-10
+  requiredSupportingClues: number; // 所需支持线索数量，默认2
   createdAt: Date;
   updatedAt: Date;
 }
@@ -548,6 +564,22 @@ export const DEFAULT_VALIDATION_RULES: ValidationRule[] = [
     id: 'sensory_coverage',
     name: '感官覆盖度',
     description: '五感型线索占总线索60%以上',
+    category: 'engagement',
+    severity: 'info',
+    autocheck: true
+  },
+  {
+    id: 'miracle_complexity',
+    name: '奇迹复杂度检查',
+    description: '奇迹链节点数>7时需要冗余说明',
+    category: 'structure',
+    severity: 'warning',
+    autocheck: true
+  },
+  {
+    id: 'scene_sensory_elements',
+    name: '场景感官要素',
+    description: '每个场景都应该包含适当的感官覆盖',
     category: 'engagement',
     severity: 'info',
     autocheck: true
