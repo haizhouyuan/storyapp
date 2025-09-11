@@ -9,7 +9,7 @@
 ### 1. 后端API服务 (Express + TypeScript)
 - **完整REST API**: 5个核心接口全部实现
 - **DeepSeek AI集成**: 使用提供的API Key进行故事生成  
-- **Supabase数据库**: 完整的数据存储和管理
+- **MongoDB数据库**: 完整的数据存储和管理
 - **错误处理**: 全面的错误处理和中文提示
 - **安全配置**: CORS、速率限制、输入验证
 
@@ -18,6 +18,7 @@
 - `POST /api/save-story` - 保存故事到数据库
 - `GET /api/get-stories` - 获取故事列表
 - `GET /api/get-story/:id` - 获取单个故事详情
+- `DELETE /api/delete-story/:id` - 删除指定故事
 - `GET /api/health` - 健康检查
 - `GET /api/tts` - 语音接口占位
 
@@ -106,30 +107,30 @@ npm run install:all
 ```
 
 ### 2. 配置环境变量
-编辑 `backend/.env`:
+编辑根目录 `.env`:
 ```bash
-# 已配置DeepSeek API
-DEEPSEEK_API_KEY=sk-e1e17a8f005340b39240591f709d71d4
+# DeepSeek API配置
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_API_URL=https://api.deepseek.com
 
-# 需要配置Supabase (用户提供)
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_KEY=your_service_key
+# MongoDB配置（使用Docker Compose默认值即可）
+# MONGODB_URI=mongodb://mongo:27017/storyapp
+# MONGODB_DB_NAME=storyapp
 ```
 
 ### 3. 数据库设置
-在Supabase中执行以下SQL:
-```sql
-CREATE TABLE stories (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+使用Docker Compose启动MongoDB：
+```bash
+# 启动MongoDB数据库服务
+docker compose up -d mongo
 
-CREATE INDEX idx_stories_created_at ON stories(created_at DESC);
+# 验证MongoDB是否启动成功
+docker compose ps
 ```
+
+数据库集合结构会自动初始化：
+- 集合名称：`stories`
+- 索引：`created_at`降序、`title`文本索引
 
 ### 4. 启动应用
 ```bash
@@ -138,7 +139,7 @@ npm run dev
 
 # 访问应用
 # 前端: http://localhost:3000  
-# 后端: http://localhost:5000
+# 后端: http://localhost:5001
 ```
 
 ### 5. 运行测试
@@ -163,7 +164,7 @@ npm test
 - 故事完整性保存
 
 ### 数据持久化 ✅
-- Supabase云数据库
+- MongoDB数据库 (Docker Compose部署)
 - 故事CRUD操作
 - 创建时间排序
 - 搜索功能
@@ -205,17 +206,17 @@ npm test
 
 ## ⚠️ 注意事项
 
-1. **Supabase配置**: 需要用户创建Supabase项目并填入环境变量
+1. **Docker配置**: 需要安装Docker和Docker Compose
 2. **前端构建**: 可能需要解决依赖版本冲突 (使用 --legacy-peer-deps)
-3. **DeepSeek API**: 已配置但需要稳定网络连接
+3. **DeepSeek API**: 需要配置有效的API密钥
 4. **语音功能**: 目前为占位接口，可后续集成TTS服务
 
 ## 🚀 部署就绪
 
 项目已准备好部署到:
-- **前端**: Vercel, Netlify, AWS S3
-- **后端**: Railway, Render, AWS Lambda
-- **数据库**: Supabase (云托管)
+- **Docker容器**: 阵里云、腾讯云等云服务器
+- **本地部署**: Docker Compose一键部署
+- **数据库**: MongoDB (容器化部署)
 
 ## 📈 后续优化建议
 

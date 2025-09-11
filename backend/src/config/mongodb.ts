@@ -103,3 +103,14 @@ export async function checkDatabaseHealth(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * 获取数据库连接信息（用于测试）
+ */
+export async function getConnectionForTesting(): Promise<{ client: MongoClient; db: Db }> {
+  const database = await connectToDatabase();
+  if (!client) {
+    throw new Error('数据库客户端未初始化');
+  }
+  return { client, db: database };
+}

@@ -6,6 +6,8 @@ import type {
   SaveStoryResponse,
   GetStoriesResponse,
   GetStoryResponse,
+  DeleteStoryRequest,
+  DeleteStoryResponse,
   GenerateFullStoryRequest,
   GenerateFullStoryResponse,
   ApiError
@@ -124,6 +126,19 @@ export async function getStoryById(id: string): Promise<GetStoryResponse> {
     return response.data;
   } catch (error) {
     console.error('获取故事详情失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 删除故事
+ */
+export async function deleteStory(id: string): Promise<DeleteStoryResponse> {
+  try {
+    const response = await apiClient.delete(`/delete-story/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('删除故事失败:', error);
     throw error;
   }
 }

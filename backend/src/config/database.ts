@@ -1,7 +1,7 @@
 // MongoDB数据库配置 - 替换原来的Supabase配置
-import { connectToDatabase, getDatabase, closeDatabase, checkDatabaseHealth, COLLECTIONS } from './mongodb';
+import { connectToDatabase, getDatabase, closeDatabase, checkDatabaseHealth, getConnectionForTesting, COLLECTIONS } from './mongodb';
 
-export { connectToDatabase, getDatabase, closeDatabase, checkDatabaseHealth, COLLECTIONS };
+export { connectToDatabase, getDatabase, closeDatabase, checkDatabaseHealth, getConnectionForTesting, COLLECTIONS };
 
 // 数据库表名常量（保持兼容性）
 export const TABLES = {

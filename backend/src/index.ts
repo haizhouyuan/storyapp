@@ -13,7 +13,7 @@ import healthRoutes from './routes/health';
 import { connectToDatabase, checkDatabaseHealth } from './config/database';
 
 // 加载环境变量
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, "..", "..", ".env") });
 
 const app = express();
 const PORT = process.env.PORT || 5001;

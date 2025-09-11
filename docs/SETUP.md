@@ -7,7 +7,8 @@
 - **Node.js**: >= 16.0.0
 - **npm**: >= 8.0.0
 - **Git**: 最新版本
-- **Supabase 账户**: 用于数据库服务
+- **Docker**: 用于容器化部署
+- **Docker Compose**: 用于MongoDB数据库
 
 ### 2. 项目安装
 
@@ -20,66 +21,48 @@ cd storyapp
 npm run install:all
 
 # 3. 配置环境变量
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+cp .env.example .env
+# 前端环境变量是可选的
 ```
 
-### 3. Supabase 数据库配置
+### 3. MongoDB 数据库配置
 
-#### 3.1 创建 Supabase 项目
-1. 访问 [supabase.com](https://supabase.com)
-2. 创建新项目
-3. 记录以下信息：
-   - Project URL
-   - Anon Key
-   - Service Role Key
+#### 3.1 启动 MongoDB 服务
+```bash
+# 启动MongoDB容器
+docker compose up -d mongo
 
-#### 3.2 创建数据库表
-在 Supabase SQL 编辑器中执行以下SQL：
-
-```sql
--- 创建stories表
-CREATE TABLE stories (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- 创建索引优化查询性能
-CREATE INDEX idx_stories_created_at ON stories(created_at DESC);
-
--- 创建更新时间触发器
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_stories_updated_at 
-  BEFORE UPDATE ON stories 
-  FOR EACH ROW 
-  EXECUTE FUNCTION update_updated_at_column();
+# 验证服务状态
+docker compose ps
 ```
 
-#### 3.3 配置环境变量
-编辑 `backend/.env` 文件：
+#### 3.2 数据库初始化
+数据库和集合结构会在后端启动时自动初始化：
+- 数据库名称：`storyapp`
+- 集合名称：`stories`
+- 索引：`created_at`降序、`title`文本索引
+
+#### 3.3 数据库管理
+可以使用MongoDB Compass或命令行工具连接：
+```bash
+# MongoDB连接字符串
+mongodb://localhost:27017/storyapp
+```
+
+#### 3.4 配置环境变量
+编辑根目录 `.env` 文件：
 
 ```bash
-# Supabase配置
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_KEY=your_service_role_key
-
-# DeepSeek API配置（已配置）
-DEEPSEEK_API_KEY=sk-e1e17a8f005340b39240591f709d71d4
+# DeepSeek API配置
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_API_URL=https://api.deepseek.com
 
+# MongoDB配置（默认值，一般不需修改）
+# MONGODB_URI=mongodb://mongo:27017/storyapp
+# MONGODB_DB_NAME=storyapp
+
 # 服务器配置
-PORT=5000
+PORT=5001
 NODE_ENV=development
 FRONTEND_URL=http://localhost:3000
 ```
@@ -93,7 +76,7 @@ npm run dev
 ```
 
 这将启动：
-- 后端服务器: http://localhost:5000
+- 后端服务器: http://localhost:5001
 - 前端开发服务器: http://localhost:3000
 
 #### 4.2 分别启动
@@ -109,7 +92,7 @@ npm run dev:frontend
 
 1. **后端健康检查**
    ```bash
-   curl http://localhost:5000/api/health
+   curl http://localhost:5001/api/health
    ```
    
    应该返回：
@@ -148,8 +131,8 @@ npm test
 ### 常见问题
 
 #### 1. 后端启动失败
-**错误**: `缺少必要的Supabase环境变量`
-**解决**: 确保 `backend/.env` 中配置了正确的 Supabase 信息
+**错误**: `MongoDB连接失败`
+**解决**: 确保 MongoDB 服务正在运行：`docker compose up -d mongo`
 
 #### 2. DeepSeek API 调用失败
 **错误**: `DeepSeek API调用失败`
@@ -161,9 +144,9 @@ npm test
 #### 3. 数据库连接失败
 **错误**: `数据库服务暂时不可用`
 **解决**:
-- 检查 Supabase 项目是否正常运行
-- 确认数据库表是否已创建
-- 验证环境变量配置
+- 检查 MongoDB 容器是否运行：`docker compose ps`
+- 重新启动数据库：`docker compose restart mongo`
+- 检查端口是否被占用
 
 #### 4. 前端白屏
 **解决**:
@@ -187,19 +170,26 @@ npm run dev
 ```
 
 #### 数据库管理
-- 访问 Supabase 控制台
-- 使用 Table Editor 查看和编辑数据
-- 使用 SQL Editor 执行查询
+```bash
+# 进入MongoDB容器
+docker compose exec mongo mongosh storyapp
+
+# 查看所有故事
+db.stories.find().pretty()
+
+# 清空所有数据
+db.stories.deleteMany({})
+```
 
 #### API 测试
 ```bash
 # 测试故事生成
-curl -X POST http://localhost:5000/api/generate-story \
+curl -X POST http://localhost:5001/api/generate-story \
   -H "Content-Type: application/json" \
   -d '{"topic": "测试故事"}'
 
 # 测试故事列表
-curl http://localhost:5000/api/get-stories
+curl http://localhost:5001/api/get-stories
 ```
 
 ## 生产部署
@@ -208,12 +198,11 @@ curl http://localhost:5000/api/get-stories
 ```bash
 # 后端生产环境变量
 NODE_ENV=production
-PORT=5000
+PORT=5001
 FRONTEND_URL=https://your-frontend-domain.com
 
-# 确保使用生产数据库
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your_production_service_key
+# 生产环境MongoDB配置
+MONGODB_URI=mongodb://your-production-mongo-host:27017/storyapp
 ```
 
 ### 构建和部署
@@ -226,15 +215,16 @@ npm run start
 ```
 
 ### 推荐部署平台
-- **前端**: Vercel, Netlify, AWS S3 + CloudFront
-- **后端**: Railway, Render, AWS Lambda + API Gateway
-- **数据库**: Supabase (已配置)
+- **全栈部署**: 阿里云、腾讯云ECS (Docker Compose)
+- **前端**: Vercel, Netlify  
+- **后端**: Railway, Render
+- **数据库**: MongoDB Atlas 或自建 MongoDB
 
 ## 更多资源
 
 - [React 文档](https://reactjs.org/docs/)
 - [Express.js 文档](https://expressjs.com/)
-- [Supabase 文档](https://supabase.com/docs)
+- [MongoDB 文档](https://docs.mongodb.com/)
 - [DeepSeek API 文档](https://platform.deepseek.com/api-docs/)
 - [Playwright 测试指南](https://playwright.dev/docs/intro)
 
