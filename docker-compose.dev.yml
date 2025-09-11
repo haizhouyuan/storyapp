@@ -20,6 +20,9 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:18-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     image: storyapp:dev
     container_name: storyapp_dev
     restart: unless-stopped

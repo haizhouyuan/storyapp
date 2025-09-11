@@ -1,10 +1,13 @@
 # 多阶段构建Dockerfile - 前后端统一部署
 
 # 阶段1: 前端构建
-FROM node:18-alpine AS frontend-builder
+ARG NODE_IMAGE=node:18-alpine
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+FROM ${NODE_IMAGE} AS frontend-builder
 WORKDIR /app
 
 # 安装前端依赖
+RUN npm config set registry $NPM_REGISTRY
 COPY frontend/package*.json ./frontend/
 RUN cd frontend && npm ci --legacy-peer-deps
 
@@ -16,11 +19,14 @@ COPY shared ./shared
 RUN cd frontend && npm run build
 
 # 阶段2: 后端构建
-FROM node:18-alpine AS backend-builder
+ARG NODE_IMAGE=node:18-alpine
+FROM ${NODE_IMAGE} AS backend-builder
 WORKDIR /app
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 # 安装后端依赖
 COPY backend/package*.json ./backend/
+RUN npm config set registry $NPM_REGISTRY
 RUN cd backend && npm ci
 
 # 复制后端源码和共享类型
@@ -31,7 +37,8 @@ COPY shared ./shared
 RUN cd backend && npm run build
 
 # 阶段3: 生产运行时
-FROM node:18-alpine
+ARG NODE_IMAGE=node:18-alpine
+FROM ${NODE_IMAGE}
 
 # 创建应用目录和用户
 WORKDIR /app
@@ -40,6 +47,8 @@ RUN addgroup -g 1001 -S nodejs && \
 
 # 复制后端package.json并安装生产依赖
 COPY backend/package*.json ./
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm config set registry $NPM_REGISTRY
 RUN npm ci --omit=dev && npm cache clean --force
 
 # 复制构建结果
