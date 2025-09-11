@@ -11,7 +11,7 @@ import type {
   GenerateStoryRequest, 
   SaveStoryRequest,
   GenerateFullStoryRequest
-} from '../../../shared/types';
+} from '../types';
 
 const router = Router();
 

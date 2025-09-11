@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **数据库**: MongoDB（通过 Docker Compose 内置 `mongo` 服务）
 - **AI服务**: DeepSeek API
 - **测试**: Playwright E2E测试
+- **监控**: 详细日志记录系统 + Appsmith可视化后台
 
 ## 开发命令
 
@@ -55,6 +56,9 @@ npm test
 
 # 运行后端测试
 cd backend && npm test
+
+# 测试日志记录系统（新增）
+node test-logging-system.js
 ```
 
 ## 项目结构
@@ -70,15 +74,19 @@ storyapp/
 │   └── package.json    # React应用配置
 ├── backend/            # Express后端API
 │   ├── src/
-│   │   ├── config/     # 配置文件 (数据库, DeepSeek API)
-│   │   ├── routes/     # API路由 (stories, health)
+│   │   ├── config/     # 配置文件 (数据库, DeepSeek API, 数据库初始化)
+│   │   ├── routes/     # API路由 (stories, health, admin)
 │   │   ├── services/   # 业务逻辑 (故事生成服务)
+│   │   ├── utils/      # 工具函数 (日志记录系统)
 │   │   └── types/      # TypeScript类型定义
 │   └── package.json    # Express应用配置
-├── shared/             # 共享类型定义
+├── shared/             # 共享类型定义 (包含日志和管理API类型)
 ├── tests/              # Playwright E2E测试
-├── docs/               # 项目文档
-└── playwright.config.ts # 测试配置
+├── docs/               # 项目文档 (包含Appsmith配置指南)
+├── appsmith-story-admin.json  # Appsmith应用配置文件
+├── test-logging-system.js     # 日志系统测试脚本
+├── README_LOGGING_SYSTEM.md   # 日志系统使用说明
+└── playwright.config.ts       # 测试配置
 ```
 
 ## API接口
@@ -91,6 +99,24 @@ storyapp/
 - `GET /api/health` - 健康检查
 - `GET /api/tts` - 语音接口占位
 
+### 管理后台API（新增）
+- `GET /api/admin/stats` - 获取系统统计数据
+- `GET /api/admin/logs` - 获取分页日志数据
+- `GET /api/admin/performance` - 获取性能指标
+- `GET /api/admin/sessions/active` - 获取活跃会话
+- `GET /api/admin/logs/:sessionId` - 获取特定会话日志
+- `POST /api/admin/logs/export` - 导出日志数据
+- `DELETE /api/admin/logs/cleanup` - 清理过期日志
+
+### 管理员API接口 (新增)
+- `GET /api/admin/stats` - 获取系统统计信息
+- `GET /api/admin/logs` - 获取日志列表 (支持分页、筛选)
+- `GET /api/admin/logs/:sessionId` - 获取特定会话完整日志
+- `GET /api/admin/performance` - 获取性能指标数据
+- `GET /api/admin/sessions/active` - 获取活跃会话列表
+- `POST /api/admin/logs/export` - 导出日志数据 (JSON/CSV)
+- `DELETE /api/admin/logs/cleanup` - 清理过期日志
+
 ### 环境变量配置
 
 后端（根目录 `.env`，供 Docker Compose 读取）
@@ -102,6 +128,12 @@ DEEPSEEK_API_URL=https://api.deepseek.com
 # MongoDB（通常使用 Compose 默认值即可）
 # MONGODB_URI=mongodb://mongo:27017/storyapp
 # MONGODB_DB_NAME=storyapp
+
+# 日志记录配置（新增）
+ENABLE_DETAILED_LOGGING=true
+ENABLE_DB_LOGGING=true
+LOG_LEVEL=info
+LOG_RETENTION_DAYS=30
 ```
 
 前端（仅本地联调需要）
@@ -113,16 +145,43 @@ REACT_APP_DEBUG=true
 
 ## 数据库结构（MongoDB）
 
-集合：`stories`
+### 主要集合
+
+#### `stories` 集合
 - `_id: ObjectId`
 - `title: string`（必填）
 - `content: string`（必填，通常为包含 `storySegment`/`choices` 的 JSON 字符串）
 - `created_at: Date`
 - `updated_at: Date`
 
-启动时初始化索引：
+#### `story_logs` 集合（新增）
+- `_id: ObjectId`
+- `sessionId: string`（会话唯一标识）
+- `timestamp: Date`（事件时间戳）
+- `logLevel: string`（日志级别：debug/info/warn/error）
+- `eventType: string`（事件类型）
+- `message: string`（日志消息）
+- `data: Object`（业务数据）
+- `performance: Object`（性能指标）
+- `context: Object`（上下文信息）
+- `stackTrace: string`（错误堆栈，可选）
+
+### 数据库索引
+
+启动时自动创建索引：
+
+**stories集合**：
 - `created_at` 降序索引（列表排序）
 - `title` 文本索引（全文搜索）
+
+**story_logs集合**：
+- `sessionId` 索引（会话查询）
+- `timestamp` 降序索引（时间排序）
+- `eventType` 索引（事件类型筛选）
+- `logLevel` 索引（日志级别筛选）
+- `{sessionId: 1, timestamp: -1}` 复合索引
+- `{eventType: 1, timestamp: -1}` 复合索引
+- `{timestamp: 1}` TTL索引（30天自动过期）
 
 ## 开发注意事项
 
@@ -266,6 +325,60 @@ curl -fsS http://storyapp.dandanbaba.xyz/api/get-story/<id>
 - 数据库连接失败
 - DeepSeek API调用失败
 - 前端构建问题
+
+## 日志记录和监控系统（新增）
+
+### 系统概述
+项目集成了详细的日志记录系统和Appsmith可视化后台，用于监控故事生成流程的每个步骤。
+
+### 快速测试
+```bash
+# 运行完整的系统功能测试
+node test-logging-system.js
+```
+
+### 主要功能
+1. **会话级别跟踪** - 每个故事生成分配唯一会话ID
+2. **详细步骤记录** - AI API调用、JSON解析、质量检查等
+3. **性能指标收集** - 响应时间、Token使用量、错误率
+4. **可视化监控** - Appsmith构建的管理后台界面
+5. **数据导出功能** - 支持JSON/CSV格式导出
+6. **自动清理机制** - 过期日志自动删除（30天）
+
+### Appsmith后台配置
+1. **导入配置文件**：
+   ```bash
+   # 使用项目根目录的配置文件
+   appsmith-story-admin.json
+   ```
+
+2. **查看配置指南**：
+   ```bash
+   # 详细的Appsmith搭建文档
+   docs/APPSMITH_SETUP.md
+   ```
+
+3. **数据源配置**：
+   - MongoDB: `mongodb://localhost:27017/storyapp`
+   - REST API: `http://localhost:5001/api/admin`
+
+### 监控指标
+- **系统概览**: 总会话数、24小时活跃数、成功率
+- **性能分析**: API响应时间趋势、Token使用统计
+- **错误监控**: 错误类型分布、失败率趋势
+- **用户行为**: 热门主题排行、使用模式分析
+
+### 日志事件类型
+- `session_start/session_end` - 会话生命周期
+- `story_generation_start/complete` - 故事生成流程
+- `ai_api_request/response/error` - AI API调用
+- `json_parse_start/success/error` - JSON解析
+- `content_validation` - 内容验证
+- `quality_check` - 质量检查
+- `db_save_start/success/error` - 数据库操作
+
+### 使用说明
+详细使用说明请参考：`README_LOGGING_SYSTEM.md`
 
 ## 代码规范
 

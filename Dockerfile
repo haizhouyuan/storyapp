@@ -50,6 +50,9 @@ COPY --from=frontend-builder /app/frontend/build ./public
 RUN mkdir -p logs uploads && \
     chown -R storyapp:nodejs /app
 
+# 安装额外的生产依赖
+RUN npm install axios
+
 # 切换到非root用户
 USER storyapp
 

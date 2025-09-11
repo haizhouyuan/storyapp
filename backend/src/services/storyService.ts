@@ -18,6 +18,16 @@ import {
   STORY_WRITING_PROMPT,
   STORY_REVIEW_PROMPT
 } from '../config/deepseek';
+import { 
+  logger, 
+  createSession, 
+  endSession, 
+  LogLevel, 
+  EventType, 
+  logAIApiCall, 
+  logPerformance
+} from '../utils/logger';
+import type { PerformanceMetrics } from '../types';
 import type { 
   GenerateStoryRequest, 
   GenerateStoryResponse,
@@ -31,7 +41,7 @@ import type {
   GenerateFullStoryResponse,
   StoryTree,
   StoryTreeNode
-} from '../../../shared/types';
+} from '../types';
 
 function extractJson(content: string): any {
   const cleaned = String(content || '')
@@ -58,8 +68,21 @@ function extractJson(content: string): any {
  * 生成故事片段服务
  */
 export async function generateStoryService(params: GenerateStoryRequest): Promise<GenerateStoryResponse> {
+  // 创建会话记录
+  const sessionId = createSession(params.topic, 'progressive', params);
+  const startTime = Date.now();
+  
   try {
     const { topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
+    
+    logger.info(EventType.STORY_GENERATION_START, '开始生成故事片段', {
+      topic,
+      isNewStory: !currentStory,
+      turnIndex,
+      maxChoices,
+      forceEnding,
+      selectedChoice
+    }, { startTime }, sessionId);
     
     // 构造给DeepSeek的消息
     const messages = [
@@ -72,6 +95,12 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     // 根据是否是继续故事来构造用户消息
     if (currentStory && selectedChoice) {
       // 继续现有故事
+      logger.debug(EventType.STORY_GENERATION_START, '继续现有故事', {
+        currentStoryLength: currentStory.length,
+        selectedChoice,
+        turnIndex
+      }, sessionId);
+      
       messages.push({
         role: 'user',
         content: STORY_CONTINUE_PROMPT(
@@ -85,6 +114,11 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       });
     } else {
       // 开始新故事 - 使用更详细的提示确保足够长度
+      logger.debug(EventType.STORY_GENERATION_START, '开始新故事', {
+        topic,
+        expectedTurns: Math.max(5, Math.min(10, maxChoices || 6))
+      }, sessionId);
+      
       messages.push({
         role: 'user',
         content: `请为以下主题创作一个儿童睡前故事的开头：${topic}。
@@ -100,9 +134,14 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       });
     }
 
-    console.log('正在调用DeepSeek API...');
+    logger.info(EventType.AI_API_REQUEST, '准备调用DeepSeek API', {
+      model: DEEPSEEK_CONFIG.CHAT_MODEL,
+      messagesCount: messages.length,
+      promptLength: messages.reduce((sum, msg) => sum + msg.content.length, 0)
+    }, undefined, sessionId);
     
     // 调用DeepSeek API
+    const apiStartTime = Date.now();
     const response = await deepseekClient.post('/chat/completions', {
       model: DEEPSEEK_CONFIG.CHAT_MODEL,
       messages,
@@ -110,15 +149,39 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       temperature: DEEPSEEK_CONFIG.TEMPERATURE,
       stream: DEEPSEEK_CONFIG.STREAM
     });
+    const apiDuration = Date.now() - apiStartTime;
 
     if (!response.data || !response.data.choices || response.data.choices.length === 0) {
       throw new Error('DeepSeek API返回数据格式不正确');
     }
 
     const aiResponse = response.data.choices[0].message.content;
-    console.log('DeepSeek API响应:', aiResponse);
+    
+    // 简单的token估算
+    const estimateTokens = (text: string): number => {
+      const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+      const englishCount = text.length - chineseCount;
+      return chineseCount + Math.ceil(englishCount / 4);
+    };
+    
+    const tokensUsed = estimateTokens(JSON.stringify(messages)) + estimateTokens(aiResponse);
+    
+    // 记录API调用成功
+    logAIApiCall(
+      sessionId,
+      DEEPSEEK_CONFIG.CHAT_MODEL,
+      { messages, config: { max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS, temperature: DEEPSEEK_CONFIG.TEMPERATURE } },
+      { content: aiResponse },
+      apiDuration,
+      tokensUsed
+    );
 
     // 解析AI返回的JSON
+    logger.info(EventType.JSON_PARSE_START, '开始解析AI响应', {
+      responseLength: aiResponse.length,
+      responsePreview: aiResponse.substring(0, 100) + '...'
+    }, undefined, sessionId);
+    
     let parsedResponse;
     try {
       // 清理可能的markdown格式
@@ -128,8 +191,18 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
         .trim();
       
       parsedResponse = JSON.parse(cleanedResponse);
+      
+      logger.info(EventType.JSON_PARSE_SUCCESS, 'JSON解析成功', {
+        hasStorySegment: !!parsedResponse.storySegment,
+        choicesCount: Array.isArray(parsedResponse.choices) ? parsedResponse.choices.length : 0,
+        isEnding: !!parsedResponse.isEnding
+      }, undefined, sessionId);
+      
     } catch (parseError) {
-      console.error('解析AI响应失败:', parseError, '原始响应:', aiResponse);
+      logger.error(EventType.JSON_PARSE_ERROR, 'JSON解析失败，使用fallback策略', parseError as Error, {
+        originalResponse: aiResponse,
+        parseError: (parseError as Error).message
+      }, sessionId);
       
       // 如果JSON解析失败，尝试从文本中提取故事内容
       const fallbackStory = aiResponse.substring(0, 200) + '...';
@@ -141,21 +214,40 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     }
 
     // 验证响应格式
+    logger.info(EventType.CONTENT_VALIDATION, '开始内容验证', {
+      hasStorySegment: !!parsedResponse.storySegment,
+      hasChoices: !!parsedResponse.choices,
+      isEnding: !!parsedResponse.isEnding
+    }, undefined, sessionId);
+    
     if (!parsedResponse.storySegment) {
+      logger.error(EventType.CONTENT_VALIDATION, 'AI响应缺少故事内容', undefined, {
+        parsedResponse
+      }, sessionId);
       throw new Error('AI响应缺少故事内容');
     }
 
     // 确保choices是数组且不超过3个
     if (!Array.isArray(parsedResponse.choices)) {
+      logger.warn(EventType.CONTENT_VALIDATION, 'choices不是数组，使用默认选择', {
+        originalChoices: parsedResponse.choices,
+        defaultChoices: ['继续冒险', '返回起点', '寻找新路径']
+      }, sessionId);
       parsedResponse.choices = ['继续冒险', '返回起点', '寻找新路径'];
     }
     
     // 限制选择数量为最多3个
     if (parsedResponse.choices.length > 3) {
+      logger.warn(EventType.CONTENT_VALIDATION, '选择过多，截取前3个', {
+        originalCount: parsedResponse.choices.length,
+        originalChoices: parsedResponse.choices,
+        trimmedChoices: parsedResponse.choices.slice(0, 3)
+      }, sessionId);
       parsedResponse.choices = parsedResponse.choices.slice(0, 3);
     } else if (parsedResponse.choices.length < 3 && !parsedResponse.isEnding) {
       // 如果不是结尾且选择少于3个，补充默认选择
       const defaultChoices = ['继续故事', '换个方向', '寻求帮助'];
+      const originalChoices = [...parsedResponse.choices];
       while (parsedResponse.choices.length < 3) {
         const nextDefault = defaultChoices[parsedResponse.choices.length];
         if (!parsedResponse.choices.includes(nextDefault)) {
@@ -164,33 +256,79 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
           parsedResponse.choices.push(`选择${parsedResponse.choices.length + 1}`);
         }
       }
+      logger.warn(EventType.CONTENT_VALIDATION, '选择不足3个，补充默认选择', {
+        originalChoices,
+        supplementedChoices: parsedResponse.choices
+      }, sessionId);
     }
 
     // 如果调用方要求强制结尾，则覆盖AI的返回，确保没有choices并标记isEnding
     if (forceEnding) {
+      logger.info(EventType.CONTENT_VALIDATION, '强制结尾模式，移除选择', {
+        originalIsEnding: parsedResponse.isEnding,
+        originalChoices: parsedResponse.choices
+      }, undefined, sessionId);
       parsedResponse.isEnding = true;
       parsedResponse.choices = [];
     }
 
     // 检查故事长度（仅记录日志，不进行二次调用避免超时）
     const plainLen = String(parsedResponse.storySegment || '').replace(/\s/g, '').length;
+    logger.info(EventType.QUALITY_CHECK, '故事长度检查', {
+      storyLength: plainLen,
+      targetLength: 500,
+      meetsTarget: plainLen >= 500,
+      wordCount: parsedResponse.storySegment.length
+    }, undefined, sessionId);
+    
     if (plainLen < 500) {
-      console.warn(`故事片段长度不足500字: ${plainLen}字，但跳过扩展避免超时`);
-    } else {
-      console.log(`故事片段长度: ${plainLen}字`);
+      logger.warn(EventType.QUALITY_CHECK, '故事片段长度不足500字，但跳过扩展避免超时', {
+        actualLength: plainLen,
+        targetLength: 500,
+        shortfall: 500 - plainLen
+      }, sessionId);
     }
 
+    // 记录生成完成
+    const totalDuration = Date.now() - startTime;
+    logger.info(EventType.STORY_GENERATION_COMPLETE, '故事片段生成完成', {
+      storyLength: parsedResponse.storySegment.length,
+      choicesCount: parsedResponse.choices.length,
+      isEnding: parsedResponse.isEnding,
+      success: true
+    }, {
+      startTime,
+      endTime: Date.now(),
+      duration: totalDuration
+    }, sessionId);
+    
+    // 结束会话
+    endSession(sessionId, true);
+    
     return {
       storySegment: parsedResponse.storySegment,
       choices: parsedResponse.isEnding ? [] : parsedResponse.choices,
       isEnding: !!parsedResponse.isEnding
     };
   } catch (error: any) {
-    console.error('DeepSeek API调用失败:', error);
+    // 记录错误
+    const totalDuration = Date.now() - startTime;
     
     if (error.response) {
-      console.error('API响应错误:', error.response.status, error.response.data);
+      logger.error(EventType.AI_API_ERROR, 'DeepSeek API响应错误', error, {
+        status: error.response.status,
+        data: error.response.data,
+        duration: totalDuration
+      }, sessionId);
+    } else {
+      logger.error(EventType.STORY_GENERATION_ERROR, 'DeepSeek API调用失败', error, {
+        duration: totalDuration,
+        errorType: error.constructor.name
+      }, sessionId);
     }
+    
+    // 结束会话（失败）
+    endSession(sessionId, false);
     
     const customError = new Error('DeepSeek API调用失败');
     (customError as any).code = 'DEEPSEEK_API_ERROR';
@@ -202,10 +340,17 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
  * 保存故事服务
  */
 export async function saveStoryService(params: SaveStoryRequest): Promise<SaveStoryResponse> {
+  const sessionId = createSession(undefined, undefined, params);
+  const startTime = Date.now();
+  
   try {
     const { title, content } = params;
     
-    console.log('正在保存故事到MongoDB...');
+    logger.info(EventType.DB_SAVE_START, '开始保存故事到MongoDB', {
+      title,
+      contentLength: content.length,
+      contentPreview: content.substring(0, 100) + '...'
+    }, { startTime }, sessionId);
     
     // 创建故事文档
     const storyDoc = createStoryDocument(title, content);
@@ -213,21 +358,49 @@ export async function saveStoryService(params: SaveStoryRequest): Promise<SaveSt
     // 验证文档
     const validationErrors = validateStoryDocument(storyDoc);
     if (validationErrors.length > 0) {
+      logger.error(EventType.CONTENT_VALIDATION, '数据验证失败', undefined, {
+        validationErrors,
+        storyDoc
+      }, sessionId);
       throw new Error(`数据验证失败: ${validationErrors.join(', ')}`);
     }
+    
+    logger.debug(EventType.CONTENT_VALIDATION, '文档验证通过', {
+      docSize: JSON.stringify(storyDoc).length,
+      hasTitle: !!storyDoc.title,
+      hasContent: !!storyDoc.content
+    }, sessionId);
     
     // 获取数据库实例
     const db = getDatabase();
     const storiesCollection = db.collection(TABLES.STORIES);
     
     // 保存到MongoDB
+    const dbStartTime = Date.now();
     const result = await storiesCollection.insertOne(storyDoc);
+    const dbDuration = Date.now() - dbStartTime;
     
     if (!result.acknowledged || !result.insertedId) {
+      logger.error(EventType.DB_SAVE_ERROR, '数据库插入操作未确认', undefined, {
+        result,
+        acknowledged: result.acknowledged,
+        insertedId: result.insertedId
+      }, sessionId);
       throw new Error('数据库插入操作未确认');
     }
 
-    console.log('故事保存成功, ID:', result.insertedId);
+    const totalDuration = Date.now() - startTime;
+    logger.info(EventType.DB_SAVE_SUCCESS, '故事保存成功', {
+      storyId: result.insertedId.toString(),
+      title,
+      success: true
+    }, {
+      startTime,
+      endTime: Date.now(),
+      duration: totalDuration
+    }, sessionId);
+
+    endSession(sessionId, true);
 
     return {
       success: true,
@@ -235,7 +408,15 @@ export async function saveStoryService(params: SaveStoryRequest): Promise<SaveSt
       message: '故事已成功保存到"我的故事"中！'
     };
   } catch (error: any) {
-    console.error('保存故事服务错误:', error);
+    const totalDuration = Date.now() - startTime;
+    
+    logger.error(EventType.DB_SAVE_ERROR, '保存故事服务错误', error, {
+      duration: totalDuration,
+      errorType: error.constructor.name,
+      originalErrorCode: error.code
+    }, sessionId);
+    
+    endSession(sessionId, false);
     
     if (error.code === 'DATABASE_ERROR') {
       throw error;

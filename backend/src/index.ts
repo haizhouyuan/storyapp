@@ -8,9 +8,11 @@ import path from 'path';
 // 导入路由
 import storyRoutes from './routes/stories';
 import healthRoutes from './routes/health';
+import adminRoutes from './routes/admin';
 
 // 导入数据库连接
 import { connectToDatabase, checkDatabaseHealth } from './config/database';
+import { initializeDatabase } from './config/initializeDatabase';
 
 // 加载环境变量
 dotenv.config({ path: path.join(__dirname, "..", "..", ".env") });
@@ -59,6 +61,7 @@ app.use((req, res, next) => {
 
 // 注册路由
 app.use('/api/health', healthRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api', storyRoutes);
 
 // 静态文件服务（前端）
@@ -100,11 +103,15 @@ async function startServer() {
     // 初始化数据库连接
     await connectToDatabase();
     
+    // 初始化数据库索引和配置
+    await initializeDatabase();
+    
     app.listen(PORT, () => {
       console.log(`🚀 服务器启动成功！`);
       console.log(`📍 端口: ${PORT}`);
       console.log(`🌐 环境: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
+      console.log(`📊 管理后台API: http://localhost:${PORT}/api/admin`);
       
       if (process.env.NODE_ENV !== 'production') {
         console.log(`🎨 前端地址: ${FRONTEND_URL}`);
