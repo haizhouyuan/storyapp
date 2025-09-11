@@ -1,8 +1,9 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import path from 'path';
 
 // 确保加载环境变量
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, "..", "..", "..", ".env") });
 
 // DeepSeek API配置
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
