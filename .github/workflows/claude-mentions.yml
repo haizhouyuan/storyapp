@@ -86,7 +86,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
-          task: "prompt"
           prompt: |
             你是故事创作工作流专家，基于我们的故事创作方法论来协助用户。
             
@@ -127,6 +126,3 @@ jobs:
             - 安全和健康的主题
             
             请根据用户的具体需求，提供相应的创作指导或技术实现支持。
-          allow_edits: true
-          create_prs: false           # 创作辅助不需要新PR
-          run_tests: false
