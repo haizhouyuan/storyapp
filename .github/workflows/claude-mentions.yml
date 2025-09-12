@@ -18,7 +18,6 @@ jobs:
     timeout-minutes: 30
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     
     steps:
       - name: Checkout repository
@@ -51,7 +50,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}    # 绕过OIDC认证问题
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}  # 关键参数
-          anthropic_base_url: ${{ secrets.ANTHROPIC_BASE_URL }}
           prompt: |
             你是这个儿童故事应用项目的AI助手。项目包含：
             
@@ -82,7 +80,8 @@ jobs:
             - 考虑最佳实践和安全性
             - 适合儿童应用的特殊要求
             
-            请根据用户的请求提供帮助。如果需要修改代码，请创建合适的提交和PR。
+            请进行深入思考和分析。仔细考虑问题的各个方面，提供详细的技术分析和实现建议。
+            根据用户的请求提供帮助。如果需要修改代码，请创建合适的提交和PR。
 
   # 处理特定的故事创作工作流提及
   story-workflow-assistant:
@@ -91,7 +90,6 @@ jobs:
     timeout-minutes: 20
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     
     steps:
       - name: Checkout repository
@@ -112,7 +110,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}    # 绕过OIDC认证问题
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}  # 关键参数
-          anthropic_base_url: ${{ secrets.ANTHROPIC_BASE_URL }}
           prompt: |
             你是故事创作工作流专家，基于我们的故事创作方法论来协助用户。
             
