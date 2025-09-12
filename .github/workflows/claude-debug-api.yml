@@ -11,9 +11,8 @@ jobs:
   debug-api:
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
-      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
     
     steps:
       - name: Checkout repository
