@@ -1,0 +1,36 @@
+# GHCR镜像验证 Override - 与生产环境一致
+# 目标：在本地/测试机复现生产镜像，彻底验证"镜像即生产"
+# 使用方式：docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up
+
+services:
+  app:
+    # 使用预构建的GHCR镜像
+    image: ghcr.io/haizhouyuan/storyapp:${APP_TAG:-sha-latest}
+    container_name: storyapp-ghcr
+    
+    # 生产环境配置
+    environment:
+      - NODE_ENV=production
+      # 其他环境变量从.env读取
+    
+    # 生产启动命令（与Dockerfile CMD一致）
+    command: ["node", "backend/dist/src/index.js"]
+    
+    # 生产端口映射
+    ports:
+      - "${APP_PORT:-5001}:5000"  # 默认5001避免与dev冲突
+    
+    # 仅保留必要的数据卷
+    volumes:
+      - app_logs:/app/logs
+      - app_uploads:/app/uploads
+      # 不挂载源码，完全使用镜像内容
+
+  mongo:
+    # 生产数据库配置
+    environment:
+      MONGO_INITDB_DATABASE: storyapp_prod
+    # 生产环境不暴露端口（安全）
+    # 如需调试可临时取消注释
+    # ports:
+    #   - "27017:27017"

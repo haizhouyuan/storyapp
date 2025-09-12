@@ -89,8 +89,12 @@ app.use('/api/workflow', validationRateLimit, workflowMiraclesRoutes);
 // API documentation routes (public)
 app.use('/docs', docsRoutes);
 
-// Main API routes
+// 标准健康检查端点（符合 ultrathink 规范）
+app.use('/healthz', healthRoutes);
+// 保持向后兼容
 app.use('/api/health', healthRoutes);
+
+// Main API routes
 app.use('/api/admin', adminRoutes);
 app.use('/api', storyRoutes);
 
@@ -148,7 +152,7 @@ async function startServer() {
         environment: process.env.NODE_ENV || 'development',
         frontendUrl: FRONTEND_URL,
         endpoints: {
-          health: `http://localhost:${PORT}/api/health`,
+          health: `http://localhost:${PORT}/healthz`,
           ready: `http://localhost:${PORT}/api/ready`,
           metrics: `http://localhost:${PORT}/metrics`,
           admin: `http://localhost:${PORT}/api/admin`

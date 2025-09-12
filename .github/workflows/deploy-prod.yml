@@ -30,10 +30,17 @@ jobs:
             echo ${{ secrets.GHCR_PAT }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             cd /root/projects/storyapp  # 按你的服务器目录修改
-            sed -i 's|\(image:\s*ghcr\.io/.*/storyapp:\).*|\1${{ github.event.inputs.tag }}|' docker-compose.yml
-
-            docker compose pull
-            docker compose up -d --remove-orphans
+            
+            echo "== 使用 GHCR compose 方式部署 =="
+            export APP_TAG=${{ github.event.inputs.tag }}
+            
+            # 使用标准化的 GHCR compose 配置
+            docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+            docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d --remove-orphans
             docker image prune -f
 
-            echo "Deployed tag: ${{ github.event.inputs.tag }}"
+            echo "== 健康检查 =="
+            sleep 10
+            curl -f http://localhost:5001/healthz || echo "❌ 健康检查失败"
+
+            echo "✅ 部署完成 - Tag: ${{ github.event.inputs.tag }}"

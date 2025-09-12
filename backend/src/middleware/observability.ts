@@ -194,7 +194,7 @@ export const requestIdMiddleware = (req: Request, res: Response, next: NextFunct
 
 // Health check middleware (doesn't need auth)
 export const healthCheckMiddleware = (req: Request, res: Response, next: NextFunction) => {
-  if (req.path === '/api/health' || req.path === '/health') {
+  if (req.path === '/healthz' || req.path === '/api/health' || req.path === '/health') {
     const health = {
       status: 'healthy',
       timestamp: new Date().toISOString(),
@@ -213,7 +213,7 @@ export const healthCheckMiddleware = (req: Request, res: Response, next: NextFun
 
 // Ready check middleware (checks database connectivity)
 export const readyCheckMiddleware = async (req: Request, res: Response, next: NextFunction) => {
-  if (req.path === '/api/ready' || req.path === '/ready') {
+  if (req.path === '/readyz' || req.path === '/api/ready' || req.path === '/ready') {
     try {
       // TODO: Add actual database connectivity check
       const ready = {

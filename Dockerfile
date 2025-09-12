@@ -90,9 +90,9 @@ ENV NODE_ENV=production \
 # 暴露端口
 EXPOSE 5000
 
-# 健康检查
+# 健康检查（使用标准/healthz端点）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:5000/api/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+    CMD node -e "require('http').get('http://localhost:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # 启动应用
 CMD ["node", "backend/dist/src/index.js"]
