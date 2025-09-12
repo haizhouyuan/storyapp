@@ -58,7 +58,7 @@ RUN addgroup -g 1001 -S nodejs && \
     adduser -S storyapp -u 1001
 
 # 复制整个workspace结构
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/package.json
 COPY shared/package.json ./shared/package.json
 
