@@ -4,6 +4,9 @@
 // Export all types
 export * from './types/workflow/index.js';
 
+// Export schemas
+export * as WorkflowSchemas from './schemas/workflow.js';
+
 // Export specific constants to avoid conflicts
 export { WORKFLOW_STAGE_INFO } from './constants/workflow.js';
 

@@ -54,7 +54,7 @@ export const validateSchema = (
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const validationErrors = error.errors.map(err => {
+        const validationErrors = error.issues.map(err => {
           const path = err.path.length > 0 ? err.path.join('.') : 'root';
           return `${path}: ${err.message}`;
         });
@@ -77,7 +77,7 @@ export const validateSchema = (
           success: false,
           error: 'Validation failed',
           errors: validationErrors,
-          details: options.abortEarly === false ? error.errors : undefined
+          details: options.abortEarly === false ? error.issues : undefined
         });
       }
       
@@ -338,7 +338,7 @@ export const parseComplexData = {
 
 // Utility function to get validation errors in a consistent format
 export const formatValidationErrors = (error: ZodError): string[] => {
-  return error.errors.map(err => {
+  return error.issues.map(err => {
     const path = err.path.length > 0 ? err.path.join('.') : 'root';
     return `${path}: ${err.message}`;
   });

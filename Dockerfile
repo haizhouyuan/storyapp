@@ -28,7 +28,7 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry $NPM_REGISTRY
 
 # 复制workspace配置
-COPY package.json ./package.json
+COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./tsconfig.base.json
 
 # 复制各包的package.json
@@ -43,7 +43,7 @@ COPY backend ./backend
 COPY shared ./shared
 
 # 构建shared包
-RUN npm run -w shared build
+RUN npm run -w @storyapp/shared build
 
 # 构建backend包
 RUN npm run -w backend build

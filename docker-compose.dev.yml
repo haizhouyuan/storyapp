@@ -1,51 +1,47 @@
-# 开发环境 - 简化配置
-name: storyapp-dev
-services:
-  # MongoDB数据库
-  mongo:
-    image: mongo:6.0
-    container_name: storyapp_mongo_dev
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_DATABASE: storyapp_dev
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_dev_data:/data/db
-    networks:
-      - storyapp_dev
+# 开发环境 Override - 源码挂载 + 热更新
+# 配合基座使用：docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
-  # 应用服务
+services:
   app:
-    build: 
+    # 本地构建，不依赖GHCR
+    build:
       context: .
       dockerfile: Dockerfile
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:18-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     image: storyapp:dev
-    container_name: storyapp_dev
-    restart: unless-stopped
+    container_name: storyapp-dev
+    
+    # 开发环境变量
     environment:
       - NODE_ENV=development
-      - PORT=5000
-      - MONGODB_URI=mongodb://mongo:27017/storyapp_dev
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-https://api.deepseek.com}
-    ports:
-      - "5000:5000"
+      - FRONTEND_URL=http://localhost:3000
+      - ENABLE_DETAILED_LOGGING=true
+      - LOG_LEVEL=debug
+    
+    # 热更新模式 - 挂载源码
+    command: ["npm", "run", "dev"]  # 需要后端package.json中有dev脚本
     volumes:
-      - ./logs:/app/logs
-      - ./uploads:/app/uploads
-    networks:
-      - storyapp_dev
-    depends_on:
-      - mongo
-
-networks:
-  storyapp_dev:
-    driver: bridge
-
-volumes:
-  mongo_dev_data:
-    driver: local
+      # 挂载源码目录实现热更新
+      - ./backend:/app/backend
+      - ./shared:/app/shared
+      - ./frontend/build:/app/backend/dist/public  # 前端构建结果
+      # 保护node_modules不被覆盖
+      - /app/node_modules
+      - /app/backend/node_modules
+      - /app/shared/node_modules
+    
+    # 开发端口映射
+    ports:
+      - "5000:5000"  # 直接映射，便于本地调试
+    
+    # 开发环境不暴露数据库端口（安全考虑）
+  
+  mongo:
+    # 开发数据库配置
+    environment:
+      MONGO_INITDB_DATABASE: storyapp_dev
+    # 暴露端口便于本地工具连接
+    ports:
+      - "27017:27017"
