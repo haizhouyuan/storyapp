@@ -27,6 +27,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             这是一个连接测试。请执行以下简单任务：
             
@@ -167,6 +168,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           task: "prompt"
           prompt: |
             请创建一个GitHub Issues，总结这次Claude Code配置测试的结果：

@@ -61,6 +61,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         # Job级env已经包含所有必要的环境变量，不需要重复配置
         with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             Hello! This is a simple connection test for Claude Code on GitHub Actions.
             
