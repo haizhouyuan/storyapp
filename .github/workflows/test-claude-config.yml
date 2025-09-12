@@ -1,0 +1,196 @@
+name: Test Claude Code Configuration
+
+on:
+  workflow_dispatch:  # 手动触发测试
+  push:
+    paths:
+      - '.github/workflows/**'  # 当工作流文件更改时触发
+
+permissions:
+  contents: read
+  id-token: write        # Required for OIDC authentication
+  pull-requests: write
+  issues: write
+
+jobs:
+  test-claude-connection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test Claude Code Connection
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          prompt: |
+            这是一个连接测试。请执行以下简单任务：
+            
+            1. 确认你能成功连接和响应
+            2. 分析当前的项目结构
+            3. 检查GitHub Actions工作流配置
+            4. 提供一个简短的项目状态报告
+            
+            ## 项目背景
+            这是一个儿童故事应用项目，包含：
+            - React前端
+            - Node.js后端
+            - Playwright E2E测试
+            - GitHub Actions CI/CD流水线
+            
+            请提供你的分析和建议。
+          claude_args: "--no-edit --no-create-pr"
+
+  validate-workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate GitHub Actions Syntax
+        run: |
+          echo "Validating GitHub Actions workflow files..."
+          
+          # Check YAML syntax for all workflow files
+          for file in .github/workflows/*.yml .github/workflows/*.yaml; do
+            if [ -f "$file" ]; then
+              echo "Checking $file"
+              # Simple YAML validation using Python
+              python -c "import yaml; yaml.safe_load(open('$file'))" || {
+                echo "❌ YAML syntax error in $file"
+                exit 1
+              }
+              echo "✅ $file is valid"
+            fi
+          done
+          
+          echo "All workflow files validated successfully!"
+
+      - name: List Current Workflows
+        run: |
+          echo "## Current GitHub Actions Workflows" > workflow-summary.md
+          echo "" >> workflow-summary.md
+          
+          for file in .github/workflows/*.yml; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              echo "### $filename" >> workflow-summary.md
+              
+              # Extract workflow name
+              name=$(grep '^name:' "$file" | sed 's/name: *//' | tr -d '"')
+              echo "- **Name**: $name" >> workflow-summary.md
+              
+              # Extract triggers
+              echo "- **Triggers**: " >> workflow-summary.md
+              grep -A 10 '^on:' "$file" | grep -E '^\s*-|^\s*types:|^\s*branches:' | sed 's/^/  /' >> workflow-summary.md
+              echo "" >> workflow-summary.md
+            fi
+          done
+          
+          echo "Generated workflow summary:"
+          cat workflow-summary.md
+
+  test-project-structure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Check Project Dependencies
+        run: |
+          echo "## Project Structure Analysis" > structure-report.md
+          echo "" >> structure-report.md
+          
+          # Check main package.json
+          if [ -f "package.json" ]; then
+            echo "### Root Package" >> structure-report.md
+            echo "✅ Root package.json exists" >> structure-report.md
+            npm list --depth=0 >> structure-report.md 2>/dev/null || echo "Dependencies not installed" >> structure-report.md
+            echo "" >> structure-report.md
+          fi
+          
+          # Check backend
+          if [ -d "backend" ]; then
+            echo "### Backend" >> structure-report.md
+            echo "✅ Backend directory exists" >> structure-report.md
+            if [ -f "backend/package.json" ]; then
+              echo "✅ Backend package.json exists" >> structure-report.md
+            fi
+            echo "" >> structure-report.md
+          fi
+          
+          # Check frontend
+          if [ -d "frontend" ]; then
+            echo "### Frontend" >> structure-report.md
+            echo "✅ Frontend directory exists" >> structure-report.md
+            if [ -f "frontend/package.json" ]; then
+              echo "✅ Frontend package.json exists" >> structure-report.md
+            fi
+            echo "" >> structure-report.md
+          fi
+          
+          # Check test directories
+          echo "### Test Setup" >> structure-report.md
+          [ -d "tests" ] && echo "✅ Tests directory exists" >> structure-report.md
+          [ -f "playwright.config.ts" ] && echo "✅ Playwright config exists" >> structure-report.md
+          [ -d "backend/tests" ] && echo "✅ Backend tests directory exists" >> structure-report.md
+          echo "" >> structure-report.md
+          
+          echo "Generated structure report:"
+          cat structure-report.md
+
+  create-test-summary:
+    runs-on: ubuntu-latest
+    needs: [test-claude-connection, validate-workflows, test-project-structure]
+    if: always()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Test Summary Issue
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            请创建一个GitHub Issues，总结这次Claude Code配置测试的结果：
+            
+            ## 测试情况
+            - Claude连接测试: ${{ needs.test-claude-connection.result }}
+            - 工作流验证测试: ${{ needs.validate-workflows.result }}
+            - 项目结构检查: ${{ needs.test-project-structure.result }}
+            
+            ## Issue内容要求
+            1. 标题: "Claude Code配置测试结果 - $(date +%Y-%m-%d)"
+            2. 总结每个测试的状态
+            3. 如果有失败，提供故障排除建议
+            4. 列出下一步的行动计划
+            5. 添加相应的标签 (testing, claude-code, configuration)
+            
+            ## 成功标准
+            - 所有工作流语法正确
+            - Claude API连接正常
+            - 项目结构完整
+            - 准备好进行实际的AI辅助开发
+            
+            请创建这个Issue来记录测试状态。
+          allow_edits: true
+          create_prs: false
+          run_tests: false
+          max_tokens: 30000
