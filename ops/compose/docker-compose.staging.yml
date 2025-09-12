@@ -1,0 +1,67 @@
+# 预发布环境配置
+# 用于服务器预发布测试
+
+name: storyapp-staging
+
+services:
+  mongo:
+    container_name: storyapp-staging-mongo
+    ports:
+      - "27019:27017"  # 预发布专用端口
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-staging_user}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-staging_pass123}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-storyapp_staging}
+    labels:
+      - "env=staging"
+
+  app:
+    container_name: storyapp-staging-app
+    build:
+      args:
+        NODE_ENV: staging
+    ports:
+      - "5002:5000"
+    environment:
+      - NODE_ENV=staging
+      - PORT=5000
+      - MONGODB_URI=mongodb://${MONGO_USER:-staging_user}:${MONGO_PASS:-staging_pass123}@mongo:27017/${MONGO_DB:-storyapp_staging}?authSource=admin
+    labels:
+      - "env=staging"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+
+  nginx:
+    container_name: storyapp-staging-nginx
+    ports:
+      - "8080:80"  # 预发布环境Web端口
+    volumes:
+      - ../nginx/conf.d/staging.conf:/etc/nginx/conf.d/default.conf:ro
+    environment:
+      - UPSTREAM_SERVER=app:5000
+    labels:
+      - "env=staging"
+    profiles:
+      - nginx
+
+  # 预发布环境的监控服务
+  monitoring:
+    image: prom/prometheus:latest
+    container_name: storyapp-staging-monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - storyapp-net
+    depends_on:
+      - app
+    profiles:
+      - monitoring
+    labels:
+      - "env=staging"
+      - "service=monitoring"

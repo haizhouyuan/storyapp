@@ -1,0 +1,30 @@
+# E2E测试专用Dockerfile
+
+FROM mcr.microsoft.com/playwright:v1.44.0-focal
+
+WORKDIR /app
+
+# 安装Node.js 18
+RUN apt-get update && apt-get install -y curl \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制package文件
+COPY package.json package-lock.json ./
+COPY playwright.config.ts ./
+
+# 安装依赖
+RUN npm ci
+
+# 复制测试文件
+COPY tests/ ./tests/
+COPY frontend/src/ ./frontend/src/
+
+# 设置工作目录权限
+RUN chown -R pwuser:pwuser /app
+USER pwuser
+
+# 默认命令
+CMD ["npx", "playwright", "test", "--config=playwright.config.ts"]

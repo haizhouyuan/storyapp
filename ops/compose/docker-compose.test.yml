@@ -1,0 +1,70 @@
+# 测试环境覆盖配置
+# 用于CI/CD自动化测试
+
+name: storyapp-test
+
+services:
+  mongo:
+    container_name: storyapp-test-mongo
+    ports:
+      - "27018:27017"  # 避免与开发环境冲突
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: test_user
+      MONGO_INITDB_ROOT_PASSWORD: test_pass123
+      MONGO_INITDB_DATABASE: storyapp_test
+    tmpfs:
+      - /data/db:size=1G  # 测试环境使用内存数据库，提高速度
+    labels:
+      - "env=test"
+
+  app:
+    container_name: storyapp-test-app
+    build:
+      args:
+        NODE_ENV: test
+        NPM_REGISTRY: https://registry.npmmirror.com
+    ports:
+      - "5001:5000"  # 避免与开发环境冲突
+    environment:
+      - NODE_ENV=test
+      - PORT=5000
+      - MONGODB_URI=mongodb://test_user:test_pass123@mongo:27017/storyapp_test?authSource=admin
+      - DEEPSEEK_API_KEY=mock_api_key  # 测试环境使用模拟API
+      - DEBUG=storyapp:test
+    volumes:
+      - app_logs:/app/logs
+    labels:
+      - "env=test"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # 测试环境的E2E测试服务
+  e2e-tests:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile.e2e
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      - TARGET_URL=http://app:5000
+      - NODE_ENV=test
+    volumes:
+      - ../../tests:/app/tests
+      - ../../playwright-report:/app/playwright-report
+      - ../../test-results:/app/test-results
+    networks:
+      - storyapp-net
+    profiles:
+      - e2e  # 仅在运行E2E测试时启动
+    labels:
+      - "env=test"
+      - "service=e2e-tests"
+
+  nginx:
+    profiles:
+      - disabled  # 测试环境不需要nginx

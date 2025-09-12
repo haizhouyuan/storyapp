@@ -1,0 +1,53 @@
+# 开发环境覆盖配置
+# 用法: docker-compose -f ops/compose/docker-compose.base.yml -f ops/compose/docker-compose.dev.yml up
+
+name: storyapp-dev
+
+services:
+  mongo:
+    container_name: storyapp-dev-mongo
+    ports:
+      - "27017:27017"  # 开发环境暴露数据库端口
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: dev_user
+      MONGO_INITDB_ROOT_PASSWORD: dev_pass123
+      MONGO_INITDB_DATABASE: storyapp_dev
+    labels:
+      - "env=development"
+
+  app:
+    container_name: storyapp-dev-app
+    build:
+      target: backend-builder  # 开发环境使用dev target
+      args:
+        NODE_ENV: development
+        NPM_REGISTRY: https://registry.npmmirror.com
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGODB_URI=mongodb://dev_user:dev_pass123@mongo:27017/storyapp_dev?authSource=admin
+      - FRONTEND_URL=http://localhost:3000
+      - DEBUG=storyapp:*
+    volumes:
+      # 开发环境挂载源码用于热重载
+      - ../../backend/src:/app/backend/src
+      - ../../frontend/src:/app/frontend/src
+      - ../../shared/src:/app/shared/src
+      # 日志和上传目录
+      - app_logs:/app/logs
+      - app_uploads:/app/uploads
+    labels:
+      - "env=development"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # 开发环境不启用nginx，直接访问应用
+  nginx:
+    profiles:
+      - disabled

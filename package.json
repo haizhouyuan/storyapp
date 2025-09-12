@@ -15,7 +15,21 @@
     "test": "npx playwright test tests/story-app.spec.ts",
     "test:mcp": "cd playwright-mcp && npm test",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../playwright-mcp && npm install",
-    "mcp:serve": "npx @playwright/mcp@latest --port 8931 --headless --isolated --timeout-navigation 60000 --timeout-action 8000 --image-responses omit --host 127.0.0.1"
+    "mcp:serve": "npx @playwright/mcp@latest --port 8931 --headless --isolated --timeout-navigation 60000 --timeout-action 8000 --image-responses omit --host 127.0.0.1",
+    "docker:dev": "bash scripts/deploy.sh dev up",
+    "docker:dev:build": "bash scripts/deploy.sh dev build",
+    "docker:dev:down": "bash scripts/deploy.sh dev down",
+    "docker:dev:logs": "bash scripts/deploy.sh dev logs",
+    "docker:test": "bash scripts/deploy.sh test up",
+    "docker:test:e2e": "bash scripts/deploy.sh test --profile e2e",
+    "docker:staging": "bash scripts/deploy.sh staging up",
+    "docker:staging:nginx": "bash scripts/deploy.sh staging --profile nginx",
+    "docker:production": "bash scripts/deploy.sh production deploy",
+    "docker:clean": "bash scripts/deploy.sh dev clean",
+    "deploy:dev": "bash scripts/deploy.sh dev deploy",
+    "deploy:test": "bash scripts/deploy.sh test deploy",
+    "deploy:staging": "bash scripts/deploy.sh staging deploy",
+    "deploy:production": "bash scripts/deploy.sh production deploy"
   },
   "keywords": [
     "儿童故事",
