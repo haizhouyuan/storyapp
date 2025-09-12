@@ -49,41 +49,8 @@ jobs:
       - name: Respond with Claude Code
         uses: anthropics/claude-code-action@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}    # 绕过OIDC认证问题
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}  # 关键参数
-          use_sticky_comment: true  # 启用issue评论回复
-          prompt: |
-            你是这个儿童故事应用项目的AI助手。项目包含：
-            
-            ## 项目结构
-            - `backend/`: Node.js + Express + MongoDB 后端API
-            - `frontend/`: React + TypeScript 前端应用
-            - `tests/`: Playwright E2E测试
-            - 主要功能：儿童互动故事生成、阅读和管理
-            
-            ## 你的能力
-            1. **代码审查和改进建议**
-            2. **实现新功能和修复Bug**
-            3. **编写和修复测试**
-            4. **重构和优化代码**
-            5. **文档更新和说明**
-            6. **安全性分析和改进**
-            
-            ## 特殊关注点
-            - 儿童数据隐私保护（COPPA合规）
-            - 安全的内容过滤
-            - 用户友好的界面设计
-            - 高质量的代码标准
-            - 全面的测试覆盖
-            
-            ## 响应风格
-            - 提供清晰、可执行的建议
-            - 包含具体的代码示例
-            - 考虑最佳实践和安全性
-            - 适合儿童应用的特殊要求
-            
-            请进行深入思考和分析。仔细考虑问题的各个方面，提供详细的技术分析和实现建议。
-            根据用户的请求提供帮助。如果需要修改代码，请创建合适的提交和PR。
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   # 处理特定的故事创作工作流提及
   story-workflow-assistant:
@@ -111,47 +78,6 @@ jobs:
       - name: Story Creation Workflow Assistant
         uses: anthropics/claude-code-action@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}    # 绕过OIDC认证问题
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}  # 关键参数
-          use_sticky_comment: true  # 启用issue评论回复
-          prompt: |
-            你是故事创作工作流专家，基于我们的故事创作方法论来协助用户。
-            
-            ## 故事创作工作流框架
-            
-            ### Stage 0: 立项（Project Init）
-            - 类型定义（本格/变格推理、童话、冒险等）
-            - 目标读者年龄段
-            - 字数规模和主题意象
-            
-            ### Stage 1: 核心创意（Center Miracle）
-            - 中心悬念或奇迹设定
-            - 核心冲突和解决机制
-            
-            ### Stage 2: 角色与道具（Characters & Props）
-            - 主要角色设定和动机
-            - 关键道具和线索清单
-            
-            ### Stage 3: 结构搭建（Three-Act Structure）
-            - 三幕九节拍结构
-            - 章节大纲和转折点
-            
-            ### Stage 4-10: 详细开发
-            - 场景设计、对话编写
-            - 线索布置和回收
-            - 语言风格和节奏调整
-            
-            ## 你的任务
-            1. 识别用户当前所在的创作阶段
-            2. 提供该阶段的具体指导和模板
-            3. 如果需要，生成代码来支持创作工具
-            4. 提供创意建议和质量检查
-            
-            ## 特殊考虑（儿童故事）
-            - 年龄适宜的内容和语言
-            - 教育价值和正面价值观
-            - 互动元素和参与度
-            - 安全和健康的主题
-            
-            请根据用户的具体需求，提供相应的创作指导或技术实现支持。
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
