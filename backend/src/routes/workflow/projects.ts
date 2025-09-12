@@ -7,8 +7,10 @@ import {
   WORKFLOW_STAGES,
   ApiResponse,
   PaginatedResponse,
-  SearchQuery
+  SearchQuery,
+  WorkflowSchemas
 } from '@storyapp/shared';
+import { validateBody, validateQuery, preprocessData } from '../../middleware/validation';
 import { 
   createProject,
   getProjectById,
@@ -27,19 +29,14 @@ const router = Router();
  * POST /api/workflow/projects
  * 创建新的故事创作项目
  */
-router.post('/', authenticate, async (req: Request, res: Response) => {
+router.post('/', 
+  authenticate, 
+  preprocessData('body'),
+  validateBody(WorkflowSchemas.CreateProjectRequestSchema, { stripUnknown: true }),
+  async (req: Request, res: Response) => {
   try {
-    const createRequest: CreateProjectRequest = req.body;
-
-    // 输入验证
-    const validationResult = validateCreateProject(createRequest);
-    if (!validationResult.isValid) {
-      return res.status(400).json({
-        success: false,
-        errors: validationResult.errors,
-        message: '项目创建数据验证失败'
-      } as ApiResponse);
-    }
+    // Use validated data from middleware
+    const createRequest: CreateProjectRequest = (req as any).validated.body;
 
     // 创建项目
     const project = await createProject({
@@ -68,15 +65,18 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
  * GET /api/workflow/projects
  * 获取项目列表（支持分页和搜索）
  */
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', 
+  authenticate,
+  preprocessData('query'),
+  validateQuery(WorkflowSchemas.SearchQuerySchema, { stripUnknown: true }),
+  async (req: Request, res: Response) => {
   try {
-    const query: SearchQuery = {
-      q: req.query.q as string,
-      filters: req.query.filters ? JSON.parse(req.query.filters as string) : {},
-      sort: req.query.sort as string || 'updatedAt',
-      order: (req.query.order as 'asc' | 'desc') || 'desc',
-      page: parseInt(req.query.page as string) || 1,
-      limit: Math.min(parseInt(req.query.limit as string) || 20, 100)
+    // Use validated query from middleware
+    const query: SearchQuery = (req as any).validated.query || {
+      sort: 'updatedAt',
+      order: 'desc',
+      page: 1,
+      limit: 20
     };
 
     const result = await getProjects(req.user.id, query);
