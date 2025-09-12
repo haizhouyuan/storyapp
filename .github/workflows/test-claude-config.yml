@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write        # Required for OIDC authentication
   pull-requests: write
   issues: write
 
@@ -26,7 +27,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
-          task: "prompt"
           prompt: |
             这是一个连接测试。请执行以下简单任务：
             
@@ -43,10 +43,7 @@ jobs:
             - GitHub Actions CI/CD流水线
             
             请提供你的分析和建议。
-          allow_edits: false       # 测试时不修改代码
-          create_prs: false        # 测试时不创建PR
-          run_tests: false         # 测试时不运行项目测试
-          max_tokens: 50000
+          claude_args: "--no-edit --no-create-pr"
 
   validate-workflows:
     runs-on: ubuntu-latest

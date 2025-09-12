@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write        # Required for OIDC authentication
   pull-requests: write
   issues: write
 
@@ -37,7 +38,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
-          task: "auto"                # Action会根据上下文智能判断
           prompt: |
             你是这个儿童故事应用项目的AI助手。项目包含：
             
@@ -69,10 +69,6 @@ jobs:
             - 适合儿童应用的特殊要求
             
             请根据用户的请求提供帮助。如果需要修改代码，请创建合适的提交和PR。
-          allow_edits: true           # 允许直接在分支上编辑并提交
-          create_prs: true            # 必要时创建新PR提交实现
-          run_tests: true             # 尝试运行项目测试脚本
-          max_tokens: 200000
 
   # 处理特定的故事创作工作流提及
   story-workflow-assistant:

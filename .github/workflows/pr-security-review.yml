@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write        # Required for OIDC authentication
   pull-requests: write   # 允许在PR中评论
   issues: write          # 如需在Issue中记录任务
 
@@ -34,7 +35,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
-          task: "review"                    # 内置模式：做代码/安全审查
           prompt: |
             请对这个儿童故事应用的代码变更进行全面的安全和质量审查，重点关注：
             
@@ -61,26 +61,6 @@ jobs:
             - 会话管理和超时设置
             
             请提供具体的修复建议，包括代码示例。
-          review_scope: "diff"              # 仅审查本次变更
-          post_inline_comments: true        # 逐行评论
-          fail_on_high_risk: true           # 发现高风险问题时置红
-          max_tokens: 200000                # 依据模型配额调整
-          allow_paths: |
-            src/**
-            backend/**
-            frontend/**
-            tests/**
-            *.ts
-            *.js
-            *.tsx
-            *.jsx
-          ignore_paths: |
-            dist/**
-            node_modules/**
-            **/*.md
-            **/*.json
-            coverage/**
-            test-results/**
 
   code-quality-check:
     runs-on: ubuntu-latest
