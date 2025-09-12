@@ -37,13 +37,8 @@ services:
 
   # 应用服务 - 生产版本
   app:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-      args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:18-alpine}
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-    image: storyapp:latest
+    # 生产环境使用预构建的GHCR镜像
+    image: ghcr.io/haizhouyuan/storyapp:sha-latest
     container_name: storyapp_prod
     restart: unless-stopped
     environment:

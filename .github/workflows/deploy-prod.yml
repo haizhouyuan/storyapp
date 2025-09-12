@@ -1,0 +1,39 @@
+name: Deploy to Production (ECS)
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (e.g., sha-xxxxxxxx)"
+        required: true
+        default: sha-${{ github.sha }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # 走环境审批 & 拿环境 secrets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH into ECS & deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -e
+            echo "== Login GHCR =="
+            echo ${{ secrets.GHCR_PAT }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            cd /root/projects/storyapp  # 按你的服务器目录修改
+            sed -i 's|\(image:\s*ghcr\.io/.*/storyapp:\).*|\1${{ github.event.inputs.tag }}|' docker-compose.yml
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
+
+            echo "Deployed tag: ${{ github.event.inputs.tag }}"
