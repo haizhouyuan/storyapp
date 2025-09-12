@@ -3,9 +3,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write          # Needed for PR modifications
   pull-requests: write
-  id-token: write
+  issues: write
+  actions: read
+  id-token: write          # Optional for OIDC, using github_token instead
 
 jobs:
   smoke:
@@ -25,6 +27,17 @@ jobs:
           test -n "$ANTHROPIC_API_KEY" || (echo "❌ Missing ANTHROPIC_API_KEY" && exit 1)
           echo "✅ ANTHROPIC_API_KEY present"
 
+      # Sanity check GitHub token
+      - name: Sanity check GitHub token
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -sfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" | jq .full_name
+
       # Run Claude Action with dual environment variable injection
       - name: Run Claude Action
         uses: anthropics/claude-code-action@v1
@@ -32,6 +45,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}     # 绕过OIDC认证问题
           prompt: "只输出：Smoke OK（不要修改任何文件，不要开 PR）"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 

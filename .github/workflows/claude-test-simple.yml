@@ -6,10 +6,11 @@ on:
     types: [created]
 
 permissions:
-  contents: read
-  id-token: write        # Required for OIDC authentication
+  contents: write          # Needed for PR modifications
   pull-requests: write
   issues: write
+  actions: read
+  id-token: write          # Optional for OIDC, using github_token instead
 
 jobs:
   claude-test:
@@ -57,10 +58,21 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
 
+      - name: Sanity check GitHub token
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -sfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" | jq .full_name
+
       - name: Test Claude Code
         uses: anthropics/claude-code-action@v1
         # Job级env已经包含所有必要的环境变量，不需要重复配置
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}     # 绕过OIDC认证问题
           prompt: |
             Hello! This is a simple connection test for Claude Code on GitHub Actions.
             

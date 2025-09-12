@@ -4,8 +4,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write          # Needed for PR modifications
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write          # Optional for OIDC, using github_token instead
 
 jobs:
   debug-api:
@@ -59,8 +62,19 @@ jobs:
             "$BASE_URL/v1/messages" \
             -w "HTTP Status: %{http_code}\n" || echo "Direct auth failed"
 
+      - name: Sanity check GitHub token
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -sfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" | jq .full_name
+
       - name: Test Claude Code with Minimal Settings
         uses: anthropics/claude-code-action@v1
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}     # 绕过OIDC认证问题
           prompt: "Test connection"
 

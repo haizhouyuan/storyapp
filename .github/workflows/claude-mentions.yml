@@ -6,9 +6,10 @@ on:
 
 permissions:
   contents: write
-  id-token: write        # Required for OIDC authentication
   pull-requests: write
   issues: write
+  actions: read
+  id-token: write        # Optional for OIDC, using github_token instead
 
 jobs:
   claude-response:
@@ -35,9 +36,20 @@ jobs:
           if [ -d "backend" ]; then cd backend && npm install && cd ..; fi
           if [ -d "frontend" ]; then cd frontend && npm install && cd ..; fi
 
+      - name: Sanity check GitHub token
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -sfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" | jq .full_name
+
       - name: Respond with Claude Code
         uses: anthropics/claude-code-action@v1
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}    # 绕过OIDC认证问题
           prompt: |
             你是这个儿童故事应用项目的AI助手。项目包含：
             
@@ -83,9 +95,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Sanity check GitHub token (Story Workflow)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -sfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" | jq .full_name
+
       - name: Story Creation Workflow Assistant
         uses: anthropics/claude-code-action@v1
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}    # 绕过OIDC认证问题
           prompt: |
             你是故事创作工作流专家，基于我们的故事创作方法论来协助用户。
             
