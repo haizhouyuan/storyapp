@@ -1,7 +1,8 @@
 // Story Creation Workflow System - TypeScript Types
 // 故事创作工作流系统 - 类型定义
 
-import { ObjectId } from 'mongodb';
+// Use custom ObjectId type to avoid MongoDB dependency in build
+export type ObjectId = string;
 
 // ========== 基础类型 ==========
 

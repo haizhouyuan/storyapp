@@ -15,12 +15,13 @@
     "sourceMap": true
   },
   "include": [
-    "backend/**/*",
-    "shared/**/*",
-    "test-validation.js"
+    "backend/src/**/*",
+    "shared/**/*"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "**/*.test.*",
+    "**/tests/**/*"
   ]
 }
