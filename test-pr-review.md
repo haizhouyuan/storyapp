@@ -21,3 +21,8 @@ Claude应该能够：
 - 简化了工作流配置，移除自定义提示
 - 使用标准Claude Code Action v1配置
 - 应该能正常工作了
+
+## 第二次修复
+- 添加了explicit prompt参数
+- 添加了checkout步骤和正确的权限
+- 应该能解决"No trigger found"问题
