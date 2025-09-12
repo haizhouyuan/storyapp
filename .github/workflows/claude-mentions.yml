@@ -37,8 +37,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_API_KEY }}
           settings: |
-            "anthropic": {
-              "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+            {
+              "anthropic": {
+                "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+              }
             }
           prompt: |
             你是这个儿童故事应用项目的AI助手。项目包含：
@@ -87,8 +89,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_API_KEY }}
           settings: |
-            "anthropic": {
-              "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+            {
+              "anthropic": {
+                "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+              }
             }
           prompt: |
             你是故事创作工作流专家，基于我们的故事创作方法论来协助用户。

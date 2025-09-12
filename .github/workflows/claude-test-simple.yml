@@ -25,8 +25,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_API_KEY }}
           settings: |
-            "anthropic": {
-              "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+            {
+              "anthropic": {
+                "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+              }
             }
           prompt: |
             Hello! This is a simple connection test for Claude Code on GitHub Actions.
