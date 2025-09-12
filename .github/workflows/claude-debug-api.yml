@@ -31,18 +31,35 @@ jobs:
           echo "API Key length: ${#API_KEY}"
           echo "API Key prefix: ${API_KEY:0:10}..."
           
-          # Test a simple API call
+          # Test different authentication methods
+          echo "Testing x-api-key auth:"
           curl -s \
             -H "Content-Type: application/json" \
             -H "x-api-key: $API_KEY" \
             -d '{"model": "claude-3-5-sonnet-20241022", "max_tokens": 10, "messages": [{"role": "user", "content": "Hi"}]}' \
             "$BASE_URL/v1/messages" \
-            -w "HTTP Status: %{http_code}\n" || echo "API call failed"
+            -w "HTTP Status: %{http_code}\n" || echo "x-api-key auth failed"
+          
+          echo "Testing Authorization Bearer auth:"
+          curl -s \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $API_KEY" \
+            -d '{"model": "claude-3-5-sonnet-20241022", "max_tokens": 10, "messages": [{"role": "user", "content": "Hi"}]}' \
+            "$BASE_URL/v1/messages" \
+            -w "HTTP Status: %{http_code}\n" || echo "Bearer auth failed"
+          
+          echo "Testing Authorization with x-api-key prefix:"
+          curl -s \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $API_KEY" \
+            -d '{"model": "claude-3-5-sonnet-20241022", "max_tokens": 10, "messages": [{"role": "user", "content": "Hi"}]}' \
+            "$BASE_URL/v1/messages" \
+            -w "HTTP Status: %{http_code}\n" || echo "Direct auth failed"
 
       - name: Test Claude Code with Minimal Settings
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.CLAUDE_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_API_KEY }}
           settings: |
             {
               "anthropic": {

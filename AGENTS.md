@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+## Project Overview
+
+这是一个儿童睡前互动故事应用，使用AI生成个性化故事内容，让孩子通过选择不同的情节分支来推动故事发展。
+
+### 技术栈
+- **前端**: React + TypeScript + Tailwind CSS + Framer Motion
+- **后端**: Node.js + Express + TypeScript
+- **数据库**: MongoDB（通过 Docker Compose 内置 `mongo` 服务）
+- **AI服务**: DeepSeek API
+- **测试**: Playwright E2E测试
+- **监控**: 详细日志记录系统 + Appsmith可视化后台
+
 ## Project Structure & Module Organization
 - `frontend/` – React + TypeScript UI (Tailwind). Key dirs: `src/components/`, `src/pages/`, `src/utils/`.
 - `backend/` – Express + TypeScript API. Key dirs: `src/routes/`, `src/services/`, `src/config/`.
@@ -8,13 +20,51 @@
 - `docs/` – Documentation; `.env.example` at repo root (copy to `backend/.env`).
 
 ## Build, Test, and Development Commands
-- Install all deps: `npm run install:all`
-- Run both servers (dev): `npm run dev`
-- Build all: `npm run build`
-- Frontend only: `cd frontend && npm start` | `npm run build`
-- Backend only: `cd backend && npm run dev` | `npm run build` | `npm start`
-- E2E tests (Playwright): `npm test` (auto-starts web servers per config)
-- Backend unit tests (Jest): `cd backend && npm test`
+
+### 安装依赖
+```bash
+# 安装所有依赖（推荐）
+npm run install:all
+
+# 或分别安装
+npm install
+cd backend && npm install
+cd ../frontend && npm install --legacy-peer-deps
+```
+
+### 开发模式
+```bash
+# 同时启动前后端开发服务器
+npm run dev
+
+# 分别启动
+npm run dev:backend  # 后端: http://localhost:5000
+npm run dev:frontend # 前端: http://localhost:3000
+```
+
+### 构建和部署
+```bash
+# 构建生产版本
+npm run build
+
+# 启动生产服务器
+npm run start
+```
+
+### 测试
+```bash
+# 安装Playwright浏览器
+npx playwright install
+
+# 运行E2E测试
+npm test
+
+# 运行后端测试
+cd backend && npm test
+
+# 测试日志记录系统（新增）
+node test-logging-system.js
+```
 
 ## Coding Style & Naming Conventions
 - TypeScript everywhere; prefer explicit types at module boundaries.
@@ -58,6 +108,15 @@
 - `GET /api/health` – Health check.
 - `GET /api/tts` – TTS placeholder.
 
+### 管理后台API（新增）
+- `GET /api/admin/stats` - 获取系统统计数据
+- `GET /api/admin/logs` - 获取分页日志数据
+- `GET /api/admin/performance` - 获取性能指标
+- `GET /api/admin/sessions/active` - 获取活跃会话
+- `GET /api/admin/logs/:sessionId` - 获取特定会话日志
+- `POST /api/admin/logs/export` - 导出日志数据
+- `DELETE /api/admin/logs/cleanup` - 清理过期日志
+
 ## Environment Variables
 
 Backend (root `.env`, used by Docker Compose):
@@ -70,6 +129,12 @@ DEEPSEEK_API_URL=https://api.deepseek.com
 # MongoDB (optional overrides)
 # MONGODB_URI=mongodb://mongo:27017/storyapp
 # MONGODB_DB_NAME=storyapp
+
+# 日志记录配置（新增）
+ENABLE_DETAILED_LOGGING=true
+ENABLE_DB_LOGGING=true
+LOG_LEVEL=info
+LOG_RETENTION_DAYS=30
 ```
 
 Frontend (`frontend/.env`, optional for local dev):
@@ -82,16 +147,43 @@ REACT_APP_DEBUG=true
 
 ## Database Schema (MongoDB)
 
-Collection: `stories`
+### 主要集合
+
+#### `stories` 集合
 - `_id: ObjectId`
-- `title: string`
-- `content: string` (JSON string or text)
+- `title: string`（必填）
+- `content: string`（必填，通常为包含 `storySegment`/`choices` 的 JSON 字符串）
 - `created_at: Date`
 - `updated_at: Date`
 
-Indexes initialized at startup:
-- `created_at` (desc)
-- `title` (text)
+#### `story_logs` 集合（新增）
+- `_id: ObjectId`
+- `sessionId: string`（会话唯一标识）
+- `timestamp: Date`（事件时间戳）
+- `logLevel: string`（日志级别：debug/info/warn/error）
+- `eventType: string`（事件类型）
+- `message: string`（日志消息）
+- `data: Object`（业务数据）
+- `performance: Object`（性能指标）
+- `context: Object`（上下文信息）
+- `stackTrace: string`（错误堆栈，可选）
+
+### 数据库索引
+
+启动时自动创建索引：
+
+**stories集合**：
+- `created_at` 降序索引（列表排序）
+- `title` 文本索引（全文搜索）
+
+**story_logs集合**：
+- `sessionId` 索引（会话查询）
+- `timestamp` 降序索引（时间排序）
+- `eventType` 索引（事件类型筛选）
+- `logLevel` 索引（日志级别筛选）
+- `{sessionId: 1, timestamp: -1}` 复合索引
+- `{eventType: 1, timestamp: -1}` 复合索引
+- `{timestamp: 1}` TTL索引（30天自动过期）
 
 ## Story Generation Flow
 1. Client calls `POST /api/generate-story` with user inputs.
@@ -151,3 +243,54 @@ Note: Prefer these step-by-step commands over batch scripts like `deploy.sh`.
 - Accessibility: keyboard navigation and screen readers.
 - Responsive: mobile and desktop.
 - Code style: TypeScript, single-responsibility components/functions, semantic commits.
+
+## 日志记录和监控系统（新增）
+
+### 系统概述
+项目集成了详细的日志记录系统和Appsmith可视化后台，用于监控故事生成流程的每个步骤。
+
+### 快速测试
+```bash
+# 运行完整的系统功能测试
+node test-logging-system.js
+```
+
+### 主要功能
+1. **会话级别跟踪** - 每个故事生成分配唯一会话ID
+2. **详细步骤记录** - AI API调用、JSON解析、质量检查等
+3. **性能指标收集** - 响应时间、Token使用量、错误率
+4. **可视化监控** - Appsmith构建的管理后台界面
+5. **数据导出功能** - 支持JSON/CSV格式导出
+6. **自动清理机制** - 过期日志自动删除（30天）
+
+### Appsmith后台配置
+1. **导入配置文件**：
+   ```bash
+   # 使用项目根目录的配置文件
+   appsmith-story-admin.json
+   ```
+
+2. **查看配置指南**：
+   ```bash
+   # 详细的Appsmith搭建文档
+   docs/APPSMITH_SETUP.md
+   ```
+
+3. **数据源配置**：
+   - MongoDB: `mongodb://localhost:27017/storyapp`
+   - REST API: `http://localhost:5001/api/admin`
+
+### 监控指标
+- **系统概览**: 总会话数、24小时活跃数、成功率
+- **性能分析**: API响应时间趋势、Token使用统计
+- **错误监控**: 错误类型分布、失败率趋势
+- **用户行为**: 热门主题排行、使用模式分析
+
+### 日志事件类型
+- `session_start/session_end` - 会话生命周期
+- `story_generation_start/complete` - 故事生成流程
+- `ai_api_request/response/error` - AI API调用
+- `json_parse_start/success/error` - JSON解析
+- `content_validation` - 内容验证
+- `quality_check` - 质量检查
+- `db_save_start/success/error` - 数据库操作

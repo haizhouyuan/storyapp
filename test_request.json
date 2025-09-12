@@ -1,0 +1,10 @@
+{
+  "model": "claude-3-5-haiku-20241022",
+  "max_tokens": 50,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, which model are you?"
+    }
+  ]
+}
