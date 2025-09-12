@@ -9,19 +9,45 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  id-token: write
 
 jobs:
   claude-review:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Auto Review PR with Claude
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            请对这个PR进行全面的代码评审。重点关注：
+            
+            ## 评审要点
+            1. **代码质量**：代码结构、可读性、最佳实践
+            2. **安全性**：潜在的安全漏洞和风险  
+            3. **性能**：性能问题和优化建议
+            4. **测试**：测试覆盖度和测试质量
+            5. **儿童应用特殊要求**：
+               - COPPA合规性（儿童隐私保护）
+               - 内容安全性和过滤
+               - 用户体验友好性
+            
+            ## 输出要求
+            - 提供具体的改进建议
+            - 标注严重程度（🔴 严重 / 🟡 建议 / 🟢 良好）
+            - 给出代码示例（如适用）
+            - 总体评分和建议
+            
+            请在PR中留下详细的评审评论。
