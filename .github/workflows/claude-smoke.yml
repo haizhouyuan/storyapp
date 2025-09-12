@@ -35,7 +35,7 @@ jobs:
       - name: Write Claude settings with API key
         run: |
           mkdir -p ~/.claude
-          cat > ~/.claude/settings.json <<'JSON'
+          cat > ~/.claude/settings.json <<JSON
           {
             "api_keys": {
               "anthropic": "${ANTHROPIC_API_KEY}"
