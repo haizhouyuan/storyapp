@@ -3,14 +3,9 @@
 
 services:
   app:
-    # 本地构建，不依赖GHCR
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:18-alpine}
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-    image: storyapp:dev
+    # 使用 Node.js 基础镜像，无需构建
+    image: node:18-alpine
+    working_dir: /app
     container_name: storyapp-dev
     
     # 开发环境变量
@@ -19,29 +14,42 @@ services:
       - FRONTEND_URL=http://localhost:3000
       - ENABLE_DETAILED_LOGGING=true
       - LOG_LEVEL=debug
+      - MONGODB_URI=mongodb://mongo:27017/storyapp_dev
+      - MONGODB_DB_NAME=storyapp_dev
     
-    # 热更新模式 - 挂载源码
-    command: ["npm", "run", "dev"]  # 需要后端package.json中有dev脚本
+    # 开发启动命令 - 安装依赖并启动
+    command: sh -c "
+      npm config set registry https://registry.npmmirror.com &&
+      echo 'Installing root dependencies...' &&
+      npm install &&
+      echo 'Installing backend dependencies (with dev dependencies)...' &&
+      cd backend && npm install &&
+      echo 'Installing shared dependencies...' &&
+      cd ../shared && npm install &&
+      echo 'Starting backend development server...' &&
+      cd ../backend && npm run dev
+      "
+    
+    # 挂载源码实现热更新
     volumes:
-      # 挂载源码目录实现热更新
-      - ./backend:/app/backend
-      - ./shared:/app/shared
-      - ./frontend/build:/app/backend/dist/public  # 前端构建结果
-      # 保护node_modules不被覆盖
+      - .:/app
       - /app/node_modules
-      - /app/backend/node_modules
+      - /app/backend/node_modules  
       - /app/shared/node_modules
     
     # 开发端口映射
     ports:
-      - "5000:5000"  # 直接映射，便于本地调试
-    
-    # 开发环境不暴露数据库端口（安全考虑）
+      - "5001:5000"  # 外部5001映射到容器5000
   
   mongo:
-    # 开发数据库配置
+    # 开发数据库配置 - 简化认证
     environment:
       MONGO_INITDB_DATABASE: storyapp_dev
+      # 开发环境不使用认证
+      MONGO_INITDB_ROOT_USERNAME: 
+      MONGO_INITDB_ROOT_PASSWORD: 
     # 暴露端口便于本地工具连接
     ports:
       - "27017:27017"
+    # 开发环境不使用认证
+    command: mongod --noauth

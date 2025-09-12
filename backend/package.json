@@ -4,7 +4,7 @@
   "description": "儿童故事应用后端API服务",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
+    "dev": "nodemon",
     "build": "npx tsc",
     "start": "node dist/index.js",
     "test": "jest"
