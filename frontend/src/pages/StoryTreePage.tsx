@@ -231,13 +231,16 @@ export default function StoryTreePage() {
 
                 {/* 故事文本 */}
                 <div className="pr-child-xl">
-                  <p className="
-                    font-child 
-                    text-child-lg 
-                    text-gray-800 
-                    leading-relaxed
-                    whitespace-pre-wrap
-                  ">
+                  <p 
+                    data-testid="story-content"
+                    className="
+                      font-child 
+                      text-child-lg 
+                      text-gray-800 
+                      leading-relaxed
+                      whitespace-pre-wrap
+                    "
+                  >
                     {currentNode.segment}
                   </p>
                 </div>
