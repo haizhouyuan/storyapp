@@ -1,5 +1,5 @@
 // Timeline Service for Story Workflow
-import { TimelineEvent } from '../../types/workflow';
+import { TimelineEvent } from '@storyapp/shared';
 
 // Mock implementation - replace with actual database operations
 let mockEvents: TimelineEvent[] = [];

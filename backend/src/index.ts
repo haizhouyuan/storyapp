@@ -1,65 +1,95 @@
 import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-import dotenv from 'dotenv';
 import path from 'path';
+import { serverConfig, securityConfig, validateConfig } from './config';
+
+// Import observability and security middleware
+import {
+  securityMiddleware,
+  compressionMiddleware,
+  generalRateLimit,
+  authRateLimit,
+  createProjectRateLimit,
+  validationRateLimit,
+  httpMetricsMiddleware,
+  errorMetricsMiddleware,
+  requestIdMiddleware,
+  healthCheckMiddleware,
+  readyCheckMiddleware,
+  metricsMiddleware
+} from './middleware/observability';
+import logger, { createLogger } from './config/logger';
 
 // 导入路由
 import storyRoutes from './routes/stories';
 import healthRoutes from './routes/health';
 import adminRoutes from './routes/admin';
+import workflowProjectsRoutes from './routes/workflow/projects';
+import workflowMiraclesRoutes from './routes/workflow/miracles';
+import docsRoutes from './routes/docs';
 
 // 导入数据库连接
 import { connectToDatabase, checkDatabaseHealth } from './config/database';
 import { initializeDatabase } from './config/initializeDatabase';
 
-// 加载环境变量
-dotenv.config({ path: path.join(__dirname, "..", "..", ".env") });
+// Validate configuration on startup
+validateConfig();
 
 const app = express();
-const PORT = process.env.PORT || 5001;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const { port: PORT, frontendUrl: FRONTEND_URL } = serverConfig;
 
-// 安全中间件
-app.use(helmet({
-  crossOriginEmbedderPolicy: false, // 允许跨域嵌入
-  contentSecurityPolicy: false     // 简化CSP配置
-}));
+const appLogger = createLogger('app');
 
-// CORS配置
+// Trust proxy for accurate IP addresses
+app.set('trust proxy', 1);
+
+// Apply middleware in order of priority:
+
+// 1. Request tracing and ID generation
+app.use(requestIdMiddleware);
+
+// 2. Health/ready/metrics endpoints (before other middleware)
+app.use(healthCheckMiddleware);
+app.use(readyCheckMiddleware);
+app.use(metricsMiddleware);
+
+// 3. Security middleware
+app.use(securityMiddleware);
+
+// 4. CORS configuration
 app.use(cors({
-  origin: [FRONTEND_URL, 'http://localhost:3000'],
+  origin: [...securityConfig.corsOrigins, FRONTEND_URL],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Correlation-ID']
 }));
 
-// 速率限制
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15分钟
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),      // 每IP最多100次请求
-  message: {
-    error: '请求次数过多，请稍后再试',
-    code: 'RATE_LIMIT_EXCEEDED'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-});
+// 5. Compression for response optimization
+app.use(compressionMiddleware);
 
-app.use(limiter);
+// 6. HTTP metrics and logging
+app.use(httpMetricsMiddleware);
 
-// 请求体解析
+// 7. Request body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// 请求日志中间件
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
+// 8. General rate limiting
+app.use(generalRateLimit);
 
-// 注册路由
+// 9. Route-specific middleware and endpoints
+
+// Authentication routes with stricter rate limiting
+app.use('/api/auth', authRateLimit);
+
+// Workflow routes with specific rate limiters
+app.use('/api/workflow/projects', createProjectRateLimit, workflowProjectsRoutes);
+app.use('/api/workflow', validationRateLimit, workflowMiraclesRoutes);
+
+// API documentation routes (public)
+app.use('/docs', docsRoutes);
+
+// Main API routes
 app.use('/api/health', healthRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', storyRoutes);
@@ -79,61 +109,77 @@ if (process.env.NODE_ENV === 'production') {
 
 // 404处理
 app.use('*', (req, res) => {
+  appLogger.warn({
+    method: req.method,
+    url: req.originalUrl,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  }, `404 - Path not found: ${req.originalUrl}`);
+  
   res.status(404).json({
-    error: '接口不存在',
-    message: `路径 ${req.originalUrl} 未找到`,
+    success: false,
+    error: 'Endpoint not found',
+    message: `Path ${req.originalUrl} not found`,
     code: 'NOT_FOUND'
   });
 });
 
-// 全局错误处理
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('服务器错误:', err);
-  
-  res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' ? '服务器内部错误' : err.message,
-    code: err.code || 'INTERNAL_SERVER_ERROR',
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
-  });
-});
+// 全局错误处理 (must be last middleware)
+app.use(errorMetricsMiddleware);
 
 // 启动服务器并初始化数据库
 async function startServer() {
   try {
+    appLogger.info('Starting server initialization...');
+    
     // 初始化数据库连接
+    appLogger.info('Connecting to database...');
     await connectToDatabase();
+    appLogger.info('Database connection established');
     
     // 初始化数据库索引和配置
+    appLogger.info('Initializing database indexes and configuration...');
     await initializeDatabase();
+    appLogger.info('Database initialization completed');
     
-    app.listen(PORT, () => {
-      console.log(`🚀 服务器启动成功！`);
-      console.log(`📍 端口: ${PORT}`);
-      console.log(`🌐 环境: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔗 健康检查: http://localhost:${PORT}/api/health`);
-      console.log(`📊 管理后台API: http://localhost:${PORT}/api/admin`);
-      
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`🎨 前端地址: ${FRONTEND_URL}`);
-      }
+    const server = app.listen(PORT, () => {
+      appLogger.info({
+        port: PORT,
+        environment: process.env.NODE_ENV || 'development',
+        frontendUrl: FRONTEND_URL,
+        endpoints: {
+          health: `http://localhost:${PORT}/api/health`,
+          ready: `http://localhost:${PORT}/api/ready`,
+          metrics: `http://localhost:${PORT}/metrics`,
+          admin: `http://localhost:${PORT}/api/admin`
+        }
+      }, 'Server started successfully');
     });
+    
+    // Graceful shutdown handling
+    const gracefulShutdown = (signal: string) => {
+      appLogger.info(`Received ${signal}, starting graceful shutdown...`);
+      
+      server.close((err) => {
+        if (err) {
+          appLogger.error({ err }, 'Error during server shutdown');
+          process.exit(1);
+        }
+        
+        appLogger.info('Server closed successfully');
+        process.exit(0);
+      });
+    };
+    
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    
   } catch (error) {
-    console.error('服务器启动失败:', error);
+    appLogger.error({ err: error }, 'Server startup failed');
     process.exit(1);
   }
 }
 
 startServer();
-
-// 优雅关闭
-process.on('SIGTERM', () => {
-  console.log('收到SIGTERM信号，正在关闭服务器...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('收到SIGINT信号，正在关闭服务器...');
-  process.exit(0);
-});
 
 export default app;

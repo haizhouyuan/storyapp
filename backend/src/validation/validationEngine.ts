@@ -15,7 +15,7 @@ import {
   ValidationRule,
   DEFAULT_VALIDATION_RULES,
   SenseType
-} from '../types/workflow';
+} from '@storyapp/shared';
 import { getProjectById } from '../services/workflow/projectService';
 import { getMiraclesByProjectId } from '../services/workflow/miracleService';
 import { getCluesByProjectId } from '../services/workflow/clueService';

@@ -1,5 +1,5 @@
 // Miracle Service for Story Workflow
-import { Miracle, GenerateMiracleRequest, UpdateMiracleRequest, MiracleNode } from '../../types/workflow';
+import { Miracle, GenerateMiracleRequest, UpdateMiracleRequest, MiracleNode } from '@storyapp/shared';
 // Using string ObjectId for temporary build compatibility
 
 // Mock implementation - replace with actual database operations
