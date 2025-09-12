@@ -22,10 +22,12 @@ jobs:
 
       - name: Test Claude Code
         uses: anthropics/claude-code-action@v1
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
+          anthropic_api_key: ${{ secrets.CLAUDE_API_KEY }}
+          settings: |
+            "anthropic": {
+              "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
+            }
           prompt: |
             Hello! This is a simple connection test for Claude Code on GitHub Actions.
             
