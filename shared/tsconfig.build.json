@@ -6,7 +6,10 @@
     "declaration": true,
     "declarationMap": true,
     "emitDeclarationOnly": false,
-    "rootDir": "src"
+    "rootDir": "src",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2020"
   },
   "include": ["src/**/*"]
 }
