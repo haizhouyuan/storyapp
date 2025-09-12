@@ -8,7 +8,7 @@ import {
   ApiResponse,
   PaginatedResponse,
   SearchQuery
-} from '../../../shared/types/workflow';
+} from '../../types/workflow';
 import { 
   createProject,
   getProjectById,
@@ -208,7 +208,7 @@ router.post('/:id/stages/:stage', authenticate, authorize('project:write'), asyn
     const stage = req.params.stage as WorkflowStage;
     const stageData = req.body;
 
-    if (!WORKFLOW_STAGES[stage]) {
+    if (!WORKFLOW_STAGES.includes(stage)) {
       return res.status(400).json({
         success: false,
         message: '无效的工作流阶段'
@@ -221,7 +221,7 @@ router.post('/:id/stages/:stage', authenticate, authorize('project:write'), asyn
     res.json({
       success: true,
       data: result,
-      message: `项目已推进到${WORKFLOW_STAGES[stage]}阶段`
+      message: `项目已推进到${stage}阶段`
     } as ApiResponse);
   } catch (error: any) {
     console.error('推进项目阶段失败:', error);

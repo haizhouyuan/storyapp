@@ -1,5 +1,5 @@
 // Misdirection Service for Story Workflow
-import { Misdirection } from '../../../shared/types/workflow';
+import { Misdirection } from '../../types/workflow';
 
 // Mock implementation - replace with actual database operations
 let mockMisdirections: Misdirection[] = [];

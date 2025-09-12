@@ -1,4 +1,4 @@
-import type { CreateProjectRequest } from '../../../shared/types/workflow';
+import type { CreateProjectRequest } from '../types/workflow';
 
 export function validateCreateProject(input: CreateProjectRequest) {
   const errors: string[] = [];

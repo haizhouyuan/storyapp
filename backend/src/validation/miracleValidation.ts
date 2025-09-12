@@ -1,4 +1,4 @@
-import type { UpdateMiracleRequest } from '../../../shared/types/workflow';
+import type { UpdateMiracleRequest } from '../types/workflow';
 
 export function validateMiracle(input: UpdateMiracleRequest) {
   const errors: string[] = [];

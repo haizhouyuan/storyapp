@@ -1,5 +1,5 @@
 // Character Service for Story Workflow
-import { Character } from '../../../shared/types/workflow';
+import { Character } from '../../types/workflow';
 
 // Mock implementation - replace with actual database operations
 let mockCharacters: Character[] = [];

@@ -1,5 +1,5 @@
 // Prop Service for Story Workflow
-import { Prop } from '../../../shared/types/workflow';
+import { Prop } from '../../types/workflow';
 
 // Mock implementation - replace with actual database operations
 let mockProps: Prop[] = [];

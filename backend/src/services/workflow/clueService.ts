@@ -1,5 +1,5 @@
 // Clue Service for Story Workflow
-import { Clue } from '../../../shared/types/workflow';
+import { Clue } from '../../types/workflow';
 
 // Mock implementation - replace with actual database operations
 let mockClues: Clue[] = [];

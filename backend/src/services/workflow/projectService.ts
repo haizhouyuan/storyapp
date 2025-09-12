@@ -1,5 +1,5 @@
 // Project Service for Story Workflow
-import { Project, SearchQuery, ProjectMetrics, Dashboard } from '../../../shared/types/workflow';
+import { Project, SearchQuery, ProjectMetrics, Dashboard, CreateProjectRequest, WorkflowStage, StageProgress } from '../../types/workflow';
 
 // Mock implementation - replace with actual database operations
 let mockProjects: Project[] = [];
@@ -8,7 +8,26 @@ export async function getProjectById(projectId: string): Promise<Project | null>
   return mockProjects.find(p => p.id === projectId) || null;
 }
 
-export async function createProject(project: Project): Promise<Project> {
+export async function createProject(data: CreateProjectRequest & { ownerId: string }): Promise<Project> {
+  const project: Project = {
+    id: Math.random().toString(36).substr(2, 9),
+    title: data.title,
+    series: data.series,
+    genreTags: data.genreTags,
+    themes: data.themes,
+    targetWords: data.targetWords,
+    dod: [], // Default to empty DOD
+    status: 'project_init' as WorkflowStage,
+    ownerId: data.ownerId,
+    collaborators: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    stageProgress: {} as Record<WorkflowStage, StageProgress>,
+    metadata: {
+      targetAudience: data.targetAudience,
+      estimatedTimeline: data.estimatedTimeline
+    }
+  };
   mockProjects.push(project);
   return project;
 }

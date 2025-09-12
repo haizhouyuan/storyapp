@@ -5,7 +5,7 @@ import {
   GenerateMiracleRequest,
   GenerateMiracleResponse,
   ApiResponse
-} from '../../../shared/types/workflow';
+} from '../../types/workflow';
 import { 
   createMiracle,
   getMiracleByProjectId,
