@@ -1,0 +1,155 @@
+name: PR Security & Quality Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write   # 允许在PR中评论
+  issues: write          # 如需在Issue中记录任务
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Claude Code Security Review
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "review"                    # 内置模式：做代码/安全审查
+          prompt: |
+            请对这个儿童故事应用的代码变更进行全面的安全和质量审查，重点关注：
+            
+            ## 安全检查
+            - SQL注入风险（特别是故事数据查询）
+            - XSS漏洞（用户输入的故事内容）
+            - 身份验证和授权缺陷
+            - 不安全的数据处理（儿童隐私保护）
+            - 依赖项漏洞
+            - API端点安全性
+            
+            ## 质量检查
+            - TypeScript/JavaScript最佳实践
+            - React组件设计模式
+            - Node.js后端安全实践
+            - 错误处理完整性
+            - 性能潜在问题
+            - 可维护性改进建议
+            
+            ## 特殊关注点（儿童应用）
+            - 儿童数据隐私保护（COPPA合规）
+            - 内容过滤和审核机制
+            - 家长控制功能安全性
+            - 会话管理和超时设置
+            
+            请提供具体的修复建议，包括代码示例。
+          review_scope: "diff"              # 仅审查本次变更
+          post_inline_comments: true        # 逐行评论
+          fail_on_high_risk: true           # 发现高风险问题时置红
+          max_tokens: 200000                # 依据模型配额调整
+          allow_paths: |
+            src/**
+            backend/**
+            frontend/**
+            tests/**
+            *.ts
+            *.js
+            *.tsx
+            *.jsx
+          ignore_paths: |
+            dist/**
+            node_modules/**
+            **/*.md
+            **/*.json
+            coverage/**
+            test-results/**
+
+  code-quality-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: security-review
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          cd backend && npm install
+          cd ../frontend && npm install
+
+      - name: Run tests and get results
+        continue-on-error: true
+        run: |
+          echo "## Test Results" > test-summary.md
+          
+          # Backend tests
+          echo "### Backend Tests" >> test-summary.md
+          cd backend && npm test 2>&1 | tee ../backend-test-output.txt || true
+          cd ..
+          
+          # Frontend tests
+          echo "### Frontend Tests" >> test-summary.md
+          cd frontend && npm test -- --coverage --watchAll=false 2>&1 | tee ../frontend-test-output.txt || true
+          cd ..
+          
+          # E2E tests
+          echo "### E2E Tests" >> test-summary.md
+          npm test 2>&1 | tee e2e-test-output.txt || true
+
+      - name: Claude Code Test Analysis & Fix
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            我是你项目的测试分析助手。请分析测试结果并提供修复建议：
+            
+            ## 任务
+            1. 分析测试失败的根本原因
+            2. 提供具体的修复方案
+            3. 如果可能，直接实现简单的修复
+            4. 为复杂问题创建详细的修复指南
+            
+            ## 测试输出文件
+            - backend-test-output.txt: 后端测试结果
+            - frontend-test-output.txt: 前端测试结果  
+            - e2e-test-output.txt: E2E测试结果
+            
+            ## 项目上下文
+            - 这是一个儿童故事应用，包含React前端、Node.js后端和Playwright E2E测试
+            - 后端使用Express + MongoDB
+            - 前端使用React + TypeScript
+            - 测试框架：Jest (单元测试) + Playwright (E2E)
+            
+            请先分析所有测试输出，然后针对失败的测试提供修复方案。
+          allow_edits: true           # 允许直接修改代码
+          create_prs: false           # 不创建新PR，在当前PR中修复
+          run_tests: true             # 修复后重新运行测试验证

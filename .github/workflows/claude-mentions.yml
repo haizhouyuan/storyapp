@@ -1,0 +1,136 @@
+name: Respond to @claude Mentions
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-response:
+    if: contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          if [ -d "backend" ]; then cd backend && npm install && cd ..; fi
+          if [ -d "frontend" ]; then cd frontend && npm install && cd ..; fi
+
+      - name: Respond with Claude Code
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "auto"                # Action会根据上下文智能判断
+          prompt: |
+            你是这个儿童故事应用项目的AI助手。项目包含：
+            
+            ## 项目结构
+            - `backend/`: Node.js + Express + MongoDB 后端API
+            - `frontend/`: React + TypeScript 前端应用
+            - `tests/`: Playwright E2E测试
+            - 主要功能：儿童互动故事生成、阅读和管理
+            
+            ## 你的能力
+            1. **代码审查和改进建议**
+            2. **实现新功能和修复Bug**
+            3. **编写和修复测试**
+            4. **重构和优化代码**
+            5. **文档更新和说明**
+            6. **安全性分析和改进**
+            
+            ## 特殊关注点
+            - 儿童数据隐私保护（COPPA合规）
+            - 安全的内容过滤
+            - 用户友好的界面设计
+            - 高质量的代码标准
+            - 全面的测试覆盖
+            
+            ## 响应风格
+            - 提供清晰、可执行的建议
+            - 包含具体的代码示例
+            - 考虑最佳实践和安全性
+            - 适合儿童应用的特殊要求
+            
+            请根据用户的请求提供帮助。如果需要修改代码，请创建合适的提交和PR。
+          allow_edits: true           # 允许直接在分支上编辑并提交
+          create_prs: true            # 必要时创建新PR提交实现
+          run_tests: true             # 尝试运行项目测试脚本
+          max_tokens: 200000
+
+  # 处理特定的故事创作工作流提及
+  story-workflow-assistant:
+    if: contains(github.event.comment.body, '@claude') && (contains(github.event.comment.body, '故事') || contains(github.event.comment.body, 'story') || contains(github.event.comment.body, '剧情') || contains(github.event.comment.body, '角色'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Story Creation Workflow Assistant
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            你是故事创作工作流专家，基于我们的故事创作方法论来协助用户。
+            
+            ## 故事创作工作流框架
+            
+            ### Stage 0: 立项（Project Init）
+            - 类型定义（本格/变格推理、童话、冒险等）
+            - 目标读者年龄段
+            - 字数规模和主题意象
+            
+            ### Stage 1: 核心创意（Center Miracle）
+            - 中心悬念或奇迹设定
+            - 核心冲突和解决机制
+            
+            ### Stage 2: 角色与道具（Characters & Props）
+            - 主要角色设定和动机
+            - 关键道具和线索清单
+            
+            ### Stage 3: 结构搭建（Three-Act Structure）
+            - 三幕九节拍结构
+            - 章节大纲和转折点
+            
+            ### Stage 4-10: 详细开发
+            - 场景设计、对话编写
+            - 线索布置和回收
+            - 语言风格和节奏调整
+            
+            ## 你的任务
+            1. 识别用户当前所在的创作阶段
+            2. 提供该阶段的具体指导和模板
+            3. 如果需要，生成代码来支持创作工具
+            4. 提供创意建议和质量检查
+            
+            ## 特殊考虑（儿童故事）
+            - 年龄适宜的内容和语言
+            - 教育价值和正面价值观
+            - 互动元素和参与度
+            - 安全和健康的主题
+            
+            请根据用户的具体需求，提供相应的创作指导或技术实现支持。
+          allow_edits: true
+          create_prs: false           # 创作辅助不需要新PR
+          run_tests: false

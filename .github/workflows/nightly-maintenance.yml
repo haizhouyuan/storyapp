@@ -1,0 +1,284 @@
+name: Nightly Maintenance by Claude
+
+on:
+  schedule:
+    - cron: "30 18 * * *"   # 每天02:30 CST (18:30 UTC前一天)
+  workflow_dispatch:        # 手动触发
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  dependency-maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          cd backend && npm install
+          cd ../frontend && npm install
+
+      - name: Claude Dependency Analysis & Updates
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            你是项目维护专家。请执行以下依赖维护任务：
+            
+            ## 任务清单
+            1. **分析过期依赖**
+               - 检查根目录、backend/、frontend/的package.json
+               - 识别可以安全更新的小版本和补丁版本
+               - 避免破坏性变更（major版本更新）
+            
+            2. **安全漏洞检查**
+               - 运行 `npm audit` 检查已知安全漏洞
+               - 提供修复建议或自动修复低风险漏洞
+            
+            3. **依赖清理**
+               - 检查是否有未使用的依赖项
+               - 分析Bundle大小和性能影响
+            
+            4. **更新策略**
+               - 优先更新安全补丁
+               - 谨慎处理儿童应用相关的敏感依赖
+               - 确保所有更新通过测试
+            
+            ## 特殊关注（儿童应用）
+            - 数据处理和隐私相关包的安全性
+            - 内容过滤和验证库的稳定性
+            - 前端UI库的accessibility支持
+            
+            请分析当前依赖状态，提供更新建议，并在安全的情况下自动应用更新。
+          allow_edits: true
+          create_prs: true            # 为依赖更新创建独立PR
+          run_tests: true
+          max_tokens: 150000
+
+  code-quality-maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: dependency-maintenance
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          cd backend && npm install
+          cd ../frontend && npm install
+
+      - name: Run tests and collect metrics
+        continue-on-error: true
+        run: |
+          # 生成测试覆盖率报告
+          echo "## Code Quality Report - $(date)" > quality-report.md
+          
+          # Backend测试覆盖率
+          echo "### Backend Test Coverage" >> quality-report.md
+          cd backend && npm test -- --coverage --coverageReporters=text 2>&1 | tee ../backend-coverage.txt
+          cd ..
+          
+          # Frontend测试覆盖率
+          echo "### Frontend Test Coverage" >> quality-report.md
+          cd frontend && npm test -- --coverage --watchAll=false --coverageReporters=text 2>&1 | tee ../frontend-coverage.txt
+          cd ..
+          
+          # E2E测试结果
+          echo "### E2E Test Results" >> quality-report.md
+          npm test 2>&1 | tee e2e-results.txt || true
+          
+          # 代码复杂度分析（如果有工具）
+          echo "### Code Metrics" >> quality-report.md
+          find . -name "*.ts" -o -name "*.js" -o -name "*.tsx" -o -name "*.jsx" | grep -v node_modules | wc -l > code-stats.txt
+          echo "Total source files: $(cat code-stats.txt)" >> quality-report.md
+
+      - name: Claude Code Quality Analysis
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            你是代码质量专家。基于测试报告和代码分析，执行以下维护任务：
+            
+            ## 代码质量分析任务
+            1. **测试覆盖率改进**
+               - 分析backend-coverage.txt和frontend-coverage.txt
+               - 识别覆盖率低的关键模块
+               - 为重要功能补充缺失的测试用例
+            
+            2. **代码异味检测**
+               - 扫描代码中的潜在问题：
+                 * 过长的函数和类
+                 * 重复代码片段
+                 * 复杂的条件逻辑
+                 * 未处理的错误情况
+            
+            3. **性能优化建议**
+               - 识别可能的性能瓶颈
+               - 提供优化建议（特别是用户体验相关）
+               - 检查React组件的渲染优化
+            
+            4. **文档完整性**
+               - 检查关键函数和组件的文档
+               - 更新README中的过时信息
+               - 确保API文档与实际代码一致
+            
+            ## 儿童应用特殊考虑
+            - 确保所有用户输入都有适当的验证
+            - 检查内容过滤机制的完整性
+            - 验证隐私保护措施的实现
+            - 确保界面对儿童友好且易用
+            
+            ## 执行策略
+            - 优先修复安全和功能相关问题
+            - 为复杂改进创建详细的Issue
+            - 直接实现简单的代码改进
+            - 提供具体的下一步行动建议
+            
+            请分析质量报告并执行相应的改进措施。
+          allow_edits: true
+          create_prs: true
+          run_tests: true
+          max_tokens: 200000
+
+  documentation-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: code-quality-maintenance
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Claude Documentation Maintenance
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            你是文档维护专家。请执行以下文档同步和更新任务：
+            
+            ## 文档维护任务
+            1. **README.md更新**
+               - 确保安装说明与实际依赖版本一致
+               - 更新功能列表和使用示例
+               - 检查链接的有效性
+            
+            2. **API文档同步**
+               - 检查后端API路由与文档的一致性
+               - 更新请求/响应示例
+               - 确保错误码说明完整
+            
+            3. **开发指南完整性**
+               - 更新开发环境设置步骤
+               - 检查构建和部署说明
+               - 补充测试运行指南
+            
+            4. **变更日志维护**
+               - 基于最近的commits生成CHANGELOG条目
+               - 分类功能增加、Bug修复和破坏性变更
+               - 使用适合的版本号标记
+            
+            ## 儿童应用特定文档
+            - 隐私政策和数据处理说明
+            - 内容审核机制说明
+            - 家长指南和安全使用说明
+            - 教育价值和学习目标描述
+            
+            ## 质量标准
+            - 使用清晰、易懂的语言
+            - 提供具体的代码示例
+            - 包含常见问题解答
+            - 确保多语言支持的文档一致性
+            
+            请检查和更新项目文档，确保其准确性和完整性。
+          allow_edits: true
+          create_prs: false           # 文档更新直接提交，不创建PR
+          run_tests: false
+          max_tokens: 150000
+
+  create-maintenance-report:
+    runs-on: ubuntu-latest
+    needs: [dependency-maintenance, code-quality-maintenance, documentation-sync]
+    if: always()  # 即使某些任务失败也要生成报告
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Maintenance Summary
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          task: "prompt"
+          prompt: |
+            你是项目维护报告专家。请创建今日维护活动的总结报告：
+            
+            ## 报告内容
+            1. **执行的维护任务总结**
+               - 依赖更新情况
+               - 代码质量改进
+               - 文档更新内容
+            
+            2. **发现的问题和解决方案**
+               - 安全漏洞及修复状态
+               - 代码质量问题
+               - 性能改进机会
+            
+            3. **创建的PR和Issue**
+               - 列出所有自动创建的PR
+               - 标记需要人工审查的项目
+               - 建议的后续行动
+            
+            4. **指标和趋势**
+               - 测试覆盖率变化
+               - 代码质量评分
+               - 依赖安全状态
+            
+            5. **下次维护建议**
+               - 需要持续关注的问题
+               - 建议的改进计划
+               - 优先级排序
+            
+            ## 报告格式
+            - 使用Markdown格式
+            - 包含必要的统计数据
+            - 提供可操作的建议
+            - 适合开发团队阅读
+            
+            请生成详细的维护报告，并创建对应的Issue用于跟踪。
+          allow_edits: true
+          create_prs: false
+          run_tests: false
+          max_tokens: 100000
