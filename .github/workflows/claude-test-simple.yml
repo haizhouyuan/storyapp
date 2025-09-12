@@ -73,6 +73,7 @@ jobs:
         # Job级env已经包含所有必要的环境变量，不需要重复配置
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}     # 绕过OIDC认证问题
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             Hello! This is a simple connection test for Claude Code on GitHub Actions.
             
