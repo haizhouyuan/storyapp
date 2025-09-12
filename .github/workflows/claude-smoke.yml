@@ -11,37 +11,27 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
 
-    # ❶ Job 级 env，确保绝大多数子进程可见
+    # Job-level environment variables
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
 
     steps:
-      # ❷ 必须先 checkout，否则后续配置 git 会 128
       - uses: actions/checkout@v4
 
-      # ❸ 自检：只判断是否存在，不打印密钥
-      - name: Assert secrets presence (no value printed)
+      # Verify secrets are present without exposing values
+      - name: Assert secrets presence
         run: |
           test -n "$ANTHROPIC_API_KEY" || (echo "❌ Missing ANTHROPIC_API_KEY" && exit 1)
           echo "✅ ANTHROPIC_API_KEY present"
-          echo "ℹ️ BASE_URL: ${ANTHROPIC_BASE_URL:+set}${ANTHROPIC_BASE_URL:-not-set}"
 
-      # ❹ 仅 GAC/自建网关需要：预批准"自定义 API Key"交互
-      - name: Pre-approve custom API key (for gateway)
-        if: env.ANTHROPIC_BASE_URL != ''
-        run: |
-          (cat ~/.claude.json 2>/dev/null || echo 'null') \
-            | jq --arg key "${ANTHROPIC_API_KEY: -20}" \
-                 '(. // {}) | .customApiKeyResponses.approved |= ([.[]?, $key] | unique)' \
-            > ~/.claude.json.tmp && mv ~/.claude.json.tmp ~/.claude.json
-
-      # ❺ 实际调用（dry-run）
-      - name: Run Claude Action (dry-run)
+      # Run Claude Action with dual environment variable injection
+      - name: Run Claude Action
         uses: anthropics/claude-code-action@v1
-        # 额外保险：step 级 env 再注入一次，杜绝继承问题
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
           prompt: "只输出：Smoke OK（不要修改任何文件，不要开 PR）"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+

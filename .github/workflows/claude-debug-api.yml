@@ -30,7 +30,7 @@ jobs:
           curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" "$BASE_URL" || echo "Connection failed"
           
           # Test with API key
-          API_KEY="${{ secrets.CLAUDE_API_KEY }}"
+          API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
           echo "API Key length: ${#API_KEY}"
           echo "API Key prefix: ${API_KEY:0:10}..."
           
@@ -63,3 +63,4 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           prompt: "Test connection"
+
