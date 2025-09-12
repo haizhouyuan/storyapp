@@ -1,4 +1,4 @@
-import type { UpdateMiracleRequest } from '../types/workflow';
+import type { UpdateMiracleRequest } from '@storyapp/shared';
 
 export function validateMiracle(input: UpdateMiracleRequest) {
   const errors: string[] = [];

@@ -8,7 +8,7 @@ import {
   ApiResponse,
   PaginatedResponse,
   SearchQuery
-} from '../../types/workflow';
+} from '@storyapp/shared';
 import { 
   createProject,
   getProjectById,
@@ -208,7 +208,7 @@ router.post('/:id/stages/:stage', authenticate, authorize('project:write'), asyn
     const stage = req.params.stage as WorkflowStage;
     const stageData = req.body;
 
-    if (!WORKFLOW_STAGES.includes(stage)) {
+    if (!Object.keys(WORKFLOW_STAGES).includes(stage)) {
       return res.status(400).json({
         success: false,
         message: '无效的工作流阶段'

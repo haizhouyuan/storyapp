@@ -5,7 +5,7 @@ import {
   GenerateMiracleRequest,
   GenerateMiracleResponse,
   ApiResponse
-} from '../../types/workflow';
+} from '@storyapp/shared';
 import { 
   createMiracle,
   getMiracleByProjectId,

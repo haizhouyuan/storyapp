@@ -1,5 +1,5 @@
 // Scene Service for Story Workflow
-import { Scene } from '../../types/workflow';
+import { Scene } from '@storyapp/shared';
 
 // Mock implementation - replace with actual database operations
 let mockScenes: Scene[] = [];

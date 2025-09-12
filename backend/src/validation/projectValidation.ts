@@ -1,4 +1,4 @@
-import type { CreateProjectRequest } from '../types/workflow';
+import type { CreateProjectRequest } from '@storyapp/shared';
 
 export function validateCreateProject(input: CreateProjectRequest) {
   const errors: string[] = [];

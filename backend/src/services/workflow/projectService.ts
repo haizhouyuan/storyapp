@@ -1,5 +1,5 @@
 // Project Service for Story Workflow
-import { Project, SearchQuery, ProjectMetrics, Dashboard, CreateProjectRequest, WorkflowStage, StageProgress } from '../../types/workflow';
+import { Project, SearchQuery, ProjectMetrics, Dashboard, CreateProjectRequest, WorkflowStage, StageProgress } from '@storyapp/shared';
 
 // Mock implementation - replace with actual database operations
 let mockProjects: Project[] = [];

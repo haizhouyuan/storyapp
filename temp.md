@@ -1,288 +1,342 @@
-太棒了！从你仓库现状和最新日志看，Smoke 已经完全打通 ✅。我按**会卡 CI/CD 的优先级**给你一份“下一步行动清单 + 最小可改代码片段（可直接拷贝）”，并解释为什么要改（都配了仓库内联引用）。
+太棒了！恭喜你把整套 CI/CD 跑通并做了集成测试 ✅
+下面我基于你当前的技术栈与上线流程，给出一份**工程级“下一步改进清单”**（含可直接落地的代码/配置片段）。优先级从高到低排列，尽量做到“改动最小、收益最大”。
 
 ---
 
-## A. 先修 TypeScript 编译/运行的阻塞点（最高优先级）
+# A. “shared 类型/常量”工程化（高优先）
 
-### 1) `projectService` 导出缺失 & 路由引用不匹配
+> 你之前用“复制一份本地类型定义”解决了路径问题，短期能过编译，但后期会**产生漂移**。建议把 `shared` 抽成一个 workspace 包，彻底解决“编译产物可寻址 + 类型单一真源”。
 
-路由里在用 `getProjects / getProjectDashboard / getProjectMetrics`，但 `projectService.ts` 没导出这些函数（只看到 `getProjectById / createProject / updateProject / deleteProject / getProjectsByUser`）。这会直接编译失败。（导入处）、（现有导出）
+**1) 顶层 `package.json` 启用 workspaces**
 
-**最小实现（追加到 `backend/src/services/workflow/projectService.ts`）**——用内存 mock 保证 CI 可过，后续你再接 DB：
-
-```ts
-// 在文件头部补充： 
-import { Project, SearchQuery, ProjectMetrics, Dashboard } from '../../../shared/types/workflow';
-
-export async function getProjects(userId: string, query: SearchQuery): Promise<{ projects: Project[]; total: number }> {
-  const list = mockProjects.filter(
-    p => p.ownerId === userId || p.collaborators?.some(c => c.userId === userId)
-  );
-  const sorted = list.sort((a, b) => +b.updatedAt - +a.updatedAt);
-  const page = Math.max(1, query.page || 1);
-  const limit = Math.min(query.limit || 20, 100);
-  const start = (page - 1) * limit;
-  return { projects: sorted.slice(start, start + limit), total: sorted.length };
-}
-
-export async function getProjectDashboard(projectId: string): Promise<Dashboard> {
-  const p = mockProjects.find(x => x.id === projectId);
-  if (!p) throw new Error('项目不存在');
-  return {
-    projectId,
-    overview: { stage: p.status, completion: 50, health: 'good', lastActivity: new Date() },
-    stageStatus: { [p.status]: { status: 'in_progress', completion: 50, issues: 0 } } as any,
-    recentActivity: [], upcomingTasks: [], criticalIssues: []
-  };
-}
-
-export async function getProjectMetrics(projectId: string): Promise<ProjectMetrics> {
-  return {
-    projectId, generatedAt: new Date(),
-    fairnessScore: 80, senseIndexScore: 72, misdirectionStrength: 35, chekhovRecoveryRate: 60,
-    totalClues: 12, sensoryClues: 8, totalProps: 5, recoveredProps: 3,
-    totalMisdirections: 4, resolvedMisdirections: 2,
-    logicConsistency: 78, readabilityIndex: 82, structuralIntegrity: 75,
-    pacingWave: [], tensionCurve: [], informationDensity: []
-  };
+```json
+{
+  "private": true,
+  "workspaces": ["backend", "frontend", "shared"]
 }
 ```
 
-### 2) `miracleService` 函数签名不一致 & 缺少生成函数
+**2) `shared/package.json`（纯 TS 常量/类型包）**
 
-路由按 `(projectId, data)` 调用 `createMiracle`，并使用 `generateMiracleAlternatives`；但服务层现在是 `createMiracle(miracle: Miracle)`，也没导出生成方法 → 编译/运行会错。（路由调用）、（现有签名）
-
-**修正 `backend/src/services/workflow/miracleService.ts`：**
-
-```ts
-import { Miracle, UpdateMiracleRequest, GenerateMiracleRequest, MiracleNode } from '../../../shared/types/workflow';
-import { ObjectId } from 'mongodb';
-
-let mockMiracles: Miracle[] = [];
-
-export async function getMiracleByProjectId(projectId: string): Promise<Miracle | null> {
-  return mockMiracles.find(m => m.projectId === projectId) || null;
-}
-
-export async function createMiracle(projectId: string, data: UpdateMiracleRequest): Promise<Miracle> {
-  const miracle: Miracle = {
-    id: new ObjectId().toString(),
-    projectId,
-    logline: data.logline,
-    chain: data.chain.map((n, i) => ({ id: String(i + 1), ...n })),
-    tolerances: data.tolerances,
-    replicationNote: data.replicationNote,
-    weaknesses: data.weaknesses || [],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
-  mockMiracles.push(miracle);
-  return miracle;
-}
-
-export async function updateMiracle(miracleId: string, updates: Partial<Miracle>): Promise<Miracle | null> {
-  const idx = mockMiracles.findIndex(m => m.id === miracleId);
-  if (idx === -1) return null;
-  mockMiracles[idx] = { ...mockMiracles[idx], ...updates, updatedAt: new Date() };
-  return mockMiracles[idx];
-}
-
-export async function deleteMiracle(miracleId: string): Promise<boolean> {
-  const idx = mockMiracles.findIndex(m => m.id === miracleId);
-  if (idx === -1) return false;
-  mockMiracles.splice(idx, 1);
-  return true;
-}
-
-export async function generateMiracleAlternatives(req: GenerateMiracleRequest) {
-  // 简单占位实现，保证路由/CI可过
-  const alt = (logline: string): { logline: string; chain: MiracleNode[]; tolerances: string; replicationNote: string } => ({
-    logline,
-    chain: [{ id: '1', node: '装置A', type: 'device', connections: ['2'] }, { id: '2', node: '自然力B', type: 'natural', connections: [] }],
-    tolerances: '±30min',
-    replicationNote: '实验可复现'
-  });
-  return [alt('方案一'), alt('方案二')];
-}
-```
-
-### 3) 缺少认证中间件与校验器文件
-
-路由在用 `authenticate/authorize` 和 `validateCreateProject/validateMiracle`，但仓库内未找到对应实现，编译会找不到模块。（auth/validate 引用）、（miracle validate 引用）
-
-**新增 `backend/src/middleware/auth.ts`（开发占位，后续可换 JWT）：**
-
-```ts
-import { Request, Response, NextFunction } from 'express';
-
-declare global {
-  namespace Express {
-    interface User { id: string; roles?: string[]; permissions?: string[]; }
-    interface Request { user: User; }
+```json
+{
+  "name": "@storyapp/shared",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
   }
 }
-export function authenticate(req: Request, _res: Response, next: NextFunction) {
-  req.user = { id: 'dev-user', roles: ['author'], permissions: ['project:read','project:write','project:delete'] };
+```
+
+**3) `shared/tsconfig.build.json`**
+
+```json
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "declaration": true,
+    "emitDeclarationOnly": false
+  },
+  "include": ["src/**/*"]
+}
+```
+
+**4) 顶层 `tsconfig.base.json` + 路径别名**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["shared/src/*"]
+    }
+  }
+}
+```
+
+**5) backend 引用统一改为：**
+
+```ts
+import { DEFAULT_VALIDATION_RULES } from '@shared/constants/validation';
+```
+
+**6) 构建顺序（本地/CI 都一致）**
+
+```bash
+npm run -w @storyapp/shared build
+npm run -w backend build
+```
+
+**7) Docker 多阶段构建补充（在“后端构建”阶段把 shared 一起编译并拷入运行镜像）**
+
+```dockerfile
+# --- build shared ---
+FROM node:20-alpine AS shared-builder
+WORKDIR /repo
+COPY package.json package-lock.json ./
+COPY shared ./shared
+RUN npm ci --omit=dev=false
+RUN npm run -w @storyapp/shared build
+
+# --- build backend ---
+FROM node:20-alpine AS backend-builder
+WORKDIR /repo
+COPY package.json package-lock.json ./
+COPY backend ./backend
+RUN npm ci --omit=dev=false
+# 注意：把 shared 的 dist 也带进来，供后端编译/运行
+COPY --from=shared-builder /repo/shared/dist ./node_modules/@storyapp/shared/dist
+RUN npm run -w backend build
+
+# --- runtime ---
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=backend-builder /repo/backend/dist ./dist
+COPY --from=shared-builder  /repo/shared/dist  ./node_modules/@storyapp/shared/dist
+CMD ["node","dist/src/index.js"]
+```
+
+> 好处：**单一真源、零复制、运行时可寻址、TS/JS 同步**。后续新增校验规则/常量，不需要到处同步。
+
+---
+
+# B. API 层“可观测性 + 健康度 + 限流”（高优先）
+
+在生产环境排障、定位问题必须有**结构化日志、指标、健康检查**。
+
+**1) 结构化日志（pino）+ 请求 ID 贯穿**
+
+```ts
+// backend/src/app.ts
+import express from 'express';
+import pino from 'pino';
+import pinoHttp from 'pino-http';
+import { v4 as uuid } from 'uuid';
+
+const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
+
+const app = express();
+app.use((req, _res, next) => { (req as any).id = uuid(); next(); });
+app.use(pinoHttp({ logger, customProps: (req) => ({ reqId: (req as any).id }) }));
+export default app;
+```
+
+**2) Prometheus 指标（prom-client）**
+
+```ts
+// backend/src/metrics.ts
+import client from 'prom-client';
+client.collectDefaultMetrics({ prefix: 'storyapp_' });
+export const httpReqDur = new client.Histogram({
+  name: 'storyapp_http_duration_seconds',
+  help: 'HTTP latency',
+  labelNames: ['method','route','code'],
+  buckets: [0.05,0.1,0.2,0.5,1,2,5]
+});
+```
+
+```ts
+// app.ts 注册
+import { httpReqDur } from './metrics';
+app.use((req,res,next)=>{
+  const end = httpReqDur.startTimer({ method: req.method, route: req.path });
+  res.on('finish', ()=> end({ code: res.statusCode }));
   next();
-}
-export function authorize(required: string) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const perms = req.user?.permissions || [];
-    if (!perms.includes(required)) return res.status(403).json({ success:false, message:'Forbidden' });
-    next();
-  };
-}
+});
+app.get('/healthz', (_req, res)=> res.json({ ok: true, ts: Date.now() }));
+app.get('/metrics', async (_req, res)=>{
+  res.set('Content-Type', client.register.contentType);
+  res.end(await client.register.metrics());
+});
 ```
 
-**新增 `backend/src/validation/projectValidation.ts`：**
+**3) 安全中间件**
 
 ```ts
-import type { CreateProjectRequest } from '../../../shared/types/workflow';
-export function validateCreateProject(input: CreateProjectRequest) {
-  const errors: string[] = [];
-  if (!input?.title?.trim()) errors.push('缺少项目标题');
-  if (!Array.isArray(input.genreTags) || input.genreTags.length === 0) errors.push('至少选择一个类型标签');
-  if (!Number.isFinite(input.targetWords) || input.targetWords <= 0) errors.push('目标字数不合法');
-  return { isValid: errors.length === 0, errors };
-}
-```
+import helmet from 'helmet';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
+import mongoSanitize from 'express-mongo-sanitize';
+import xss from 'xss-clean';
 
-**新增 `backend/src/validation/miracleValidation.ts`：**
-
-```ts
-import type { UpdateMiracleRequest } from '../../../shared/types/workflow';
-export function validateMiracle(input: UpdateMiracleRequest) {
-  const errors: string[] = [];
-  if (!input?.logline?.trim()) errors.push('缺少 logline');
-  if (!Array.isArray(input.chain) || input.chain.length === 0) errors.push('缺少奇迹链');
-  return { isValid: errors.length === 0, errors };
-}
+app.use(helmet());
+app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? '*', credentials: true }));
+app.use(rateLimit({ windowMs: 60_000, max: 600 }));
+app.use(mongoSanitize());
+app.use(xss());
 ```
 
 ---
 
-## B. 解决“共享常量/类型”在**运行时**的路径问题（高优）
+# C. 路由/Service 契约“自解释”：OpenAPI + Zod（中高）
 
-**问题根因**
+> 让前后端、CI、文档“共用同一份契约”，减少灰区。
 
-* 后端 `tsconfig.json` 只编译 `src` 到 `backend/dist`，而业务代码在运行时**确实引用了共享模块里的“值”**（如 `DEFAULT_VALIDATION_RULES`），这会被编译成 `require('../../../shared/types/workflow')`，运行时会去 `backend/dist/...` 的相对路径找 **JS** 文件，但并没有编译到那里 → 运行会 `MODULE_NOT_FOUND`。（运行时用到常量）、（后端 tsc 仅编译 src）
+**做法 A（Zod → OpenAPI）**
 
-**两种解法，推荐方案 1：统一用根 tsconfig 编译**
-根 `tsconfig.json` 已同时包含 `backend/**/*` 与 `shared/**/*` 并输出到顶层 `dist`，正好满足运行时相对路径指向 `dist/shared`。
+* 使用 `zod` 定义请求/响应 schema；
+* 用 `zod-to-openapi` 生成 `openapi.json`；
+* 加 `express-openapi-validator` 做运行时校验；
+* 在 CI 加一步“同步生成并上传 artifact”。
 
-### 方案 1（推荐）：后端/镜像构建都用“根 tsconfig”
+**示例（片段）**
 
-1. **改后端构建脚本**（使用工作区 TypeScript 执行根编译）
-   在 `backend/package.json` 把：
-
-   ```json
-   { "scripts": { "build": "tsc" } }
-   ```
-
-   改为：
-
-   ```json
-   { "scripts": { "build": "npx tsc -p ../tsconfig.json" } }
-   ```
-2. **改 Dockerfile**：
-
-   * 当前只拷贝了 `backend/dist`，应改为拷贝根 `dist`；
-   * 后端入口也应改成 `dist/backend/src/index.js`；
-   * **前端静态资源**：后端代码用 `../public` 路径加载静态文件（位于编译产物相对目录），所以需要把前端 build 产物复制到 `dist/backend/public`。
-
-   **最小改动（片段替换）**：
-
-   ```dockerfile
-   # 阶段2: 后端构建
-   FROM ${NODE_IMAGE} AS backend-builder
-   WORKDIR /app
-   ARG NPM_REGISTRY=https://registry.npmmirror.com
-
-   # 安装后端依赖即可（包含 typescript）
-   COPY backend/package*.json ./backend/
-   RUN npm config set registry $NPM_REGISTRY
-   RUN cd backend && npm ci
-
-   # 复制源码与根 tsconfig
-   COPY backend ./backend
-   COPY shared ./shared
-   COPY tsconfig.json ./tsconfig.json
-
-   # 用根 tsconfig 编译 -> 输出到 /app/dist（含 backend + shared）
-   RUN cd backend && npx tsc -p ../tsconfig.json
-
-   # 阶段3: 运行时
-   FROM ${NODE_IMAGE}
-   WORKDIR /app
-   COPY backend/package*.json ./
-   ARG NPM_REGISTRY=https://registry.npmmirror.com
-   RUN npm config set registry $NPM_REGISTRY && npm ci --omit=dev && npm cache clean --force
-
-   # 拷贝编译结果（包含 shared）
-   COPY --from=backend-builder /app/dist ./dist
-
-   # 拷贝前端到 dist/backend/public，匹配后端静态路径
-   COPY --from=frontend-builder /app/frontend/build ./dist/backend/public
-
-   # ... 其余保持（非 root、健康检查等）
-   EXPOSE 5000
-   CMD ["node", "dist/backend/src/index.js"]
-   ```
-
-> 如不便改 Docker，现在也可**临时**把常量（如 `DEFAULT_VALIDATION_RULES`）拷一份到 `backend/src/constants/...` 并改 import，缺点是重复代码，不建议。
+```ts
+import { z } from 'zod';
+export const CreateProjectReq = z.object({
+  title: z.string().min(1),
+  genreTags: z.array(z.string()).nonempty(),
+  targetWords: z.number().int().positive()
+});
+export type CreateProjectReq = z.infer<typeof CreateProjectReq>;
+```
 
 ---
 
-## C. 镜像标签策略与 Compose 对齐（中优）
+# D. 数据层：索引与约束（中高）
 
-* `docker-build-push.yml` 只打了 `sha-<sha>` / 分支 / tag 三种标签，**没有** `sha-latest`；而你的 `docker-compose.yml` 默认写的是 `ghcr.io/...:sha-latest`。这两处默认值不一致，容易让“手工 pull/compose”与“自动部署”对不上号。（元数据 tags）、（compose 使用 sha-latest）
+假设你使用 MongoDB 原生或 Mongoose，建议把“常用查询”加索引，并用迁移工具（如 migrate-mongo）管理。
 
-**两种做法，二选一：**
+**1) 典型索引**
 
-1. **在 docker-build-push.yml 增加一个固定 tag**（简单直接）：
+```js
+// projects collection
+db.projects.createIndex({ ownerId: 1, updatedAt: -1 });
+db.projects.createIndex({ 'collaborators.userId': 1 });
+db.projects.createIndex({ title: 'text' });
+
+// miracles collection
+db.miracles.createIndex({ projectId: 1 }, { unique: true });
+```
+
+**2) 迁移脚手架**
+
+```bash
+npm i -D migrate-mongo
+npx migrate-mongo init
+npx migrate-mongo create add-indexes-20250912
+```
+
+在 CI 增加“生成环境跳过、Staging 执行”的安全策略；生产用“人工批准 + 回滚脚本”。
+
+---
+
+# E. 测试金字塔补齐（中）
+
+你已经有 CI 质量门，建议补齐 **Supertest E2E** 与 **契约测试**：
+
+**1) E2E 样例**
+
+```ts
+import request from 'supertest';
+import app from '../src/app';
+
+describe('health', ()=>{
+  it('GET /healthz', async ()=>{
+    const res = await request(app).get('/healthz');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  })
+})
+```
+
+**2) GitHub Actions 增强**
+
+* 为 E2E 起一个 `services: mongodb`（actions 自带服务容器）；
+* Playwright E2E（如果你要做前端端到端），跑完上传 HTML 报告 artifact。
+
+---
+
+# F. 安全扫描 & 依赖策略（中）
+
+你现在把 Trivy设为非阻塞。如果要“主干更稳”，可以：
+
+* **main/master 分支**：CRITICAL/HIGH **阻断**；
+* 其它分支：仅告警。
+
+**Trivy 条件化示例**
 
 ```yaml
-- name: Docker meta
-  id: meta
-  uses: docker/metadata-action@v5
+- name: Trivy scan image
+  uses: aquasecurity/trivy-action@0.24.0
   with:
-    images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-    tags: |
-      type=sha,prefix=sha-
-      type=ref,event=tag
-      type=ref,event=branch
-      type=raw,value=sha-latest
+    image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+    format: table
+    exit-code: ${{ github.ref_name == 'master' && '1' || '0' }}
+    severity: CRITICAL,HIGH
 ```
 
-2. 保持现状，依赖 `deploy-prod.yml` 的 `sed` 动态替换 compose 里的 tag（已实现）。
+**依赖更新**
 
-> 建议同时做 1），这样**本地/服务器手工 compose** 时也有一个“最近构建”的稳定标签可用。
-
----
-
-## D. 服务器端/环境配置检查（中优）
-
-* 在 GitHub **Environments → production** 创建并写入：`PROD_HOST / PROD_USER / PROD_SSH_KEY / GHCR_PAT`（PAT 需 `read:packages`）。这一点你在文档中已列明，但没法从代码验证，记得补齐即可。
+* 加 Renovate（更灵活）或 Dependabot；
+* 配一个轻量规则：仅 minor/patch 自动提 PR，由 Claude Review 先行审查。
 
 ---
 
-## E. 低风险优化（可择机再做）
+# G. 部署与回滚体验（中）
 
-1. 给工作流加 `actionlint`（防拼写）与 `harden-runner`（出站锁定）；
-2. PR 预览环境（按 PR 号起 `compose -p pr-<num>`）；
-3. Dependabot/ Renovate 自动依赖升级，配合 Claude Review。
+**1) GHCR tag 策略**
+你已引入 `sha-latest`，建议同时保留：`<semver>` / `sha-<shortsha>` / `sha-latest` 三轨，以便**随时回滚**。
+
+**2) 蓝绿/预览环境**
+Compose 层可以这样做：`app_blue` 与 `app_green` 两个 service，Nginx upstream 指向当前活跃颜色；部署时切换标签 + 健康检查通过后**原子切换** upstream。
+
+**Nginx upstream 片段**
+
+```nginx
+upstream storyapp {
+    server app_blue:5000 max_fails=3 fail_timeout=10s;
+    # 或根据环境变量渲染，部署时写入 active=blue/green
+}
+```
 
 ---
 
-## 一句话 Roadmap（照此执行）
+# H. 运行时健壮性（中）
 
-1. **补代码**：按 A-1/2/3 的片段把缺失导出、签名、认证/校验器补上（编译立刻能过）。
-2. **改构建链**：按 B 的方案 1，让后端与 `shared` 用**根 tsconfig**统一编译，并更新 Dockerfile 拷贝/入口/静态路径。
-3. **标签对齐**：在 `docker-build-push.yml` 加 `sha-latest`，或继续依赖部署流的 `sed`（推荐两者都保留）。
-4. **部署生产**：配置 `production` 环境 secrets → 运行 **Deploy to Production**，输入要发的 `sha-xxxxxxx`。
+* 在 Node 启动脚本加：
+
+  * `NODE_OPTIONS="--enable-source-maps"`（便于定位错误行）
+  * `--unhandled-rejections=strict`（CI/生产 fail-fast）
+* 进程守护：容器里由 Docker/Compose 管理重启策略即可（`restart: always` + 健康检查失败自动重启）。
 
 ---
 
-如果你愿意，我可以把以上改动整理成**最小修改 diff**（针对：
-`projectService.ts / miracleService.ts / middleware/auth.ts / validation/*.ts / backend/package.json / Dockerfile / docker-build-push.yml`），你一键合并即可跑全链路。
-现在先按上面的顺序改，你遇到新的 CI 报错把日志贴上来，我就继续对症修。
+# I. 开发体验与治理（可选但推荐）
+
+* **actionlint**：给工作流专门跑一次；
+* **commitlint + husky**：规范 commit message → 自动生成 ChangeLog（release-please / changesets）；
+* **Sentry/ErrLog**：接入错误上报；
+* **gitleaks**：Secrets 泄露扫描（阻断 PR）。
+
+---
+
+## 小结（你现在可以直接做的 5 步）
+
+1. 把 `shared` 升级为 workspace 包，删掉“复制型类型定义”，后端/镜像按上面的方式引用与构建。
+2. 在后端加 **pino 日志 + Prometheus 指标 + /healthz**，Compose 增加健康检查。
+3. 用 Zod 定义请求/响应，生成 OpenAPI；在 CI 上传 `openapi.json`。
+4. 补 MongoDB 关键索引，并引入 migrate-mongo 管理迁移。
+5. `docker-build-push.yml` 中 Trivy 对主干阻断，其它分支警告；加 Renovate/Dependabot。
+
+如果你把当前的 `Dockerfile`、`package.json（root/backend/shared）` 贴出来，我可以给你**最小 diff**，做到“零心智负担”升级到 workspace + 根 tsconfig 的方案；也可以给你一份现成的 **Nginx 蓝绿切换配置** 和 **预览环境工作流**。
