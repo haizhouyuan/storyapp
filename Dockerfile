@@ -8,7 +8,7 @@ WORKDIR /app
 
 # 安装前端依赖
 RUN npm config set registry $NPM_REGISTRY
-COPY frontend/package*.json ./frontend/
+COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci --legacy-peer-deps
 
 # 复制前端源码和共享类型
