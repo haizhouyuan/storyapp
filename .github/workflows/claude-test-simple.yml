@@ -40,17 +40,18 @@ jobs:
       - name: Write Claude settings with API key
         run: |
           mkdir -p ~/.claude
-          cat > ~/.claude/settings.json <<JSON
-          {
+          # 使用printf确保正确的变量替换
+          printf '{
             "api_keys": {
-              "anthropic": "${ANTHROPIC_API_KEY}"
+              "anthropic": "%s"
             },
             "anthropic": {
-              "base_url": "${ANTHROPIC_BASE_URL}"
+              "base_url": "%s"
             },
             "enableAllProjectMcpServers": true
-          }
-          JSON
+          }\n' "$ANTHROPIC_API_KEY" "$ANTHROPIC_BASE_URL" > ~/.claude/settings.json
+          echo "Settings file created:"
+          cat ~/.claude/settings.json
         shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
