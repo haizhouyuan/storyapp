@@ -24,17 +24,18 @@ FROM ${NODE_IMAGE} AS backend-builder
 WORKDIR /app
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
-# 安装后端依赖
+# 安装后端依赖即可（包含 typescript）
 COPY backend/package*.json ./backend/
 RUN npm config set registry $NPM_REGISTRY
 RUN cd backend && npm ci
 
-# 复制后端源码和共享类型
+# 复制源码与根 tsconfig
 COPY backend ./backend
 COPY shared ./shared
+COPY tsconfig.json ./tsconfig.json
 
-# 构建后端
-RUN cd backend && npm run build
+# 用根 tsconfig 编译 -> 输出到 /app/dist（含 backend + shared）
+RUN cd backend && npx tsc -p ../tsconfig.json
 
 # 阶段3: 生产运行时
 ARG NODE_IMAGE=node:18-alpine
@@ -51,9 +52,11 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry $NPM_REGISTRY
 RUN npm ci --omit=dev && npm cache clean --force
 
-# 复制构建结果
-COPY --from=backend-builder /app/backend/dist ./dist
-COPY --from=frontend-builder /app/frontend/build ./public
+# 拷贝编译结果（包含 shared）
+COPY --from=backend-builder /app/dist ./dist
+
+# 拷贝前端到 dist/backend/public，匹配后端静态路径
+COPY --from=frontend-builder /app/frontend/build ./dist/backend/public
 
 # 创建必要的目录
 RUN mkdir -p logs uploads && \
@@ -77,4 +80,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD node -e "require('http').get('http://localhost:5000/api/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # 启动应用
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/backend/src/index.js"]

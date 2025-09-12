@@ -1,5 +1,5 @@
 // Project Service for Story Workflow
-import { Project } from '../../../shared/types/workflow';
+import { Project, SearchQuery, ProjectMetrics, Dashboard } from '../../../shared/types/workflow';
 
 // Mock implementation - replace with actual database operations
 let mockProjects: Project[] = [];
@@ -34,4 +34,37 @@ export async function getProjectsByUser(userId: string): Promise<Project[]> {
     p.ownerId === userId || 
     p.collaborators.some(c => c.userId === userId)
   );
+}
+
+export async function getProjects(userId: string, query: SearchQuery): Promise<{ projects: Project[]; total: number }> {
+  const list = mockProjects.filter(
+    p => p.ownerId === userId || p.collaborators?.some(c => c.userId === userId)
+  );
+  const sorted = list.sort((a, b) => +b.updatedAt - +a.updatedAt);
+  const page = Math.max(1, query.page || 1);
+  const limit = Math.min(query.limit || 20, 100);
+  const start = (page - 1) * limit;
+  return { projects: sorted.slice(start, start + limit), total: sorted.length };
+}
+
+export async function getProjectDashboard(projectId: string): Promise<Dashboard> {
+  const p = mockProjects.find(x => x.id === projectId);
+  if (!p) throw new Error('项目不存在');
+  return {
+    projectId,
+    overview: { stage: p.status, completion: 50, health: 'good', lastActivity: new Date() },
+    stageStatus: { [p.status]: { status: 'in_progress', completion: 50, issues: 0 } } as any,
+    recentActivity: [], upcomingTasks: [], criticalIssues: []
+  };
+}
+
+export async function getProjectMetrics(projectId: string): Promise<ProjectMetrics> {
+  return {
+    projectId, generatedAt: new Date(),
+    fairnessScore: 80, senseIndexScore: 72, misdirectionStrength: 35, chekhovRecoveryRate: 60,
+    totalClues: 12, sensoryClues: 8, totalProps: 5, recoveredProps: 3,
+    totalMisdirections: 4, resolvedMisdirections: 2,
+    logicConsistency: 78, readabilityIndex: 82, structuralIntegrity: 75,
+    pacingWave: [], tensionCurve: [], informationDensity: []
+  };
 }
