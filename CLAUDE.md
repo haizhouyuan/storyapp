@@ -96,7 +96,8 @@ storyapp/
 - `POST /api/save-story` - 保存故事到数据库
 - `GET /api/get-stories` - 获取故事列表
 - `GET /api/get-story/:id` - 获取单个故事详情
-- `GET /api/health` - 健康检查
+- `GET /healthz` - 标准健康检查（推荐，符合ultrathink规范）
+- `GET /api/health` - 健康检查（向后兼容）
 - `GET /api/tts` - 语音接口占位
 
 ### 管理后台API（新增）
