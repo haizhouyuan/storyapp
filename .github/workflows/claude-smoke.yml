@@ -5,6 +5,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 jobs:
   smoke:
@@ -43,7 +44,4 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
-          task: "prompt"
           prompt: "只输出：Smoke OK（不要修改任何文件，不要开 PR）"
-          allow_edits: false
-          create_prs: false
