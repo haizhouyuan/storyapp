@@ -1,0 +1,35 @@
+name: Claude Smoke Check
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write        # Required for OIDC authentication
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+    steps:
+      - name: Assert Anthropic envs
+        run: |
+          test -n "$ANTHROPIC_API_KEY" || (echo "❌ Missing ANTHROPIC_API_KEY" && exit 1)
+          echo "✅ ANTHROPIC_API_KEY present"
+          echo "ℹ️ BASE_URL: ${ANTHROPIC_BASE_URL:+set}${ANTHROPIC_BASE_URL:-not-set}"
+
+      - name: Pre-approve custom API key (GAC only)
+        if: env.ANTHROPIC_BASE_URL != ''
+        run: |
+          (cat ~/.claude.json 2>/dev/null || echo 'null') \
+            | jq --arg key "${ANTHROPIC_API_KEY: -20}" \
+                 '(. // {}) | .customApiKeyResponses.approved |= ([.[]?, $key] | unique)' \
+            > ~/.claude.json.tmp && mv ~/.claude.json.tmp ~/.claude.json
+
+      - name: Run Claude (dry-run)
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "只输出：Smoke OK（不要修改任何文件，不要开 PR）"

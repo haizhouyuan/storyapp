@@ -10,6 +10,10 @@ permissions:
 jobs:
   debug-api:
     runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
     
     steps:
       - name: Checkout repository
@@ -59,11 +63,4 @@ jobs:
       - name: Test Claude Code with Minimal Settings
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_API_KEY }}
-          settings: |
-            {
-              "anthropic": {
-                "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
-              }
-            }
           prompt: "Test connection"

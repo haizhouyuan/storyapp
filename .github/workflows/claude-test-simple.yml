@@ -15,21 +15,33 @@ jobs:
   claude-test:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
+    env:                   # ← Job级环境变量，确保子进程都能继承
+      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}       # 兼容某些版本的CLI
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Assert Anthropic envs
+        run: |
+          test -n "$ANTHROPIC_API_KEY" || (echo "❌ Missing ANTHROPIC_API_KEY" && exit 1)
+          echo "✅ ANTHROPIC_API_KEY present"
+          echo "ℹ️ BASE_URL: ${ANTHROPIC_BASE_URL:+set}${ANTHROPIC_BASE_URL:-not-set}"
+
+      - name: Pre-approve custom API key (GAC only)
+        if: env.ANTHROPIC_BASE_URL != ''
+        run: |
+          (cat ~/.claude.json 2>/dev/null || echo 'null') \
+            | jq --arg key "${ANTHROPIC_API_KEY: -20}" \
+                 '(. // {}) | .customApiKeyResponses.approved |= ([.[]?, $key] | unique)' \
+            > ~/.claude.json.tmp && mv ~/.claude.json.tmp ~/.claude.json
+
       - name: Test Claude Code
         uses: anthropics/claude-code-action@v1
+        # Job级env已经包含所有必要的环境变量，不需要重复配置
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_API_KEY }}
-          settings: |
-            {
-              "anthropic": {
-                "base_url": "${{ secrets.ANTHROPIC_BASE_URL }}"
-              }
-            }
           prompt: |
             Hello! This is a simple connection test for Claude Code on GitHub Actions.
             
