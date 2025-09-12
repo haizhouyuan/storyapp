@@ -127,10 +127,33 @@ jobs:
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
+      - name: Assert Anthropic secrets presence
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "❌ Missing ANTHROPIC_API_KEY GitHub Secret"
+            echo "See docs/CI_CLAUDE_SECRETS.md to configure."
+            exit 1
+          fi
+          echo "✅ ANTHROPIC_API_KEY is configured"
+
+      - name: Comment guidance on PR when secrets missing
+        if: env.ANTHROPIC_API_KEY == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = context.payload.pull_request.number;
+            const body = `⚠️ 无法运行 Claude 评审：缺少 GitHub Secret \`ANTHROPIC_API_KEY\`\n\n请在仓库 Settings → Secrets and variables → Actions 中新增：\n- ANTHROPIC_API_KEY=sk-ant-***\n- （可选）ANTHROPIC_BASE_URL=https://api.anthropic.com\n\n参考: docs/CI_CLAUDE_SECRETS.md`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body,
+            });
       - name: Claude Code Review
         uses: anthropics/claude-code-action@v1
+        if: env.ANTHROPIC_API_KEY != ''
         env: # 再加一层 step 级 env 保险
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ env.ANTHROPIC_BASE_URL }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -18,8 +18,33 @@ jobs:
   security-review:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     
     steps:
+      - name: Assert Anthropic secrets presence
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "❌ Missing ANTHROPIC_API_KEY GitHub Secret"
+            echo "See docs/CI_CLAUDE_SECRETS.md to configure."
+            exit 1
+          fi
+          echo "✅ ANTHROPIC_API_KEY is configured"
+
+      - name: Comment guidance on PR when secrets missing
+        if: env.ANTHROPIC_API_KEY == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = context.payload.pull_request.number;
+            const body = `⚠️ 无法运行 Claude 安全评审：缺少 GitHub Secret \`ANTHROPIC_API_KEY\`\n\n请在仓库 Settings → Secrets and variables → Actions 中新增：\n- ANTHROPIC_API_KEY=sk-ant-***\n- （可选）ANTHROPIC_BASE_URL=https://api.anthropic.com\n\n参考: docs/CI_CLAUDE_SECRETS.md`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body,
+            });
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -31,9 +56,10 @@ jobs:
 
       - name: Claude Code Security Review
         uses: anthropics/claude-code-action@v1
+        if: env.ANTHROPIC_API_KEY != ''
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ env.ANTHROPIC_BASE_URL }}
         with:
           prompt: |
             请对这个儿童故事应用的代码变更进行全面的安全和质量审查，重点关注：
@@ -104,9 +130,10 @@ jobs:
 
       - name: Claude Code Test Analysis & Fix
         uses: anthropics/claude-code-action@v1
+        if: env.ANTHROPIC_API_KEY != ''
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ env.ANTHROPIC_BASE_URL }}
         with:
           task: "prompt"
           prompt: |

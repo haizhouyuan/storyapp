@@ -20,6 +20,28 @@ jobs:
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     
     steps:
+      - name: Assert Anthropic secrets presence
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "❌ Missing ANTHROPIC_API_KEY GitHub Secret"
+            echo "See docs/CI_CLAUDE_SECRETS.md to configure."
+            exit 1
+          fi
+          echo "✅ ANTHROPIC_API_KEY is configured"
+
+      - name: Comment guidance when secrets missing
+        if: env.ANTHROPIC_API_KEY == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `⚠️ 无法响应 @claude：缺少 GitHub Secret \`ANTHROPIC_API_KEY\`\n\n请在仓库 Settings → Secrets and variables → Actions 中新增：\n- ANTHROPIC_API_KEY=sk-ant-***\n- （可选）ANTHROPIC_BASE_URL=https://api.anthropic.com\n\n参考: docs/CI_CLAUDE_SECRETS.md`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body,
+            });
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -80,6 +102,28 @@ jobs:
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     
     steps:
+      - name: Assert Anthropic secrets presence
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "❌ Missing ANTHROPIC_API_KEY GitHub Secret"
+            echo "See docs/CI_CLAUDE_SECRETS.md to configure."
+            exit 1
+          fi
+          echo "✅ ANTHROPIC_API_KEY is configured"
+
+      - name: Comment guidance when secrets missing
+        if: env.ANTHROPIC_API_KEY == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `⚠️ 无法响应 @claude（故事创作助手）：缺少 GitHub Secret \`ANTHROPIC_API_KEY\`。\n\n请参考 docs/CI_CLAUDE_SECRETS.md 完成配置后重试。`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body,
+            });
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -126,4 +170,3 @@ jobs:
             - 安全和健康的主题
             
             请根据用户的具体需求，提供相应的创作指导或技术实现支持。
-

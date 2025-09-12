@@ -36,9 +36,11 @@
 
 ## 🔧 关键配置
 
-### Repository Secrets (已配置)
-- `ANTHROPIC_API_KEY`: Claude API密钥
+### Repository Secrets (需配置)
+- `ANTHROPIC_API_KEY`: Claude API密钥（必需）
 - `ANTHROPIC_BASE_URL`: Claude网关URL (可选)
+
+详见: `docs/CI_CLAUDE_SECRETS.md` 配置与验证步骤。
 
 ### GitHub Environment: production (需要配置)
 在GitHub仓库Settings → Environments → New environment创建`production`环境，并配置：
