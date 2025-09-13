@@ -1,11 +1,11 @@
 import axios from 'axios';
+import dotenv from 'dotenv';
 
-// 使用集中化配置加载器
-const { getTypedConfig } = require('../../../config/env-loader');
+// 加载环境变量
+dotenv.config();
 
-const typedConfig = getTypedConfig();
-const DEEPSEEK_API_URL = typedConfig.api.deepseek.apiUrl;
-const DEEPSEEK_API_KEY = typedConfig.api.deepseek.apiKey;
+const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
 console.log('🔑 DeepSeek API Key 加载状态:', DEEPSEEK_API_KEY ? `已加载 (${DEEPSEEK_API_KEY.substring(0, 10)}...)` : '未找到');
 

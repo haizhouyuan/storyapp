@@ -1,25 +1,30 @@
-// 使用集中化配置加载器
-const { getTypedConfig } = require('../../../config/env-loader');
+// 直接使用dotenv加载环境变量
+import dotenv from 'dotenv';
+dotenv.config();
 
-// 获取类型化配置
-const typedConfig = getTypedConfig();
-
-// Configuration object using centralized config
+// Configuration object using environment variables
 export const config = {
-  // Server configuration - 使用集中化配置
-  server: typedConfig.server,
+  // Server configuration
+  server: {
+    port: parseInt(process.env.PORT || '5000', 10),
+    nodeEnv: process.env.NODE_ENV || 'development',
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+  },
 
-  // Logging configuration - 使用集中化配置
+  // Logging configuration
   logging: {
-    ...typedConfig.logging,
+    level: process.env.LOG_LEVEL || 'info',
+    enableDetailedLogging: process.env.ENABLE_DETAILED_LOGGING === 'true',
+    enableDbLogging: process.env.ENABLE_DB_LOGGING === 'true',
+    retentionDays: parseInt(process.env.LOG_RETENTION_DAYS || '30', 10),
     format: process.env.LOG_FORMAT || 'json', // json | pretty
   },
 
-  // Rate limiting configuration - 扩展基础配置
+  // Rate limiting configuration
   rateLimit: {
     general: {
-      windowMs: typedConfig.rateLimit.windowMs,
-      max: typedConfig.rateLimit.max,
+      windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
+      max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     },
     auth: {
       windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW_MS || '900000', 10), // 15 minutes
@@ -38,7 +43,7 @@ export const config = {
   // Security configuration
   security: {
     trustProxy: process.env.TRUST_PROXY === 'true',
-    corsOrigins: process.env.CORS_ORIGINS?.split(',') || [typedConfig.server.frontendUrl],
+    corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
     helmetOptions: {
       hsts: {
         maxAge: parseInt(process.env.HSTS_MAX_AGE || '31536000', 10), // 1 year
@@ -48,10 +53,10 @@ export const config = {
     },
   },
 
-  // Database configuration - 使用集中化配置
+  // Database configuration
   database: {
-    url: typedConfig.database.uri,
-    name: typedConfig.database.name,
+    url: process.env.MONGODB_URI || 'mongodb://localhost:27017',
+    name: process.env.MONGODB_DB_NAME || 'storyapp',
     options: {
       maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE || '10', 10),
       minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE || '5', 10),
@@ -84,11 +89,19 @@ export const config = {
   features: {
     enableMetrics: process.env.FEATURE_METRICS !== 'false',
     enableTracing: process.env.FEATURE_TRACING === 'true',
-    enableDetailedErrors: typedConfig.server.nodeEnv === 'development',
+    enableDetailedErrors: (process.env.NODE_ENV || 'development') === 'development',
   },
 
-  // API配置 - 新增，使用集中化配置
-  api: typedConfig.api,
+  // API配置
+  api: {
+    deepseek: {
+      apiKey: process.env.DEEPSEEK_API_KEY || '',
+      apiUrl: process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com',
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+      maxTokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000', 10),
+      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
+    },
+  },
 };
 
 // Validation function

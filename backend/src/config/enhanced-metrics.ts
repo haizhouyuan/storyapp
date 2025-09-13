@@ -174,7 +174,7 @@ const enhancedMetrics = [
   apiResponseTimeDistribution,
 ];
 
-enhancedMetrics.forEach(metric => register.registerMetric(metric));
+enhancedMetrics.forEach(metric => register.registerMetric(metric as any));
 
 // ===== 辅助函数 =====
 
