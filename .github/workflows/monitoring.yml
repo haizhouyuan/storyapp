@@ -1,0 +1,209 @@
+name: Production Monitoring
+
+on:
+  schedule:
+    # 每5分钟检查一次生产环境状态
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      check_type:
+        description: '检查类型'
+        required: false
+        default: 'health'
+        type: choice
+        options:
+          - 'health'
+          - 'performance'
+          - 'security'
+          - 'full'
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.check_type == 'health' || github.event.inputs.check_type == 'full' || !github.event.inputs.check_type
+    
+    steps:
+      - name: Application Health Check
+        id: health
+        run: |
+          echo "🏥 执行应用健康检查..."
+          
+          HEALTH_STATUS="healthy"
+          ISSUES=()
+          
+          # 检查主要端点
+          ENDPOINTS=(
+            "https://storyapp.dandanbaba.xyz/api/health"
+            "https://storyapp.dandanbaba.xyz/healthz"
+            "https://storyapp.dandanbaba.xyz"
+          )
+          
+          for endpoint in "${ENDPOINTS[@]}"; do
+            echo "检查: $endpoint"
+            if ! curl -f -s --max-time 10 "$endpoint" > /dev/null; then
+              echo "❌ $endpoint 不可访问"
+              HEALTH_STATUS="unhealthy"
+              ISSUES+=("$endpoint 不可访问")
+            else
+              echo "✅ $endpoint 正常"
+            fi
+          done
+          
+          # 检查响应时间
+          RESPONSE_TIME=$(curl -o /dev/null -s -w '%{time_total}' https://storyapp.dandanbaba.xyz/api/health || echo "999")
+          if (( $(echo "$RESPONSE_TIME > 5.0" | bc -l) )); then
+            echo "⚠️ 响应时间过长: ${RESPONSE_TIME}s"
+            HEALTH_STATUS="slow"
+            ISSUES+=("响应时间过长: ${RESPONSE_TIME}s")
+          else
+            echo "✅ 响应时间正常: ${RESPONSE_TIME}s"
+          fi
+          
+          echo "status=$HEALTH_STATUS" >> $GITHUB_OUTPUT
+          printf 'issues=%s\n' "$(IFS=,; echo "${ISSUES[*]}")" >> $GITHUB_OUTPUT
+
+      - name: Database Connectivity Check
+        id: database
+        run: |
+          echo "🗄️ 检查数据库连接..."
+          
+          # 通过API检查数据库连接状态
+          if curl -f -s https://storyapp.dandanbaba.xyz/api/health | jq -e '.database.connected == true' > /dev/null; then
+            echo "✅ 数据库连接正常"
+            echo "status=connected" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 数据库连接异常"
+            echo "status=disconnected" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Health Report
+        if: always()
+        run: |
+          echo "## 🏥 应用健康检查报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**检查时间:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # 应用状态
+          case "${{ steps.health.outputs.status }}" in
+            "healthy")
+              echo "**应用状态:** ✅ 健康" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "slow")
+              echo "**应用状态:** ⚠️ 响应缓慢" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "unhealthy")
+              echo "**应用状态:** ❌ 异常" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          
+          # 数据库状态
+          if [ "${{ steps.database.outputs.status }}" == "connected" ]; then
+            echo "**数据库状态:** ✅ 连接正常" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**数据库状态:** ❌ 连接异常" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # 问题详情
+          if [ -n "${{ steps.health.outputs.issues }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**发现问题:**" >> $GITHUB_STEP_SUMMARY
+            IFS=',' read -ra ISSUE_ARRAY <<< "${{ steps.health.outputs.issues }}"
+            for issue in "${ISSUE_ARRAY[@]}"; do
+              echo "- $issue" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
+
+  performance-check:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.check_type == 'performance' || github.event.inputs.check_type == 'full'
+    
+    steps:
+      - name: Performance Metrics Collection
+        id: performance
+        run: |
+          echo "📊 收集性能指标..."
+          
+          # 检查响应时间
+          declare -A endpoints=(
+            ["主页"]="https://storyapp.dandanbaba.xyz"
+            ["健康检查"]="https://storyapp.dandanbaba.xyz/api/health"
+            ["API端点"]="https://storyapp.dandanbaba.xyz/healthz"
+          )
+          
+          echo "## 响应时间测试" >> /tmp/performance.txt
+          for name in "${!endpoints[@]}"; do
+            url="${endpoints[$name]}"
+            time=$(curl -o /dev/null -s -w '%{time_total}' "$url" || echo "999")
+            echo "$name: ${time}s" >> /tmp/performance.txt
+            
+            if (( $(echo "$time > 3.0" | bc -l) )); then
+              echo "⚠️ $name 响应时间过长: ${time}s"
+            else
+              echo "✅ $name 响应时间正常: ${time}s"
+            fi
+          done
+          
+          # 检查可用性
+          UPTIME_START=$(date +%s)
+          for i in {1..5}; do
+            if curl -f -s https://storyapp.dandanbaba.xyz/api/health > /dev/null; then
+              echo "✅ 可用性检查 $i/5 通过"
+            else
+              echo "❌ 可用性检查 $i/5 失败"
+            fi
+            sleep 2
+          done
+          UPTIME_END=$(date +%s)
+          
+          echo "可用性测试完成，耗时: $((UPTIME_END - UPTIME_START))秒" >> /tmp/performance.txt
+
+      - name: Upload Performance Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-report-${{ github.run_number }}
+          path: /tmp/performance.txt
+
+  alert:
+    runs-on: ubuntu-latest
+    needs: [health-check, performance-check]
+    if: always() && (needs.health-check.outputs.status == 'unhealthy' || needs.database-check.outputs.status == 'disconnected')
+    
+    steps:
+      - name: Send Alert Notification
+        run: |
+          echo "🚨 发送告警通知..."
+          
+          # 构建告警消息
+          ALERT_MESSAGE="🚨 StoryApp 生产环境告警"
+          ALERT_MESSAGE="$ALERT_MESSAGE\n时间: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          if [ "${{ needs.health-check.outputs.status }}" == "unhealthy" ]; then
+            ALERT_MESSAGE="$ALERT_MESSAGE\n❌ 应用健康检查失败"
+          fi
+          
+          if [ "${{ needs.database-check.outputs.status }}" == "disconnected" ]; then
+            ALERT_MESSAGE="$ALERT_MESSAGE\n❌ 数据库连接异常"
+          fi
+          
+          ALERT_MESSAGE="$ALERT_MESSAGE\n\n请立即检查生产环境状态"
+          ALERT_MESSAGE="$ALERT_MESSAGE\n🔗 监控面板: https://github.com/${{ github.repository }}/actions"
+          
+          echo -e "$ALERT_MESSAGE"
+          
+          # 这里可以集成 Slack、Discord、邮件等通知方式
+          # 示例：Slack Webhook
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data "{\"text\":\"$ALERT_MESSAGE\"}" \
+          #   "${{ secrets.SLACK_WEBHOOK_URL }}"
+
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.check_type == 'full'
+    
+    steps:
+      - name: Cleanup Old Artifacts
+        run: |
+          echo "🧹 清理旧的监控数据..."
+          # 这里可以添加清理逻辑，比如删除旧的性能报告等
+          echo "清理完成"

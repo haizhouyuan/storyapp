@@ -1,0 +1,239 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: '部署的镜像标签'
+        required: false
+        default: 'main'
+        type: choice
+        options:
+          - 'main'
+          - 'latest'
+          - 'master'
+      force_deploy:
+        description: '强制部署（跳过健康检查）'
+        required: false
+        default: false
+        type: boolean
+      rollback_on_failure:
+        description: '失败时自动回滚'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  pre-deploy-checks:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    outputs:
+      deploy_ready: ${{ steps.checks.outputs.ready }}
+      image_exists: ${{ steps.image_check.outputs.exists }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if image exists
+        id: image_check
+        run: |
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          
+          echo "检查镜像: $IMAGE_URL"
+          
+          # 登录GHCR
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # 检查镜像是否存在
+          if docker manifest inspect $IMAGE_URL > /dev/null 2>&1; then
+            echo "✅ 镜像存在: $IMAGE_URL"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 镜像不存在: $IMAGE_URL"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Pre-deployment checks
+        id: checks
+        run: |
+          echo "🔍 执行部署前检查..."
+          
+          # 检查输入参数
+          if [[ -z "${{ github.event.inputs.image_tag }}" ]]; then
+            echo "❌ 镜像标签不能为空"
+            exit 1
+          fi
+          
+          echo "✅ 所有检查通过"
+          echo "ready=true" >> $GITHUB_OUTPUT
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: pre-deploy-checks
+    environment: production
+    if: needs.pre-deploy-checks.outputs.deploy_ready == 'true' && needs.pre-deploy-checks.outputs.image_exists == 'true'
+    
+    steps:
+      - name: Deploy to Production Server
+        id: deploy
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          timeout: 300s
+          command_timeout: 300s
+          script: |
+            set -e
+            
+            echo "🚀 开始部署 StoryApp 到生产环境"
+            echo "📦 镜像标签: ${{ github.event.inputs.image_tag }}"
+            echo "🕒 部署时间: $(date '+%Y-%m-%d %H:%M:%S')"
+            
+            # 切换到项目目录
+            cd /root/projects/storyapp || { echo "❌ 项目目录不存在"; exit 1; }
+            
+            # 记录当前运行的容器信息（用于回滚）
+            echo "📋 记录当前部署状态..."
+            docker compose ps > /tmp/storyapp_pre_deploy_status.txt
+            docker images | grep storyapp > /tmp/storyapp_pre_deploy_images.txt || true
+            
+            # 更新代码
+            echo "📥 更新代码..."
+            git fetch --all
+            git pull gitee master || git pull gitee main
+            
+            # 设置镜像标签
+            export APP_TAG="${{ github.event.inputs.image_tag }}"
+            echo "🏷️  设置镜像标签: $APP_TAG"
+            
+            # 登录GHCR
+            echo "🔐 登录容器镜像仓库..."
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # 拉取新镜像
+            IMAGE_URL="ghcr.io/${{ github.repository }}:${APP_TAG}"
+            echo "📦 拉取镜像: $IMAGE_URL"
+            docker pull $IMAGE_URL
+            
+            # 停止旧服务（保留数据库）
+            echo "⏹️  停止应用服务..."
+            docker compose stop app || true
+            
+            # 备份当前环境文件
+            cp .env .env.backup.$(date +%Y%m%d_%H%M%S) || true
+            
+            # 更新docker-compose配置使用新镜像
+            echo "🔧 更新容器配置..."
+            export DOCKER_IMAGE="$IMAGE_URL"
+            
+            # 启动新服务
+            echo "🚀 启动新版本..."
+            docker compose up -d app
+            
+            # 等待服务启动
+            echo "⏳ 等待服务启动..."
+            sleep 15
+            
+            # 健康检查
+            echo "🏥 执行健康检查..."
+            for i in {1..5}; do
+              if curl -f -s http://localhost:5001/api/health > /dev/null; then
+                echo "✅ 健康检查通过 (尝试 $i)"
+                break
+              elif [ $i -eq 5 ]; then
+                echo "❌ 健康检查失败，准备回滚..."
+                exit 1
+              else
+                echo "⏳ 健康检查失败，等待重试... (尝试 $i)"
+                sleep 10
+              fi
+            done
+            
+            # 清理旧镜像（保留最近3个版本）
+            echo "🧹 清理旧镜像..."
+            docker images --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" | \
+              grep "ghcr.io/${{ github.repository }}" | \
+              tail -n +4 | \
+              awk '{print $1}' | \
+              xargs -r docker rmi || true
+            
+            echo "🎉 部署完成！"
+            echo "🌐 应用地址: https://storyapp.dandanbaba.xyz"
+
+      - name: Post-deployment verification
+        if: steps.deploy.outcome == 'success'
+        run: |
+          echo "🔍 执行部署后验证..."
+          
+          # 等待DNS传播
+          sleep 30
+          
+          # 验证生产环境
+          for endpoint in "/api/health" "/healthz"; do
+            echo "检查端点: $endpoint"
+            if curl -f -s https://storyapp.dandanbaba.xyz$endpoint; then
+              echo "✅ $endpoint 正常"
+            else
+              echo "⚠️ $endpoint 检查失败，但不阻止部署"
+            fi
+          done
+
+      - name: Rollback on failure
+        if: failure() && github.event.inputs.rollback_on_failure == 'true'
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            echo "🔄 执行自动回滚..."
+            cd /root/projects/storyapp
+            
+            # 恢复之前的状态
+            if [ -f /tmp/storyapp_pre_deploy_status.txt ]; then
+              echo "📋 恢复之前的部署状态..."
+              docker compose down app || true
+              docker compose up -d app
+              
+              # 简单健康检查
+              sleep 10
+              if curl -f -s http://localhost:5001/api/health; then
+                echo "✅ 回滚成功"
+              else
+                echo "❌ 回滚失败，需要手动处理"
+              fi
+            else
+              echo "⚠️ 无法找到之前的状态，跳过自动回滚"
+            fi
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [pre-deploy-checks, deploy]
+    if: always()
+    
+    steps:
+      - name: Generate deployment summary
+        run: |
+          echo "## 🚀 生产环境部署报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**部署时间:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**镜像标签:** \`${{ github.event.inputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**部署用户:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "**状态:** ✅ 部署成功" >> $GITHUB_STEP_SUMMARY
+            echo "**应用地址:** https://storyapp.dandanbaba.xyz" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**状态:** ❌ 部署失败" >> $GITHUB_STEP_SUMMARY
+            echo "**回滚状态:** ${{ github.event.inputs.rollback_on_failure && '已执行自动回滚' || '未执行自动回滚' }}" >> $GITHUB_STEP_SUMMARY
+          fi

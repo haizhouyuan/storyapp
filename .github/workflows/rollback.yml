@@ -1,0 +1,229 @@
+name: Rollback Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_tag:
+        description: '回滚到的镜像标签'
+        required: true
+        type: string
+      rollback_reason:
+        description: '回滚原因'
+        required: true
+        type: choice
+        options:
+          - 'critical_bug'
+          - 'performance_issue'
+          - 'security_vulnerability'
+          - 'feature_rollback'
+          - 'other'
+      confirm_rollback:
+        description: '确认执行回滚 (输入 CONFIRM)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate-rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    outputs:
+      rollback_approved: ${{ steps.validation.outputs.approved }}
+      target_image: ${{ steps.validation.outputs.target_image }}
+      
+    steps:
+      - name: Validate rollback request
+        id: validation
+        run: |
+          echo "🔍 验证回滚请求..."
+          
+          # 验证确认输入
+          if [ "${{ github.event.inputs.confirm_rollback }}" != "CONFIRM" ]; then
+            echo "❌ 回滚确认失败，必须输入 CONFIRM"
+            exit 1
+          fi
+          
+          # 构建目标镜像路径
+          TARGET_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.rollback_tag }}"
+          echo "target_image=$TARGET_IMAGE" >> $GITHUB_OUTPUT
+          
+          # 检查目标镜像是否存在
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          if docker manifest inspect $TARGET_IMAGE > /dev/null 2>&1; then
+            echo "✅ 目标镜像存在: $TARGET_IMAGE"
+            echo "approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 目标镜像不存在: $TARGET_IMAGE"
+            echo "approved=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "📋 回滚信息:"
+          echo "- 目标标签: ${{ github.event.inputs.rollback_tag }}"
+          echo "- 回滚原因: ${{ github.event.inputs.rollback_reason }}"
+          echo "- 操作用户: ${{ github.actor }}"
+          echo "- 操作时间: $(date)"
+
+  rollback:
+    runs-on: ubuntu-latest
+    needs: validate-rollback
+    environment: production
+    if: needs.validate-rollback.outputs.rollback_approved == 'true'
+    
+    steps:
+      - name: Execute rollback
+        id: rollback
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          timeout: 300s
+          script: |
+            set -e
+            
+            echo "🔄 开始执行生产环境回滚"
+            echo "📦 目标镜像: ${{ needs.validate-rollback.outputs.target_image }}"
+            echo "🎯 回滚原因: ${{ github.event.inputs.rollback_reason }}"
+            echo "👤 操作用户: ${{ github.actor }}"
+            echo "🕒 回滚时间: $(date '+%Y-%m-%d %H:%M:%S')"
+            
+            # 切换到项目目录
+            cd /root/projects/storyapp || { echo "❌ 项目目录不存在"; exit 1; }
+            
+            # 备份当前状态
+            echo "💾 备份当前部署状态..."
+            mkdir -p /root/backups/rollback/$(date +%Y%m%d_%H%M%S)
+            BACKUP_DIR="/root/backups/rollback/$(date +%Y%m%d_%H%M%S)"
+            
+            # 记录当前容器状态
+            docker compose ps > "$BACKUP_DIR/pre_rollback_status.txt"
+            docker images | grep storyapp > "$BACKUP_DIR/pre_rollback_images.txt" || true
+            cp .env "$BACKUP_DIR/pre_rollback_env" || true
+            
+            # 获取当前运行的镜像信息
+            CURRENT_IMAGE=$(docker inspect storyapp-app 2>/dev/null | jq -r '.[0].Config.Image' || echo "unknown")
+            echo "📋 当前镜像: $CURRENT_IMAGE" | tee "$BACKUP_DIR/current_image.txt"
+            
+            # 登录 GHCR
+            echo "🔐 登录容器镜像仓库..."
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # 拉取回滚目标镜像
+            echo "📦 拉取回滚目标镜像..."
+            docker pull ${{ needs.validate-rollback.outputs.target_image }}
+            
+            # 停止当前应用服务
+            echo "⏹️  停止当前应用服务..."
+            docker compose stop app || true
+            
+            # 更新镜像标签
+            export DOCKER_IMAGE="${{ needs.validate-rollback.outputs.target_image }}"
+            echo "🏷️  设置回滚镜像: $DOCKER_IMAGE"
+            
+            # 启动回滚版本
+            echo "🚀 启动回滚版本..."
+            docker compose up -d app
+            
+            # 等待服务启动
+            echo "⏳ 等待服务启动..."
+            sleep 20
+            
+            # 健康检查
+            echo "🏥 执行健康检查..."
+            HEALTH_CHECK_PASSED=false
+            for i in {1..6}; do
+              if curl -f -s http://localhost:5001/api/health > /dev/null; then
+                echo "✅ 健康检查通过 (尝试 $i)"
+                HEALTH_CHECK_PASSED=true
+                break
+              else
+                echo "⏳ 健康检查失败，等待重试... (尝试 $i/6)"
+                sleep 15
+              fi
+            done
+            
+            if [ "$HEALTH_CHECK_PASSED" = false ]; then
+              echo "❌ 回滚后健康检查失败，尝试恢复之前状态..."
+              export DOCKER_IMAGE="$CURRENT_IMAGE"
+              docker compose up -d app
+              sleep 15
+              if curl -f -s http://localhost:5001/api/health > /dev/null; then
+                echo "🔄 已恢复到之前状态"
+              else
+                echo "💥 严重错误：无法恢复，需要紧急手动处理！"
+                exit 1
+              fi
+              exit 1
+            fi
+            
+            # 记录回滚成功信息
+            echo "✅ 回滚成功完成" | tee "$BACKUP_DIR/rollback_success.txt"
+            echo "回滚前镜像: $CURRENT_IMAGE" >> "$BACKUP_DIR/rollback_success.txt"
+            echo "回滚后镜像: ${{ needs.validate-rollback.outputs.target_image }}" >> "$BACKUP_DIR/rollback_success.txt"
+            echo "回滚时间: $(date)" >> "$BACKUP_DIR/rollback_success.txt"
+            echo "操作用户: ${{ github.actor }}" >> "$BACKUP_DIR/rollback_success.txt"
+            echo "回滚原因: ${{ github.event.inputs.rollback_reason }}" >> "$BACKUP_DIR/rollback_success.txt"
+            
+            echo "🎉 回滚完成！"
+            echo "🌐 应用地址: https://storyapp.dandanbaba.xyz"
+            echo "💾 备份目录: $BACKUP_DIR"
+
+      - name: Post-rollback verification
+        if: steps.rollback.outcome == 'success'
+        run: |
+          echo "🔍 执行回滚后验证..."
+          
+          # 等待DNS传播和服务稳定
+          sleep 60
+          
+          # 验证生产环境
+          VERIFICATION_PASSED=true
+          for endpoint in "/api/health" "/healthz"; do
+            echo "检查端点: $endpoint"
+            if curl -f -s https://storyapp.dandanbaba.xyz$endpoint; then
+              echo "✅ $endpoint 正常"
+            else
+              echo "❌ $endpoint 检查失败"
+              VERIFICATION_PASSED=false
+            fi
+          done
+          
+          if [ "$VERIFICATION_PASSED" = false ]; then
+            echo "⚠️ 部分验证失败，请检查应用状态"
+            exit 1
+          fi
+          
+          echo "✅ 回滚验证全部通过"
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [validate-rollback, rollback]
+    if: always()
+    
+    steps:
+      - name: Generate rollback summary
+        run: |
+          echo "## 🔄 生产环境回滚报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**回滚时间:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**目标镜像:** \`${{ github.event.inputs.rollback_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**回滚原因:** ${{ github.event.inputs.rollback_reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "**操作用户:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.rollback.result }}" == "success" ]; then
+            echo "**状态:** ✅ 回滚成功" >> $GITHUB_STEP_SUMMARY
+            echo "**应用地址:** https://storyapp.dandanbaba.xyz" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> ⚠️ **重要提醒:** 请及时分析并修复导致回滚的问题，避免再次发生。" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**状态:** ❌ 回滚失败" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> 🚨 **紧急:** 回滚失败，需要立即手动处理生产环境问题！" >> $GITHUB_STEP_SUMMARY
+          fi
