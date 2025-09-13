@@ -322,21 +322,58 @@ export const updateMongoDbMetrics = async (db: MongoDatabase) => {
 /**
  * 更新资源利用率指标
  */
-export const updateResourceUtilization = () => {
-  const memUsage = process.memoryUsage();
-  const cpuUsage = process.cpuUsage();
-  
-  // 内存使用率估算（基于heapUsed/heapTotal）
-  const memUtilization = (memUsage.heapUsed / memUsage.heapTotal) * 100;
-  
-  if (memUtilization > 90) {
-    resourceUtilization.set({ resource_type: 'memory', threshold_level: 'critical' }, memUtilization);
-  } else if (memUtilization > 70) {
-    resourceUtilization.set({ resource_type: 'memory', threshold_level: 'warning' }, memUtilization);
-  } else {
-    resourceUtilization.set({ resource_type: 'memory', threshold_level: 'normal' }, memUtilization);
+export const updateResourceUtilization = async () => {
+  try {
+    const memUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
+    
+    // 内存使用率估算（基于heapUsed/heapTotal）
+    const memUtilization = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+    
+    // 使用异步更新避免阻塞主线程
+    await new Promise<void>((resolve) => {
+      setImmediate(() => {
+        try {
+          if (memUtilization > 90) {
+            resourceUtilization.set({ resource_type: 'memory', threshold_level: 'critical' }, memUtilization);
+          } else if (memUtilization > 70) {
+            resourceUtilization.set({ resource_type: 'memory', threshold_level: 'warning' }, memUtilization);
+          } else {
+            resourceUtilization.set({ resource_type: 'memory', threshold_level: 'normal' }, memUtilization);
+          }
+          resolve();
+        } catch (error) {
+          console.warn('Failed to update resource utilization metrics:', error);
+          resolve();
+        }
+      });
+    });
+  } catch (error) {
+    console.warn('Resource utilization monitoring error:', error);
   }
 };
 
-// 启动定期指标更新
-setInterval(updateResourceUtilization, 30000); // 每30秒更新一次
+// 启动定期指标更新 - 使用异步定时器避免阻塞
+let monitoringInterval: NodeJS.Timeout | null = null;
+
+const startResourceMonitoring = () => {
+  // 避免重复启动
+  if (monitoringInterval) return;
+  
+  monitoringInterval = setInterval(async () => {
+    await updateResourceUtilization();
+  }, 60000); // 优化为每60秒更新一次，减少性能影响
+};
+
+// 优雅关闭监控
+export const stopResourceMonitoring = () => {
+  if (monitoringInterval) {
+    clearInterval(monitoringInterval);
+    monitoringInterval = null;
+  }
+};
+
+// 启动监控（仅在生产环境启用详细监控）
+if (process.env.NODE_ENV === 'production') {
+  startResourceMonitoring();
+}

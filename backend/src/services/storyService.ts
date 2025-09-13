@@ -87,6 +87,19 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
     }
     
+    // 生产环境必须有API密钥
+    if (process.env.NODE_ENV === 'production' && !process.env.DEEPSEEK_API_KEY) {
+      logger.error(EventType.AI_API_ERROR, 'DeepSeek API密钥未配置', {
+        topic,
+        environment: process.env.NODE_ENV
+      }, { startTime }, sessionId);
+      
+      const configError = new Error('服务暂时不可用，请稍后重试');
+      (configError as any).code = 'SERVICE_UNAVAILABLE';
+      (configError as any).statusCode = 503;
+      throw configError;
+    }
+    
     logger.info(EventType.STORY_GENERATION_START, '开始生成故事片段', {
       topic,
       isNewStory: !currentStory,

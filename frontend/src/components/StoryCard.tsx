@@ -1,7 +1,14 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo } from 'react';
 import { motion } from 'framer-motion';
 import { BookOpenIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { formatDate } from '../utils/helpers';
+
+// 动画配置常量，移到组件外部避免重复创建
+const MOTION_TRANSITION = {
+  type: 'spring' as const,
+  stiffness: 300,
+  damping: 20
+};
 
 interface StoryCardProps {
   id: string;
@@ -27,11 +34,11 @@ const StoryCard = memo(function StoryCard({
   onDelete,
   className = ''
 }: StoryCardProps) {
-  // 使用useMemo缓存格式化后的日期，避免重复计算
-  const formattedDate = useMemo(() => formatDate(createdAt), [createdAt]);
+  // 仅对复杂计算使用useMemo，简单字符串操作直接计算更高效
+  const formattedDate = formatDate(createdAt);
 
-  // 使用useMemo缓存样式类名，避免重复拼接
-  const cardClassName = useMemo(() => `
+  // 简单的className拼接不需要缓存
+  const cardClassName = `
     relative
     bg-white
     rounded-child-lg
@@ -45,14 +52,7 @@ const StoryCard = memo(function StoryCard({
     transition-all
     duration-200
     ${className}
-  `, [className]);
-
-  // 使用useMemo缓存动画配置，避免重复创建对象
-  const motionTransition = useMemo(() => ({
-    type: 'spring' as const,
-    stiffness: 300,
-    damping: 20
-  }), []);
+  `;
 
   return (
     <motion.div
@@ -60,7 +60,7 @@ const StoryCard = memo(function StoryCard({
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ scale: 1.02, y: -2 }}
       whileTap={{ scale: 0.98 }}
-      transition={motionTransition}
+      transition={MOTION_TRANSITION}
       onClick={onClick}
       className={cardClassName}
       data-testid={`story-card-${id}`}
