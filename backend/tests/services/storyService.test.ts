@@ -179,9 +179,8 @@ describe('Story Service', () => {
       expect(deleted).toBeNull();
     });
 
-    it('应该在故事不存在时返回deletedCount为0', async () => {
-      const result = await deleteStoryService({ id: '507f1f77bcf86cd799439011' });
-      expect(result.success).toBe(false);
+    it('应该在故事不存在时抛出错误', async () => {
+      await expect(deleteStoryService({ id: '507f1f77bcf86cd799439011' })).rejects.toThrow('要删除的故事不存在');
     });
 
     it('应该处理无效的ID格式', async () => {
