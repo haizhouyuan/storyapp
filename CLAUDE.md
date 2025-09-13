@@ -38,6 +38,8 @@ npm run dev:frontend # 前端: http://localhost:3000
 ```
 
 ### 构建和部署
+
+#### 本地开发构建
 ```bash
 # 构建生产版本
 npm run build
@@ -46,19 +48,47 @@ npm run build
 npm run start
 ```
 
+#### 容器化部署（推荐生产环境）
+```bash
+# 构建Docker镜像
+docker build -t storyapp:latest .
+
+# 使用Docker Compose启动完整服务栈
+docker compose up -d
+
+# 查看服务状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f app
+
+# 停止服务
+docker compose down
+```
+
 ### 测试
+
+#### 本地测试
 ```bash
 # 安装Playwright浏览器
 npx playwright install
 
-# 运行E2E测试
+# 运行E2E测试（本地开发模式）
 npm test
 
-# 运行后端测试
+# 运行后端单元测试
 cd backend && npm test
 
-# 测试日志记录系统（新增）
+# 测试日志记录系统
 node test-logging-system.js
+```
+
+#### 容器化测试（CI环境）
+```bash
+# 运行完整容器化测试流程
+docker compose -f docker-compose.ci.yml up -d --build
+npm test  # 在CI环境中运行
+docker compose -f docker-compose.ci.yml down -v
 ```
 
 ## 项目结构
@@ -318,6 +348,98 @@ curl -fsS http://storyapp.dandanbaba.xyz/api/get-story/<id>
 - 使用生产环境API密钥
 - Docker容器化部署
 - 配置监控和日志记录
+
+## CI/CD 和容器化配置（新增）
+
+### GitHub Actions CI 工作流
+
+项目使用完全容器化的CI/CD流程，确保测试环境与生产环境一致：
+
+#### 1. PR自动代码评审
+```yaml
+# .github/workflows/pr-auto-review.yml
+# 使用Claude Code Action进行智能代码评审
+- 触发条件：PR opened/synchronized/reopened
+- 评审重点：代码质量、安全性、儿童应用合规性
+- 输出：详细评审意见和改进建议
+```
+
+#### 2. 持续集成流程
+```yaml
+# .github/workflows/ci.yml
+fast-checks:  # 快速检查（构建+后端单元测试）
+  - 构建shared/backend/frontend包
+  - 启动MongoDB容器进行数据库测试
+  - 运行Jest单元测试
+  
+deep-tests:   # 深度测试（Playwright E2E）
+  - 使用docker-compose.ci.yml构建完整应用栈
+  - 运行跨浏览器E2E测试
+  - 生成测试报告和错误截图
+```
+
+### 容器化配置文件
+
+#### 1. 生产环境 (docker-compose.yml)
+```bash
+# 标准化配置，支持不同环境的override
+services:
+  mongo:    # MongoDB 6.0 数据库
+  app:      # Node.js应用 (前后端统一镜像)
+  nginx:    # 反向代理 (可选)
+```
+
+#### 2. CI测试环境 (docker-compose.ci.yml)
+```bash
+# 专用于GitHub Actions的测试配置
+- 使用测试用的环境变量
+- MongoDB端口映射用于单元测试
+- 应用服务健康检查配置
+- 自动构建和启动流程
+```
+
+#### 3. 多阶段Dockerfile
+```dockerfile
+# 统一的前后端构建镜像
+Stage 1: 前端构建 (React + TypeScript)
+Stage 2: 后端构建 (Node.js + Express)  
+Stage 3: 生产运行时 (轻量化Alpine镜像)
+```
+
+### 测试策略对比
+
+| 环境 | 后端服务 | 前端服务 | 数据库 | 端口配置 |
+|------|----------|----------|--------|----------|
+| **本地开发** | npm run dev | npm start | 本地安装 | :5000, :3000 |
+| **本地容器** | Docker镜像 | 内置静态文件 | mongo容器 | :5001 |
+| **CI测试** | Docker镜像 | 内置静态文件 | mongo容器 | :5001 |
+| **生产部署** | Docker镜像 | nginx代理 | mongo容器 | :80/:443 |
+
+### 关键配置更新
+
+#### Playwright测试配置
+```typescript
+// 自动适配CI环境
+baseURL: process.env.CI ? 'http://localhost:5001' : 'http://localhost:3000'
+webServer: process.env.CI ? undefined : [/* 本地开发服务器 */]
+```
+
+#### Jest后端测试
+```javascript
+// 支持axios ES模块
+moduleNameMapper: {
+  '^axios$': 'axios/dist/node/axios.cjs'
+}
+```
+
+### 环境变量配置
+```bash
+# CI环境专用变量
+DEEPSEEK_API_KEY=sk-test-dummy  # 测试模式
+MONGODB_URI=mongodb://root:pass123@mongo:27017/storyapp?authSource=admin
+NODE_ENV=test
+PORT=5000
+```
 
 ## 故障排除
 

@@ -521,6 +521,11 @@ export async function deleteStoryService(params: DeleteStoryRequest): Promise<De
     
     console.log(`正在删除故事, ID: ${id}`);
     
+    // 验证ID格式
+    if (!ObjectId.isValid(id)) {
+      throw new Error('无效的故事ID格式');
+    }
+    
     // 获取数据库实例
     const db = getDatabase();
     const storiesCollection = db.collection(TABLES.STORIES);
