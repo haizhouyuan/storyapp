@@ -18,9 +18,8 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     timeout-minutes: 15
     
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+# 移除环境变量避免密钥在日志中暴露
+    # 密钥通过with参数安全传递
     
     outputs:
       review_completed: ${{ steps.claude_review.outputs.completed }}

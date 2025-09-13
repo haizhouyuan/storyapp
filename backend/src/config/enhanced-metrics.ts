@@ -239,17 +239,21 @@ export const recordUserInteraction = (
   userType: string,
   sessionStartTime?: number
 ) => {
+  // COPPA合规：仅记录匿名化的交互数据，不包含个人身份信息
   storyInteractions.inc({
     interaction_type: interactionType,
     story_length: storyLength,
-    user_type: userType,
+    user_type: userType, // 仅记录类型（如'child', 'parent'），不记录具体身份
   });
   
+  // 记录会话时长，但不关联具体用户
   if (sessionStartTime) {
     const sessionDuration = (Date.now() - sessionStartTime) / 1000;
+    // 限制最大记录时长，保护隐私
+    const cappedDuration = Math.min(sessionDuration, 3600); // 最长1小时
     userSessionDuration.observe(
       { session_type: 'story', completion_status: 'completed' },
-      sessionDuration
+      cappedDuration
     );
   }
 };
@@ -272,7 +276,31 @@ export const recordContentValidation = (
 /**
  * 更新MongoDB指标
  */
-export const updateMongoDbMetrics = async (db: any) => {
+// MongoDB数据库接口定义，提高类型安全
+interface DatabaseStats {
+  storageSize?: number;
+  dataSize?: number;
+  indexSize?: number;
+  objects?: number;
+}
+
+interface ServerStatus {
+  connections?: {
+    current?: number;
+  };
+  opcounters?: {
+    query?: number;
+  };
+}
+
+interface MongoDatabase {
+  stats(): Promise<DatabaseStats>;
+  admin(): {
+    serverStatus(): Promise<ServerStatus>;
+  };
+}
+
+export const updateMongoDbMetrics = async (db: MongoDatabase) => {
   try {
     // 获取数据库统计信息
     const stats = await db.stats();

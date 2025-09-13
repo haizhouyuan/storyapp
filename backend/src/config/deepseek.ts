@@ -7,9 +7,17 @@ dotenv.config();
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
-console.log('🔑 DeepSeek API Key 加载状态:', DEEPSEEK_API_KEY ? `已加载 (${DEEPSEEK_API_KEY.substring(0, 10)}...)` : '未找到');
+// 安全的API密钥状态记录（不泄露密钥内容）
+const hasValidApiKey = DEEPSEEK_API_KEY && DEEPSEEK_API_KEY.length > 0;
+console.log('🔑 DeepSeek API Key 状态:', hasValidApiKey ? '已配置' : '未配置');
 
-if (!DEEPSEEK_API_KEY) {
+// 生产环境强制要求API密钥
+if (process.env.NODE_ENV === 'production' && !hasValidApiKey) {
+  console.error('❌ 生产环境必须配置DeepSeek API Key');
+  throw new Error('DeepSeek API Key is required in production environment');
+}
+
+if (!hasValidApiKey) {
   console.warn('⚠️  未配置DeepSeek API Key，将使用模拟数据进行测试');
 }
 
