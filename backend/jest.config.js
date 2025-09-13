@@ -9,6 +9,9 @@ module.exports = {
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
+  moduleNameMapper: {
+    '^axios$': 'axios/dist/node/axios.cjs'
+  },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/index.ts',

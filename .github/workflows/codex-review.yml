@@ -1,0 +1,52 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: codex-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codex:
+    name: Codex automated review
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Codex review (powered by Claude)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            请以“自动化评审助手（Codex）”身份审查此PR，直达要点：
+
+            - 代码质量与可维护性（TypeScript类型边界、模块职责、错误处理）
+            - 安全性（输入校验、Secrets使用、依赖风险）
+            - 性能与资源消耗（前端渲染、后端请求/DB IO热点）
+            - 测试策略（后端Jest、前端/端到端Playwright，需给出补测建议）
+            - 儿童应用合规与内容安全（COPPA、内容过滤、家长可控）
+
+            输出：
+            - 用中文在PR中评论，按“🔴严重/🟡建议/🟢良好”标注
+            - 指出具体文件与位置，给出可操作改进建议或示例
+            - 最后给出合并建议（block/approve/neutral）及简要理由
+
