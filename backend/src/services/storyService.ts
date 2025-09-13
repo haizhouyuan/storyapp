@@ -133,16 +133,17 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       
       messages.push({
         role: 'user',
-        content: `请为以下主题创作一个儿童睡前故事的开头：${topic}。
+        content: `请为以下主题创作一个适合8-12岁儿童的睡前故事开头：${topic}。
 
 要求：
-1. 故事内容至少600字，语言温柔、生动，适合3-8岁儿童
-2. 包含详细的场景描述、人物情感和细节
-3. 为故事设定一个有趣的开头情境
-4. 提供3个吸引人的选择选项，让孩子参与故事发展
-5. 使用JSON格式返回：{"storySegment":"故事内容（至少600字）","choices":["选择1","选择2","选择3"],"isEnding":false}
+1. 故事内容800-1200字，语言生动有趣，适合8-12岁儿童的认知水平
+2. 包含丰富的场景描述、角色心理和细节刻画
+3. 设定有挑战性和悬念的开头情境，激发孩子思考
+4. 融入教育元素：科学知识、历史文化或道德品格
+5. 提供3个具有策略性和思考性的选择，每个选择导向不同故事发展
+6. 使用JSON格式返回：{"storySegment":"故事内容（800-1200字）","choices":["选择1","选择2","选择3"],"isEnding":false}
 
-总互动次数预计为 ${Math.max(5, Math.min(10, maxChoices || 6))} 次，请设计好故事节奏。`
+总互动次数预计为 ${Math.max(8, Math.min(15, maxChoices || 10))} 次，支持更复杂的故事发展。`
       });
     }
 
@@ -188,7 +189,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       tokensUsed
     );
 
-    // 解析AI返回的JSON
+    // 解析AI返回的JSON（增强重试机制）
     logger.info(EventType.JSON_PARSE_START, '开始解析AI响应', {
       responseLength: aiResponse.length,
       responsePreview: aiResponse.substring(0, 100) + '...'
@@ -196,13 +197,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     
     let parsedResponse;
     try {
-      // 清理可能的markdown格式
-      const cleanedResponse = aiResponse
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
-      
-      parsedResponse = JSON.parse(cleanedResponse);
+      parsedResponse = extractJson(aiResponse);
       
       logger.info(EventType.JSON_PARSE_SUCCESS, 'JSON解析成功', {
         hasStorySegment: !!parsedResponse.storySegment,
@@ -211,18 +206,49 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       }, undefined, sessionId);
       
     } catch (parseError) {
-      logger.error(EventType.JSON_PARSE_ERROR, 'JSON解析失败，使用fallback策略', parseError as Error, {
+      logger.error(EventType.JSON_PARSE_ERROR, 'JSON解析失败，尝试重新请求', parseError as Error, {
         originalResponse: aiResponse,
         parseError: (parseError as Error).message
       }, sessionId);
       
-      // 如果JSON解析失败，尝试从文本中提取故事内容
-      const fallbackStory = aiResponse.substring(0, 200) + '...';
-      parsedResponse = {
-        storySegment: fallbackStory,
-        choices: ['继续探索', '回到家中', '寻求帮助'],
-        isEnding: false
-      };
+      // JSON解析失败时，尝试重新请求纯JSON格式
+      try {
+        logger.info(EventType.JSON_PARSE_START, '尝试JSON重试请求', {}, undefined, sessionId);
+        
+        const retryMessages = [
+          { role: 'system', content: '请仅返回纯JSON格式，不要包含代码块标记或任何额外说明文字。' },
+          { role: 'user', content: `请将以下内容转换为严格的JSON格式：\n\n${aiResponse}\n\n要求格式：{"storySegment": "故事内容", "choices": ["选择1", "选择2", "选择3"], "isEnding": false}` }
+        ];
+        
+        const retryResponse = await deepseekClient.post('/chat/completions', {
+          model: DEEPSEEK_CONFIG.CHAT_MODEL,
+          messages: retryMessages,
+          max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+          temperature: 0.1, // 降低温度确保格式准确
+          stream: DEEPSEEK_CONFIG.STREAM
+        });
+        
+        const retryContent = retryResponse.data?.choices?.[0]?.message?.content;
+        if (retryContent) {
+          parsedResponse = extractJson(retryContent);
+          logger.info(EventType.JSON_PARSE_SUCCESS, 'JSON重试解析成功', {
+            hasStorySegment: !!parsedResponse.storySegment,
+            choicesCount: Array.isArray(parsedResponse.choices) ? parsedResponse.choices.length : 0
+          }, undefined, sessionId);
+        } else {
+          throw new Error('重试请求返回空内容');
+        }
+      } catch (retryError) {
+        logger.error(EventType.JSON_PARSE_ERROR, 'JSON重试也失败，使用fallback策略', retryError as Error, sessionId);
+        
+        // 如果重试也失败，使用更智能的fallback策略
+        const fallbackStory = aiResponse.length > 800 ? aiResponse.substring(0, 800) + '...' : aiResponse;
+        parsedResponse = {
+          storySegment: fallbackStory,
+          choices: ['继续冒险探索', '寻找新的线索', '回到安全地带'],
+          isEnding: false
+        };
+      }
     }
 
     // 验证响应格式
@@ -617,8 +643,14 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
       return generateMockStoryTree(topic, storyTreeId, timestamp);
     }
     
-    // 使用基础模式快速生成故事树，避免超时
-    return await generateBasicStoryTreeService({ topic });
+    // 默认启用高级模式（三阶段协作），超时或失败时降级到基础模式
+    try {
+      console.log('尝试使用高级三阶段生成模式...');
+      return await generateAdvancedStoryTree(topic);
+    } catch (advancedError) {
+      console.warn('高级模式失败，降级到基础模式:', advancedError);
+      return await generateBasicStoryTreeService({ topic });
+    }
     
   } catch (error: any) {
     console.error('故事树生成失败:', error);
@@ -1042,10 +1074,10 @@ async function generateStoryTreeNode(
       throw new Error('AI响应缺少故事内容');
     }
     
-    // 验证字数要求
+    // 验证字数要求（800字标准）
     const segmentLength = parsedResponse.segment.replace(/\s/g, '').length;
-    if (segmentLength < 500) {
-      console.warn(`节点字数不足500字: ${segmentLength}字，路径: ${path}`);
+    if (segmentLength < 800) {
+      console.warn(`节点字数不足800字: ${segmentLength}字，路径: ${path}`);
       // 尝试扩展内容
       try {
         const expandResponse = await expandStorySegment(parsedResponse.segment);
@@ -1084,14 +1116,14 @@ async function generateStoryTreeNode(
 }
 
 /**
- * 扩展故事片段到500字以上
+ * 扩展故事片段到800字以上（适合8-12岁）
  */
 async function expandStorySegment(segment: string): Promise<string | null> {
   try {
     const expandMessages = [
       { 
         role: 'system', 
-        content: '你是一个擅长润色儿童故事的助手，请将给定文本保留情节不变地扩展为至少500字，语言温柔、适合3-8岁儿童。只返回扩展后的正文，不要任何额外说明。' 
+        content: '你是一个擅长创作儿童故事的专家，请将给定文本保留情节不变地扩展为800-1200字，语言生动有趣、适合8-12岁儿童的认知水平。增加更多的场景描述、角色心理和细节刑画。只返回扩展后的正文，不要任何额外说明。' 
       },
       { 
         role: 'user', 
@@ -1102,7 +1134,7 @@ async function expandStorySegment(segment: string): Promise<string | null> {
     const expandResp = await deepseekClient.post('/chat/completions', {
       model: DEEPSEEK_CONFIG.CHAT_MODEL,
       messages: expandMessages,
-      max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS - 200, 800),
+      max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS, 1500),
       temperature: 0.7,
       stream: false
     });
