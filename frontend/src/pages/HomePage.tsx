@@ -135,6 +135,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
           items-center 
           justify-center
           group
+          z-20
         "
         data-testid="my-stories-button"
       >
@@ -361,6 +362,8 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
               onKeyPress={handleKeyPress}
               placeholder="请输入你想听的故事主题..."
               disabled={isLoading}
+              autoFocus
+              tabIndex={1}
               data-testid="topic-input"
               className="
                 w-full
@@ -419,6 +422,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
             size="large"
             icon={!isLoading && <HomeIcon className="w-6 h-6" />}
             testId="start-story-button"
+            tabIndex={2}
             className="w-full max-w-xs"
           >
             {isLoading ? '正在准备...' : '开始讲故事'}

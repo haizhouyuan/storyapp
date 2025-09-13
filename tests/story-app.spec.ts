@@ -96,12 +96,24 @@ test.describe('儿童睡前故事App', () => {
     await expect(page.locator('text=我的故事')).toBeVisible();
     await expect(page.getByTestId('home-button')).toBeVisible();
     
-    // 如果没有故事，应该显示空状态
+    // 检查页面是否加载完成（等待加载状态消失或内容出现）
+    await page.waitForLoadState('networkidle');
+    
+    // 等待页面内容加载完成
+    await page.locator('text=我的故事').waitFor({ state: 'visible' });
+    
+    // 验证搜索框存在
+    await expect(page.getByTestId('search-input')).toBeVisible();
+    
+    // 检查是否有故事或显示空状态
     const hasStories = await page.locator('[data-testid^="story-card-"]').count() > 0;
     
     if (!hasStories) {
       await expect(page.locator('text=还没有保存的故事')).toBeVisible();
       await expect(page.getByTestId('create-first-story-button')).toBeVisible();
+    } else {
+      // 如果有故事，验证故事统计信息显示
+      await expect(page.locator('text=共有').first()).toBeVisible();
     }
   });
 
@@ -226,14 +238,21 @@ test.describe('儿童睡前故事App', () => {
   test('键盘导航支持', async ({ page }) => {
     const topicInput = page.getByTestId('topic-input');
     
-    // 使用Tab键导航
-    await page.keyboard.press('Tab');
+    // 等待页面完全加载
+    await page.waitForLoadState('networkidle');
     
-    // 应该焦点在输入框上
+    // 由于输入框有autofocus，它应该已经获得焦点
     await expect(topicInput).toBeFocused();
     
     // 输入内容
     await topicInput.fill('键盘测试故事');
+    
+    // 使用Tab键导航到按钮
+    await page.keyboard.press('Tab');
+    
+    // 验证按钮获得焦点
+    const startButton = page.getByTestId('start-story-button');
+    await expect(startButton).toBeFocused();
     
     // 按Enter键应该触发开始故事
     await page.keyboard.press('Enter');

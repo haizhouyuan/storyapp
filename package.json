@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "儿童睡前互动故事应用",
   "private": true,
-  "workspaces": ["backend", "frontend", "shared"],
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm run -w backend dev",
@@ -32,6 +36,7 @@
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "axios": "^1.11.0",
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "jest-util": "^30.0.5"
   }
 }

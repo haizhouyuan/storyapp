@@ -82,8 +82,9 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       throw customError;
     }
     
-    // 仅在测试环境允许mock，避免生产环境静默降级
-    if (process.env.NODE_ENV === 'test' && !process.env.DEEPSEEK_API_KEY) {
+    // 在没有API Key时使用mock数据（除了生产环境）
+    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== 'production') {
+      console.log('使用模拟数据生成适合8-12岁儿童的故事');
       return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
     }
     
@@ -635,9 +636,9 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 仅在测试环境允许mock，避免生产环境静默降级
-    if (process.env.NODE_ENV === 'test' && !process.env.DEEPSEEK_API_KEY) {
-      console.log('使用模拟数据生成故事树');
+    // 在没有API Key时使用mock数据（除了生产环境）
+    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== 'production') {
+      console.log('使用模拟数据生成适合8-12岁儿童的故事树');
       const storyTreeId = new ObjectId().toString();
       const timestamp = new Date().toISOString();
       return generateMockStoryTree(topic, storyTreeId, timestamp);
