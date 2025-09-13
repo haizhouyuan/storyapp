@@ -299,6 +299,8 @@ class Logger {
 
   // 简单的token估算
   private estimateTokens(text: string): number {
+    if (!text) return 0;
+    
     // 粗略估算：中文1字符≈1token，英文4字符≈1token
     const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
     const englishCount = text.length - chineseCount;
