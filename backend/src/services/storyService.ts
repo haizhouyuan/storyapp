@@ -75,6 +75,18 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
   try {
     const { topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
     
+    // 验证输入参数
+    if (!topic || topic.trim().length === 0) {
+      const customError = new Error('story_topic_required');
+      (customError as any).code = 'VALIDATION_ERROR';
+      throw customError;
+    }
+    
+    // 仅在测试环境允许mock，避免生产环境静默降级
+    if (process.env.NODE_ENV === 'test' && !process.env.DEEPSEEK_API_KEY) {
+      return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
+    }
+    
     logger.info(EventType.STORY_GENERATION_START, '开始生成故事片段', {
       topic,
       isNewStory: !currentStory,
@@ -477,6 +489,11 @@ export async function getStoryByIdService(id: string): Promise<GetStoryResponse 
   try {
     console.log('正在从MongoDB获取故事详情...');
     
+    // 验证ID格式
+    if (!ObjectId.isValid(id)) {
+      throw new Error('无效的故事ID格式');
+    }
+    
     // 获取数据库实例
     const db = getDatabase();
     const storiesCollection = db.collection(TABLES.STORIES);
@@ -501,6 +518,11 @@ export async function getStoryByIdService(id: string): Promise<GetStoryResponse 
     };
   } catch (error: any) {
     console.error('获取故事详情服务错误:', error);
+    
+    // 如果是验证错误，直接抛出
+    if (error.message === '无效的故事ID格式') {
+      throw error;
+    }
     
     if (error.code === 'DATABASE_ERROR') {
       throw error;
@@ -557,6 +579,11 @@ export async function deleteStoryService(params: DeleteStoryRequest): Promise<De
   } catch (error: any) {
     console.error('删除故事服务错误:', error);
     
+    // 如果是验证错误，直接抛出
+    if (error.message === '无效的故事ID格式') {
+      throw error;
+    }
+    
     if (error.message === '要删除的故事不存在') {
       const customError = new Error('要删除的故事不存在');
       (customError as any).code = 'STORY_NOT_FOUND';
@@ -582,8 +609,8 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 检查是否有API密钥，没有则使用模拟数据
-    if (!process.env.DEEPSEEK_API_KEY) {
+    // 仅在测试环境允许mock，避免生产环境静默降级
+    if (process.env.NODE_ENV === 'test' && !process.env.DEEPSEEK_API_KEY) {
       console.log('使用模拟数据生成故事树');
       const storyTreeId = new ObjectId().toString();
       const timestamp = new Date().toISOString();
@@ -1091,6 +1118,54 @@ async function expandStorySegment(segment: string): Promise<string | null> {
 /**
  * 生成模拟故事树（用于测试）
  */
+/**
+ * 生成模拟故事响应（用于测试环境）
+ */
+function generateMockStoryResponse(
+  topic: string, 
+  currentStory?: string, 
+  selectedChoice?: string, 
+  turnIndex?: number, 
+  maxChoices?: number, 
+  forceEnding?: boolean
+): GenerateStoryResponse {
+  const isNewStory = !currentStory;
+  const actualTurnIndex = turnIndex || 0;
+  
+  let storySegment: string;
+  let choices: string[];
+  let isEnding = false;
+  
+  if (isNewStory) {
+    // 新故事开头
+    storySegment = `在一个美丽的${topic === '小兔子的冒险' ? '花园里' : '神奇的地方'}，我们的主角开始了一段奇妙的旅程。阳光透过绿叶洒下斑驳的光影，微风轻柔地吹过，带来了花朵的香气。在这个充满魔法的世界里，每一步都可能遇到意想不到的惊喜。我们的主角充满好奇地四处张望，发现周围有许多有趣的东西。不远处，一只美丽的蝴蝶正在花丛中翩翩起舞，它的翅膀闪闪发光，就像彩虹一样美丽。另一边，一条小河正在欢快地流淌，发出叮咚叮咚的悦耳声音。突然，主角听到了一个神秘的声音，这个声音似乎在召唤着什么。这时，面前出现了几条不同的道路，每一条路都充满了未知的冒险和惊喜，现在需要做出选择了...`;
+    choices = [
+      '沿着鲜花盛开的小径前进',
+      '走向神秘的森林深处',
+      '跟随蝴蝶去探索'
+    ];
+  } else if (forceEnding || actualTurnIndex >= 4) {
+    // 强制结局或达到最大轮次
+    storySegment = `经过一番精彩的冒险，我们的主角终于完成了这次奇妙的旅程。${selectedChoice}的选择带来了意想不到的收获，主角不仅学到了很多宝贵的经验，还结交了许多好朋友。当太阳西下时，主角带着满满的快乐和美好的回忆，踏上了回家的路。这真是一次永远难忘的奇妙冒险！从此以后，主角每当想起这次冒险，心中都会充满温暖和快乐。晚安，愿你也能拥有这样美好的梦境！`;
+    choices = [];
+    isEnding = true;
+  } else {
+    // 继续故事
+    storySegment = `主角选择了"${selectedChoice}"，继续着这场奇妙的冒险。新的道路带来了新的发现和惊喜。在接下来的旅程中，主角遇到了更多有趣的事情，学到了更多宝贵的知识。每一步都让这个故事变得更加精彩和有趣。现在，又到了需要做出新选择的时候了...`;
+    choices = [
+      `继续探索${topic}的奥秘`,
+      '寻找新的朋友一起冒险',
+      '解决遇到的小难题'
+    ];
+  }
+  
+  return {
+    storySegment,
+    choices,
+    isEnding
+  };
+}
+
 function generateMockStoryTree(topic: string, storyTreeId: string, timestamp: string): GenerateFullStoryResponse {
   const mockSegmentText = `在一个美丽的${topic === '小兔子的冒险' ? '花园里' : '神奇的地方'}，我们的主角开始了一段奇妙的旅程。阳光透过绿叶洒下斑驳的光影，微风轻柔地吹过，带来了花朵的香气。在这个充满魔法的世界里，每一步都可能遇到意想不到的惊喜。
 

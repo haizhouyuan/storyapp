@@ -173,6 +173,14 @@ router.get('/get-story/:id', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('获取故事详情失败:', error);
     
+    // 检查是否是无效ID格式错误
+    if (error.message === '无效的故事ID格式') {
+      return res.status(400).json({
+        error: '无效的故事ID格式',
+        code: 'INVALID_ID_FORMAT'
+      });
+    }
+    
     if (error.code === 'DATABASE_ERROR') {
       return res.status(503).json({
         error: '数据库服务暂时不可用，请稍后再试',
@@ -208,6 +216,14 @@ router.delete('/delete-story/:id', async (req: Request, res: Response) => {
     res.json(result);
   } catch (error: any) {
     console.error('删除故事失败:', error);
+    
+    // 检查是否是无效ID格式错误
+    if (error.message === '无效的故事ID格式') {
+      return res.status(400).json({
+        error: '无效的故事ID格式',
+        code: 'INVALID_ID_FORMAT'
+      });
+    }
     
     if (error.code === 'STORY_NOT_FOUND') {
       return res.status(404).json({

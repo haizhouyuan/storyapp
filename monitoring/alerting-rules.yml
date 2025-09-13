@@ -1,0 +1,211 @@
+# Prometheus告警规则配置
+# StoryApp应用监控告警
+
+groups:
+  - name: storyapp-critical
+    rules:
+      # 服务可用性告警
+      - alert: StoryAppServiceDown
+        expr: up{job="storyapp-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: storyapp
+        annotations:
+          summary: "StoryApp backend service is down"
+          description: "StoryApp backend service has been down for more than 1 minute."
+      
+      # 数据库连接告警
+      - alert: MongoDBConnectionFailed
+        expr: storyapp_db_connection_pool{status="active"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: mongodb
+        annotations:
+          summary: "MongoDB connection failed"
+          description: "No active MongoDB connections available for {{ $labels.instance }}"
+
+      # 内存使用过高
+      - alert: HighMemoryUsage
+        expr: (storyapp_memory_usage_bytes{type="heapUsed"} / storyapp_memory_usage_bytes{type="heapTotal"}) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          service: storyapp
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 90% for more than 5 minutes: {{ $value }}%"
+
+      # API响应时间过慢
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, storyapp_http_request_duration_seconds_bucket) > 5
+        for: 3m
+        labels:
+          severity: critical
+          service: storyapp-api
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile latency is above 5 seconds: {{ $value }}s"
+
+      # DeepSeek API故障
+      - alert: DeepSeekAPIFailure
+        expr: rate(storyapp_deepseek_api_calls_total{status!="200"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          service: deepseek-api
+        annotations:
+          summary: "High DeepSeek API failure rate"
+          description: "DeepSeek API failure rate is above 10%: {{ $value }}"
+
+  - name: storyapp-warning
+    rules:
+      # 故事生成成功率低
+      - alert: LowStoryGenerationSuccess
+        expr: rate(storyapp_story_generation_total{success="true"}[10m]) / rate(storyapp_story_generation_total[10m]) < 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: story-generation
+        annotations:
+          summary: "Low story generation success rate"
+          description: "Story generation success rate is below 80%: {{ $value }}%"
+
+      # HTTP错误率增高
+      - alert: HighHTTPErrorRate
+        expr: rate(storyapp_http_requests_total{status_code=~"4..|5.."}[5m]) / rate(storyapp_http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: storyapp-api
+        annotations:
+          summary: "High HTTP error rate"
+          description: "HTTP error rate (4xx/5xx) is above 5%: {{ $value }}%"
+
+      # 数据库操作延迟
+      - alert: HighDatabaseLatency
+        expr: histogram_quantile(0.95, storyapp_db_operation_duration_seconds_bucket) > 2
+        for: 3m
+        labels:
+          severity: warning
+          service: mongodb
+        annotations:
+          summary: "High database operation latency"
+          description: "95th percentile DB latency is above 2 seconds: {{ $value }}s"
+
+      # 内存使用警告
+      - alert: ModerateMemoryUsage
+        expr: (storyapp_memory_usage_bytes{type="heapUsed"} / storyapp_memory_usage_bytes{type="heapTotal"}) > 0.7
+        for: 10m
+        labels:
+          severity: warning
+          service: storyapp
+        annotations:
+          summary: "Moderate memory usage"
+          description: "Memory usage is above 70%: {{ $value }}%"
+
+      # DeepSeek API延迟过高
+      - alert: HighDeepSeekLatency
+        expr: histogram_quantile(0.90, storyapp_deepseek_api_latency_seconds_bucket) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: deepseek-api
+        annotations:
+          summary: "High DeepSeek API latency"
+          description: "90th percentile DeepSeek API latency is above 10 seconds: {{ $value }}s"
+
+  - name: storyapp-business
+    rules:
+      # 故事生成频率异常低
+      - alert: LowStoryGenerationRate
+        expr: rate(storyapp_story_generation_total[1h]) < 0.1
+        for: 30m
+        labels:
+          severity: warning
+          service: story-generation
+        annotations:
+          summary: "Low story generation rate"
+          description: "Story generation rate is unusually low: {{ $value }} requests/hour"
+
+      # 用户会话持续时间异常
+      - alert: UnusualSessionDuration
+        expr: histogram_quantile(0.50, storyapp_user_session_duration_seconds_bucket) > 3600
+        for: 15m
+        labels:
+          severity: info
+          service: user-experience
+        annotations:
+          summary: "Unusual session duration detected"
+          description: "Median user session duration is above 1 hour: {{ $value }}s"
+
+      # 内容验证失败率高
+      - alert: HighContentValidationFailures
+        expr: rate(storyapp_content_validation_total{result="fail"}[10m]) / rate(storyapp_content_validation_total[10m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: content-validation
+        annotations:
+          summary: "High content validation failure rate"
+          description: "Content validation failure rate is above 10%: {{ $value }}%"
+
+  - name: storyapp-infrastructure
+    rules:
+      # 磁盘空间不足
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 10%: {{ $value }}%"
+
+      # CPU使用率过高
+      - alert: HighCPUUsage
+        expr: (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80%: {{ $value }}%"
+
+      # 文件描述符使用率高
+      - alert: HighFileDescriptorUsage
+        expr: (process_open_fds / process_max_fds) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High file descriptor usage"
+          description: "File descriptor usage is above 80%: {{ $value }}%"
+
+  - name: storyapp-security
+    rules:
+      # 异常高的失败请求
+      - alert: SuspiciousActivity
+        expr: rate(storyapp_http_requests_total{status_code="401"}[5m]) > 1
+        for: 3m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "Suspicious authentication failures"
+          description: "High rate of 401 responses detected: {{ $value }} requests/second"
+
+      # 限流触发过多
+      - alert: HighRateLimitHits
+        expr: rate(storyapp_rate_limit_hits_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "High rate limit hits"
+          description: "Rate limiting is being triggered frequently: {{ $value }} hits/second"

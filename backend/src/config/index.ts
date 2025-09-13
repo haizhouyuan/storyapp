@@ -1,30 +1,25 @@
-import dotenv from 'dotenv';
-import path from 'path';
+// 使用集中化配置加载器
+const { getTypedConfig } = require('../../../config/env-loader');
 
-// Load environment variables
-dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
+// 获取类型化配置
+const typedConfig = getTypedConfig();
 
-// Configuration object with defaults and validation
+// Configuration object using centralized config
 export const config = {
-  // Server configuration
-  server: {
-    port: parseInt(process.env.PORT || '5001', 10),
-    host: process.env.HOST || '0.0.0.0',
-    nodeEnv: process.env.NODE_ENV || 'development',
-    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
-  },
+  // Server configuration - 使用集中化配置
+  server: typedConfig.server,
 
-  // Logging configuration
+  // Logging configuration - 使用集中化配置
   logging: {
-    level: process.env.LOG_LEVEL || 'info',
+    ...typedConfig.logging,
     format: process.env.LOG_FORMAT || 'json', // json | pretty
   },
 
-  // Rate limiting configuration
+  // Rate limiting configuration - 扩展基础配置
   rateLimit: {
     general: {
-      windowMs: parseInt(process.env.RATE_LIMIT_GENERAL_WINDOW_MS || '900000', 10), // 15 minutes
-      max: parseInt(process.env.RATE_LIMIT_GENERAL_MAX || '100', 10),
+      windowMs: typedConfig.rateLimit.windowMs,
+      max: typedConfig.rateLimit.max,
     },
     auth: {
       windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW_MS || '900000', 10), // 15 minutes
@@ -43,7 +38,7 @@ export const config = {
   // Security configuration
   security: {
     trustProxy: process.env.TRUST_PROXY === 'true',
-    corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
+    corsOrigins: process.env.CORS_ORIGINS?.split(',') || [typedConfig.server.frontendUrl],
     helmetOptions: {
       hsts: {
         maxAge: parseInt(process.env.HSTS_MAX_AGE || '31536000', 10), // 1 year
@@ -53,10 +48,10 @@ export const config = {
     },
   },
 
-  // Database configuration
+  // Database configuration - 使用集中化配置
   database: {
-    url: process.env.DATABASE_URL || process.env.MONGODB_URI || 'mongodb://localhost:27017/storyapp',
-    name: process.env.DATABASE_NAME || 'storyapp',
+    url: typedConfig.database.uri,
+    name: typedConfig.database.name,
     options: {
       maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE || '10', 10),
       minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE || '5', 10),
@@ -89,8 +84,11 @@ export const config = {
   features: {
     enableMetrics: process.env.FEATURE_METRICS !== 'false',
     enableTracing: process.env.FEATURE_TRACING === 'true',
-    enableDetailedErrors: process.env.NODE_ENV === 'development',
+    enableDetailedErrors: typedConfig.server.nodeEnv === 'development',
   },
+
+  // API配置 - 新增，使用集中化配置
+  api: typedConfig.api,
 };
 
 // Validation function
