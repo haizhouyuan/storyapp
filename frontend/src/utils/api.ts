@@ -6,7 +6,6 @@ import type {
   SaveStoryResponse,
   GetStoriesResponse,
   GetStoryResponse,
-  DeleteStoryRequest,
   DeleteStoryResponse,
   GenerateFullStoryRequest,
   GenerateFullStoryResponse,

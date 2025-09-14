@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { HomeIcon, SpeakerWaveIcon } from '@heroicons/react/24/outline';
@@ -34,10 +34,10 @@ export default function StoryTreePage() {
     
     // 开始生成故事树
     generateStoryTree();
-  }, [topic]);
+  }, [topic, generateStoryTree, navigate]);
 
   // 生成完整故事树
-  const generateStoryTree = async () => {
+  const generateStoryTree = useCallback(async () => {
     if (!topic) return;
 
     setIsGenerating(true);
@@ -65,7 +65,7 @@ export default function StoryTreePage() {
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [topic, navigate]);
 
   // 处理选择
   const handleChoice = (choiceIndex: number) => {

@@ -16,6 +16,13 @@ function App() {
   // 故事会话状态 - 在整个应用中共享
   const [storySession, setStorySession] = React.useState<StorySession | null>(null);
   const [storyTreeSession, setStoryTreeSession] = React.useState<StoryTreeSession | null>(null);
+  
+  // TODO: 在后续版本中实现故事树功能
+  React.useEffect(() => {
+    if (storyTreeSession) {
+      console.log('Story tree session:', storyTreeSession);
+    }
+  }, [storyTreeSession]);
 
   return (
     <Router>

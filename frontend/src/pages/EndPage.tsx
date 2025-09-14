@@ -158,13 +158,13 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
     storyDuration = Math.round((Date.now() - storySession.startTime) / 1000 / 60);
     choiceCount = storySession.path.filter(p => p.choice).length;
     segmentCount = storySession.path.length;
-    currentTopic = storySession.topic;
+    // currentTopic = storySession.topic; // 后续可能需要显示主题
   } else if (storyTreeData) {
     // 故事树模式
     storyDuration = 5; // 估算值，因为故事树模式通常较快
     choiceCount = storyTreeData.finalPath.length;
     segmentCount = storyTreeData.finalPath.length + 1; // 包含开始节点
-    currentTopic = storyTreeData.topic;
+    // currentTopic = storyTreeData.topic; // 后续可能需要显示主题
   }
 
   return (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { HomeIcon, SpeakerWaveIcon } from '@heroicons/react/24/outline';
@@ -50,10 +50,10 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
       // 这里需要重新生成选择，实际项目中应该保存选择到session中
       setHasStarted(true);
     }
-  }, [storySession]);
+  }, [storySession, generateFirstSegment, navigate]);
 
   // 生成第一段故事
-  const generateFirstSegment = async () => {
+  const generateFirstSegment = useCallback(async () => {
     if (!storySession) return;
 
     setIsLoading(true);
@@ -95,7 +95,7 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [storySession, navigate, onUpdateSession]);
 
   // 处理选择
   const handleChoice = async (choice: string, choiceIndex: number) => {
