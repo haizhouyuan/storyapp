@@ -20,9 +20,23 @@ RUN npm ci --workspaces
 # 复制全量源码
 COPY . .
 
-# 构建前后端
-RUN npm run -w shared build && \
+# 构建前后端 - 添加详细调试信息
+RUN echo "=== Building shared package ===" && \
+    cd shared && \
+    pwd && \
+    ls -la && \
+    echo "=== Running TypeScript compiler directly ===" && \
+    npx tsc -p tsconfig.build.json && \
+    echo "=== After compilation ===" && \
+    ls -la && \
+    echo "=== Checking if dist directory exists ===" && \
+    (ls -la dist/ || echo "dist directory not found") && \
+    cd .. && \
+    echo "=== Contents of shared directory ===" && \
+    find shared/ -type f -name "*.js" -o -name "*.d.ts" | head -20 && \
+    echo "=== Building frontend ===" && \
     npm run -w frontend build && \
+    echo "=== Building backend ===" && \
     npm run -w backend build
 
 # 生产镜像
