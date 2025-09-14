@@ -39,20 +39,18 @@ jobs:
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_request_number: context.issue.number
+              pull_number: context.issue.number
             });
             
-            return {
-              head_ref: pr.head.ref,
-              head_sha: pr.head.sha,
-              base_ref: pr.base.ref,
-              clone_url: pr.head.repo.clone_url
-            };
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('base_ref', pr.base.ref);
+            core.setOutput('clone_url', pr.head.repo.clone_url);
 
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ fromJson(steps.pr-details.outputs.result).head_ref }}
+          ref: ${{ steps.pr-details.outputs.head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
@@ -213,14 +211,24 @@ jobs:
           评论: ${{ github.event.comment.html_url }}"
           
           # 推送修改
-          git push origin ${{ fromJson(steps.pr-details.outputs.result).head_ref }}
+          git push origin ${{ steps.pr-details.outputs.head_ref }}
 
       - name: Post fix summary comment
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const diagnosticReport = require('fs').readFileSync('diagnostic_report.md', 'utf8');
+            const fs = require('fs');
+            let diagnosticReport = '### 🔍 诊断报告\n未生成诊断报告文件';
+            
+            try {
+              if (fs.existsSync('diagnostic_report.md')) {
+                diagnosticReport = fs.readFileSync('diagnostic_report.md', 'utf8');
+              }
+            } catch (error) {
+              console.log('读取诊断报告失败:', error.message);
+            }
+            
             const fixesApplied = '${{ steps.apply-fixes.outputs.fixes_applied }}' === 'true';
             const testsPassed = '${{ steps.test-after-fix.outputs.tests_passed }}' === 'true';
             
