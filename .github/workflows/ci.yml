@@ -53,23 +53,11 @@ jobs:
       - name: Build frontend
         run: npm run -w frontend build
 
-      - name: Wait for MongoDB
-        run: |
-          MONGO_PASSWORD="${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}"
-          timeout 60 bash -c '
-            until mongosh --username root --password "$MONGO_PASSWORD" --authenticationDatabase admin --quiet --eval "db.runCommand({ ping: 1 }).ok" 2>/dev/null | grep -q 1; do 
-              echo "Waiting for MongoDB..."
-              sleep 3
-            done
-            echo "MongoDB is ready!"
-          '
-
-      # FIXME: 暂时跳过后端单元测试直到修复axios模拟问题
-      # - name: Run backend tests
-      #   run: npm run -w backend test
-      #   env:
-      #     NODE_ENV: test
-      #     MONGODB_URI: mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@localhost:27017/storyapp?authSource=admin
+      - name: Run backend tests
+        run: npm run -w backend test
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@localhost:27017/storyapp_test?authSource=admin
 
       - name: Upload test results
         if: always()
