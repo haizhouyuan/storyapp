@@ -58,3 +58,9 @@ coverage/
 
 # Yarn Integrity file
 .yarn-integrity
+# Ignore accidental Windows drive mount
+D:/
+D:\storyapp-worktrees/
+
+# Ignore MS Office lock files
+~
