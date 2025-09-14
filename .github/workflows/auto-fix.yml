@@ -6,7 +6,7 @@ on:
 
 jobs:
   auto-fix:
-    # 仅在PR评论，且评论者为成员/所有者，且包含修复指令时运行
+    # 仅在 PR 评论，且评论者为成员/所有者，且包含修复指令时运行
     if: >
       ${{ github.event.issue.pull_request &&
           contains('OWNER,MEMBER,COLLABORATOR', github.event.comment.author_association) &&
@@ -142,40 +142,23 @@ jobs:
           fi
           cd ..
 
-      - name: Apply automatic fixes
+      - name: Run Claude Code to apply fixes
         id: apply-fixes
-        if: >
-          steps.diagnostics.outputs.backend_lint_issues == 'true' ||
-          steps.diagnostics.outputs.frontend_lint_issues == 'true' ||
-          steps.diagnostics.outputs.backend_build_failed == 'true' ||
-          steps.diagnostics.outputs.frontend_build_failed == 'true'
-        run: |
-          echo "🔧 应用自动修复..."
-          
-          # 应用linting修复
-          if [ "${{ steps.diagnostics.outputs.backend_lint_issues }}" = "true" ]; then
-            echo "修复后端代码规范问题..."
-            cd backend && npm run lint:fix --if-present
-            cd ..
-          fi
-          
-          if [ "${{ steps.diagnostics.outputs.frontend_lint_issues }}" = "true" ]; then
-            echo "修复前端代码规范问题..."
-            cd frontend && npm run lint:fix --if-present
-            cd ..
-          fi
-          
-          # 检查是否有修改
-          if git diff --quiet; then
-            echo "fixes_applied=false" >> $GITHUB_OUTPUT
-            echo "无需修复或自动修复无效果"
-          else
-            echo "fixes_applied=true" >> $GITHUB_OUTPUT
-            echo "自动修复已应用"
-          fi
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_sticky_comment: true
+          track_progress: true
+          prompt: |
+            请根据上一步诊断报告（diagnostic_report.md）和 CI 失败信息，对当前 PR 进行“最小可行修改”的自动修复：
+            - 优先修复编译/类型/测试失败与明显的代码规范问题；
+            - 尽可能保持变更最小；必要时补充或修正测试；
+            - 提交信息使用："claude: autofix"；
+            - 在 PR 中附上修复摘要（关键文件/修改点/原因）。
 
       - name: Run tests after fixes
-        if: steps.apply-fixes.outputs.fixes_applied == 'true'
+        if: always()
         id: test-after-fix
         run: |
           echo "🧪 修复后运行测试..."
@@ -192,26 +175,18 @@ jobs:
           
           echo "tests_passed=true" >> $GITHUB_OUTPUT
 
-      - name: Commit and push fixes
-        if: steps.apply-fixes.outputs.fixes_applied == 'true' && steps.test-after-fix.outputs.tests_passed == 'true'
+      - name: Fallback commit if changes exist and not committed
+        if: always()
         run: |
-          echo "📝 提交自动修复..."
-          
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Auto-Fix"
-          
-          git add -A
-          git commit -m "🤖 auto-fix: 自动修复代码质量问题
-
-          - 应用ESLint自动修复
-          - 修复TypeScript类型问题  
-          - 确保构建和测试通过
-          
-          触发者: @${{ github.event.comment.user.login }}
-          评论: ${{ github.event.comment.html_url }}"
-          
-          # 推送修改
-          git push origin ${{ steps.pr-details.outputs.head_ref }}
+          if ! git diff --quiet; then
+            echo "📝 发现未提交的修改，执行提交..."
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action Auto-Fix"
+            git add -A
+            git commit -m "claude: autofix"
+            git push origin ${{ steps.pr-details.outputs.head_ref }}
+          else
+            echo "没有未提交的修改。"
 
       - name: Post fix summary comment
         if: always()
