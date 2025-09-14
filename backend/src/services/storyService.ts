@@ -1,5 +1,14 @@
 import { ObjectId } from 'mongodb';
 import { getDatabase, TABLES } from '../config/database';
+
+// 检查是否为有效的API Key
+function isValidApiKey(apiKey: string | undefined): boolean {
+  return !!(apiKey && 
+    apiKey !== 'your_deepseek_api_key_here' && 
+    apiKey.trim().length > 0 &&
+    !apiKey.includes('placeholder') &&
+    !apiKey.includes('example'));
+}
 import { 
   StoryDocument, 
   createStoryDocument, 
@@ -82,8 +91,8 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       throw customError;
     }
     
-    // 在没有API Key时使用mock数据（除了生产环境）
-    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== 'production') {
+    // 在没有有效API Key时使用mock数据（除了生产环境）
+    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY) && process.env.NODE_ENV !== 'production') {
       console.log('使用模拟数据生成适合8-12岁儿童的故事');
       return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
     }
@@ -636,8 +645,8 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 在没有API Key时使用mock数据（除了生产环境）
-    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== 'production') {
+    // 在没有有效API Key时使用mock数据（除了生产环境）
+    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY) && process.env.NODE_ENV !== 'production') {
       console.log('使用模拟数据生成适合8-12岁儿童的故事树');
       const storyTreeId = new ObjectId().toString();
       const timestamp = new Date().toISOString();
@@ -935,8 +944,8 @@ export async function generateBasicStoryTreeService(params: GenerateFullStoryReq
     const storyTreeId = new ObjectId().toString();
     const timestamp = new Date().toISOString();
 
-    // 检查是否有API密钥，没有则使用模拟数据
-    if (!process.env.DEEPSEEK_API_KEY) {
+    // 检查是否有有效API密钥，没有则使用模拟数据
+    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY)) {
       console.log('使用模拟数据生成故事树');
       return generateMockStoryTree(topic, storyTreeId, timestamp);
     }

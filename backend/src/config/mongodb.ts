@@ -42,9 +42,6 @@ export async function connectToDatabase(): Promise<Db> {
     console.log(`📍 数据库: ${MONGODB_DB_NAME}`);
     console.log(`🔗 URI: ${MONGODB_URI}`);
     
-    // 初始化数据库索引
-    await initializeDatabase();
-    
     return db;
   } catch (error) {
     console.error('❌ MongoDB连接失败:', error);
@@ -52,22 +49,6 @@ export async function connectToDatabase(): Promise<Db> {
   }
 }
 
-/**
- * 初始化数据库索引
- */
-async function initializeDatabase(): Promise<void> {
-  try {
-    const storiesCollection = db.collection(COLLECTIONS.STORIES);
-    
-    // 创建索引
-    await storiesCollection.createIndex({ created_at: -1 });
-    await storiesCollection.createIndex({ title: 'text' });
-    
-    console.log('✅ 数据库索引初始化完成');
-  } catch (error) {
-    console.error('数据库索引初始化失败:', error);
-  }
-}
 
 /**
  * 获取数据库实例
