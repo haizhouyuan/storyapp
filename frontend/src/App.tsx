@@ -15,7 +15,7 @@ import type { StorySession, StoryTreeSession } from '../../shared/types';
 function App() {
   // 故事会话状态 - 在整个应用中共享
   const [storySession, setStorySession] = React.useState<StorySession | null>(null);
-  const [storyTreeSession, setStoryTreeSession] = React.useState<StoryTreeSession | null>(null);
+  const [, setStoryTreeSession] = React.useState<StoryTreeSession | null>(null);
 
   return (
     <Router>

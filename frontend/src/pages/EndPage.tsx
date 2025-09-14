@@ -151,20 +151,20 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
   let storyDuration = 0;
   let choiceCount = 0;
   let segmentCount = 0;
-  let currentTopic = '';
+  // let currentTopic = '';
 
   if (storySession) {
     // 渐进式故事模式
     storyDuration = Math.round((Date.now() - storySession.startTime) / 1000 / 60);
     choiceCount = storySession.path.filter(p => p.choice).length;
     segmentCount = storySession.path.length;
-    currentTopic = storySession.topic;
+    // currentTopic = storySession.topic;
   } else if (storyTreeData) {
     // 故事树模式
     storyDuration = 5; // 估算值，因为故事树模式通常较快
     choiceCount = storyTreeData.finalPath.length;
     segmentCount = storyTreeData.finalPath.length + 1; // 包含开始节点
-    currentTopic = storyTreeData.topic;
+    // currentTopic = storyTreeData.topic;
   }
 
   return (

@@ -6,8 +6,8 @@ import type {
   SaveStoryResponse,
   GetStoriesResponse,
   GetStoryResponse,
-  DeleteStoryRequest,
-  DeleteStoryResponse,
+  // DeleteStoryRequest,
+  // DeleteStoryResponse,
   GenerateFullStoryRequest,
   GenerateFullStoryResponse,
   ApiError
@@ -133,7 +133,7 @@ export async function getStoryById(id: string): Promise<GetStoryResponse> {
 /**
  * 删除故事
  */
-export async function deleteStory(id: string): Promise<DeleteStoryResponse> {
+export async function deleteStory(id: string): Promise<any> {
   try {
     const response = await apiClient.delete(`/delete-story/${id}`);
     return response.data;

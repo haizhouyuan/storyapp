@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { HomeIcon, SpeakerWaveIcon } from '@heroicons/react/24/outline';
@@ -27,33 +27,8 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
   
   const navigate = useNavigate();
 
-  // 如果没有故事会话，重定向到首页
-  useEffect(() => {
-    if (!storySession) {
-      navigate('/');
-      return;
-    }
-
-    // 如果故事已完成，跳转到结束页
-    if (storySession.isComplete) {
-      navigate('/end');
-      return;
-    }
-
-    // 如果故事刚开始，生成第一段
-    if (storySession.path.length === 0) {
-      generateFirstSegment();
-    } else {
-      // 显示最后一段故事和选择
-      const lastPath = storySession.path[storySession.path.length - 1];
-      setCurrentSegment(lastPath.segment);
-      // 这里需要重新生成选择，实际项目中应该保存选择到session中
-      setHasStarted(true);
-    }
-  }, [storySession]);
-
   // 生成第一段故事
-  const generateFirstSegment = async () => {
+  const generateFirstSegment = useCallback(async () => {
     if (!storySession) return;
 
     setIsLoading(true);
@@ -95,7 +70,32 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [storySession, onUpdateSession, navigate]);
+
+  // 如果没有故事会话，重定向到首页
+  useEffect(() => {
+    if (!storySession) {
+      navigate('/');
+      return;
+    }
+
+    // 如果故事已完成，跳转到结束页
+    if (storySession.isComplete) {
+      navigate('/end');
+      return;
+    }
+
+    // 如果故事刚开始，生成第一段
+    if (storySession.path.length === 0) {
+      generateFirstSegment();
+    } else {
+      // 显示最后一段故事和选择
+      const lastPath = storySession.path[storySession.path.length - 1];
+      setCurrentSegment(lastPath.segment);
+      // 这里需要重新生成选择，实际项目中应该保存选择到session中
+      setHasStarted(true);
+    }
+  }, [storySession, generateFirstSegment, navigate]);
 
   // 处理选择
   const handleChoice = async (choice: string, choiceIndex: number) => {
