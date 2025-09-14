@@ -1,13 +1,14 @@
-name: CI
+# FIXME: 已弃用，使用ci.yml替代
+# name: CI
 
-on:
-  push:
-    branches: ["**"]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+# on:
+#   push:
+#     branches: ["**"]
+#     paths-ignore:
+#       - "**/*.md"
+#       - "docs/**"
+#   pull_request:
+#     types: [opened, reopened, synchronize, ready_for_review]
     branches: ["**"]
   workflow_dispatch:
 
