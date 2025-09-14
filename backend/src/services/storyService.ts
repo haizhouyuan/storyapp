@@ -89,10 +89,11 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     
     // 生产环境必须有API密钥
     if (process.env.NODE_ENV === 'production' && !process.env.DEEPSEEK_API_KEY) {
-      logger.error(EventType.AI_API_ERROR, 'DeepSeek API密钥未配置', {
+      logger.error(EventType.AI_API_ERROR, 'DeepSeek API密钥未配置', undefined, {
         topic,
-        environment: process.env.NODE_ENV
-      }, { startTime }, sessionId);
+        environment: process.env.NODE_ENV,
+        startTime
+      }, sessionId);
       
       const configError = new Error('服务暂时不可用，请稍后重试');
       (configError as any).code = 'SERVICE_UNAVAILABLE';
