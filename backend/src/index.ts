@@ -24,8 +24,6 @@ import logger, { createLogger } from './config/logger';
 import storyRoutes from './routes/stories';
 import healthRoutes from './routes/health';
 import adminRoutes from './routes/admin';
-import workflowProjectsRoutes from './routes/workflow/projects';
-import workflowMiraclesRoutes from './routes/workflow/miracles';
 import docsRoutes from './routes/docs';
 
 // 导入数据库连接
@@ -82,9 +80,7 @@ app.use(generalRateLimit);
 // Authentication routes with stricter rate limiting
 app.use('/api/auth', authRateLimit);
 
-// Workflow routes with specific rate limiters
-app.use('/api/workflow/projects', createProjectRateLimit, workflowProjectsRoutes);
-app.use('/api/workflow', validationRateLimit, workflowMiraclesRoutes);
+// Note: Workflow routes removed as they were not relevant to the children's story app
 
 // API documentation routes (public)
 app.use('/docs', docsRoutes);
