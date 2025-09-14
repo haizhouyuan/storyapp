@@ -61,3 +61,6 @@ coverage/
 # Ignore accidental Windows drive mount
 D:/
 D:\storyapp-worktrees/
+
+# Ignore MS Office lock files
+~
