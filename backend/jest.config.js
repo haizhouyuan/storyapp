@@ -10,8 +10,12 @@ module.exports = {
     '^.+\\.ts$': 'ts-jest',
   },
   moduleNameMapper: {
-    '^axios$': require.resolve('axios')
+    '^axios$': require.resolve('axios'),
+    '^uuid$': require.resolve('uuid')
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(uuid)/)'
+  ],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/index.ts',
