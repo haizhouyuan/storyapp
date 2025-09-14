@@ -75,7 +75,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
   try {
     const { topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
     
-    // 验证输入参数
+    // 验证输入参数（始终验证，即使在测试环境）
     if (!topic || topic.trim().length === 0) {
       const customError = new Error('story_topic_required');
       (customError as any).code = 'VALIDATION_ERROR';
