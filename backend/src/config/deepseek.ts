@@ -7,7 +7,7 @@ const typedConfig = getTypedConfig();
 const DEEPSEEK_API_URL = typedConfig.api.deepseek.apiUrl;
 const DEEPSEEK_API_KEY = typedConfig.api.deepseek.apiKey;
 
-console.log('🔑 DeepSeek API Key 加载状态:', DEEPSEEK_API_KEY ? `已加载 (${DEEPSEEK_API_KEY.substring(0, 10)}...)` : '未找到');
+console.log('🔑 DeepSeek API Key 加载状态:', DEEPSEEK_API_KEY ? '已加载 (*****)' : '未找到');
 
 if (!DEEPSEEK_API_KEY) {
   console.warn('⚠️  未配置DeepSeek API Key，将使用模拟数据进行测试');

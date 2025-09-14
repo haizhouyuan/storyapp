@@ -174,7 +174,7 @@ const enhancedMetrics = [
   apiResponseTimeDistribution,
 ];
 
-enhancedMetrics.forEach(metric => register.registerMetric(metric));
+enhancedMetrics.forEach(metric => register.registerMetric(metric as any));
 
 // ===== 辅助函数 =====
 
@@ -311,4 +311,17 @@ export const updateResourceUtilization = () => {
 };
 
 // 启动定期指标更新
-setInterval(updateResourceUtilization, 30000); // 每30秒更新一次
+const resourceMetricsInterval = setInterval(updateResourceUtilization, 30000); // 每30秒更新一次
+
+// 优雅关闭处理
+const cleanupResourceMetrics = () => {
+  if (resourceMetricsInterval) {
+    clearInterval(resourceMetricsInterval);
+    console.log('🧹 资源监控定时器已清理');
+  }
+};
+
+// 监听进程退出事件
+process.on('SIGINT', cleanupResourceMetrics);
+process.on('SIGTERM', cleanupResourceMetrics);
+process.on('exit', cleanupResourceMetrics);

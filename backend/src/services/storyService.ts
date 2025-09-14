@@ -1152,7 +1152,7 @@ async function expandStorySegment(segment: string): Promise<string | null> {
  * 生成模拟故事树（用于测试）
  */
 /**
- * 生成模拟故事响应（用于测试环境）
+ * 生成模拟故事响应（用于测试环境，针对10岁儿童优化）
  */
 function generateMockStoryResponse(
   topic: string, 
@@ -1169,27 +1169,19 @@ function generateMockStoryResponse(
   let choices: string[];
   let isEnding = false;
   
+  // 基于主题生成更个性化的故事内容
+  const themeBasedContent = generateThemeBasedStory(topic, isNewStory, selectedChoice, actualTurnIndex, forceEnding);
+  
   if (isNewStory) {
-    // 新故事开头
-    storySegment = `在一个美丽的${topic === '小兔子的冒险' ? '花园里' : '神奇的地方'}，我们的主角开始了一段奇妙的旅程。阳光透过绿叶洒下斑驳的光影，微风轻柔地吹过，带来了花朵的香气。在这个充满魔法的世界里，每一步都可能遇到意想不到的惊喜。我们的主角充满好奇地四处张望，发现周围有许多有趣的东西。不远处，一只美丽的蝴蝶正在花丛中翩翩起舞，它的翅膀闪闪发光，就像彩虹一样美丽。另一边，一条小河正在欢快地流淌，发出叮咚叮咚的悦耳声音。突然，主角听到了一个神秘的声音，这个声音似乎在召唤着什么。这时，面前出现了几条不同的道路，每一条路都充满了未知的冒险和惊喜，现在需要做出选择了...`;
-    choices = [
-      '沿着鲜花盛开的小径前进',
-      '走向神秘的森林深处',
-      '跟随蝴蝶去探索'
-    ];
+    storySegment = themeBasedContent.opening;
+    choices = themeBasedContent.initialChoices;
   } else if (forceEnding || actualTurnIndex >= 4) {
-    // 强制结局或达到最大轮次
-    storySegment = `经过一番精彩的冒险，我们的主角终于完成了这次奇妙的旅程。${selectedChoice}的选择带来了意想不到的收获，主角不仅学到了很多宝贵的经验，还结交了许多好朋友。当太阳西下时，主角带着满满的快乐和美好的回忆，踏上了回家的路。这真是一次永远难忘的奇妙冒险！从此以后，主角每当想起这次冒险，心中都会充满温暖和快乐。晚安，愿你也能拥有这样美好的梦境！`;
+    storySegment = themeBasedContent.ending;
     choices = [];
     isEnding = true;
   } else {
-    // 继续故事
-    storySegment = `主角选择了"${selectedChoice}"，继续着这场奇妙的冒险。新的道路带来了新的发现和惊喜。在接下来的旅程中，主角遇到了更多有趣的事情，学到了更多宝贵的知识。每一步都让这个故事变得更加精彩和有趣。现在，又到了需要做出新选择的时候了...`;
-    choices = [
-      `继续探索${topic}的奥秘`,
-      '寻找新的朋友一起冒险',
-      '解决遇到的小难题'
-    ];
+    storySegment = themeBasedContent.continuation;
+    choices = themeBasedContent.continuationChoices;
   }
   
   return {
@@ -1197,6 +1189,87 @@ function generateMockStoryResponse(
     choices,
     isEnding
   };
+}
+
+/**
+ * 根据主题生成适合10岁儿童的故事内容
+ */
+function generateThemeBasedStory(
+  topic: string,
+  isNewStory: boolean,
+  selectedChoice?: string,
+  turnIndex?: number,
+  forceEnding?: boolean
+) {
+  // 分析主题关键词，生成相应的故事元素
+  const lowerTopic = topic.toLowerCase();
+  const isSpace = lowerTopic.includes('太空') || lowerTopic.includes('宇航') || lowerTopic.includes('外星') || lowerTopic.includes('星球');
+  const isUnicorn = lowerTopic.includes('独角兽') || lowerTopic.includes('魔法');
+  const isScience = lowerTopic.includes('科学') || lowerTopic.includes('实验') || lowerTopic.includes('发明');
+  const isAdventure = lowerTopic.includes('冒险') || lowerTopic.includes('探索') || lowerTopic.includes('寻找');
+  
+  if (isSpace) {
+    return {
+      opening: `十岁的小明是个对天空充满好奇的孩子，每天晚上都喜欢看星星。今天，他在后院发现了一个闪闪发光的神秘装置，看起来像是从天空中掉下来的。当他小心翼翼地触碰装置时，突然间，一道温暖的蓝光包围了他，他感觉自己轻飘飘地飞了起来！
+
+眨眼间，小明发现自己站在了一艘超级酷炫的宇宙飞船里。飞船的窗户外面是璀璨的星空，各种颜色的星球在远方闪烁着。这时，一个友好的外星朋友出现了，它有着大大的眼睛和温和的笑容。"欢迎来到银河探险号！"外星朋友说，"我叫星星，我们正在进行一次特殊的太空探索任务。你愿意帮助我们吗？"
+
+小明兴奋地点点头，他从来没有想过会有这样的奇遇！星星告诉他，宇宙中有许多有趣的科学现象等待他们去发现...`,
+      initialChoices: [
+        '先去参观神奇的太空实验室',
+        '选择飞向最亮的那颗星球',
+        '学习如何驾驶宇宙飞船'
+      ],
+      continuation: `跟随星星的指引，小明选择了"${selectedChoice}"。这个决定让他学到了很多关于宇宙的知识：原来星球有不同的重力，有些星球上还有会发光的植物！在星星朋友的帮助下，小明用特殊的太空望远镜观察了遥远的星系，还学会了如何在零重力环境中移动。"每个星球都有它独特的秘密，"星星说，"科学让我们能够理解这些奥妙。"现在，他们面临着新的探索选择...`,
+      continuationChoices: [
+        '探索一颗有奇特生物的星球',
+        '研究黑洞的神秘现象',
+        '帮助修复受损的太空站'
+      ],
+      ending: `经过这次不可思议的太空冒险，小明学到了许多宇宙科学知识，也明白了友谊和勇气的重要性。星星送给他一个特殊的星空指南针，告诉他："只要保持好奇心和学习的热情，科学的奥秘就会一直陪伴你。"当小明回到地球时，他望着夜空中的星星，心中充满了对科学探索的渴望。从此以后，他更加努力地学习，希望将来真的能成为一名宇航员，去探索更多未知的世界！`
+    };
+  } else if (isUnicorn) {
+    return {
+      opening: `十岁的小莉是个特别善良的女孩，她总是相信世界上有魔法存在。一个阳光明媚的周末，当她在奶奶家的花园里玩耍时，突然听到了一阵轻柔的铃声。循着声音，她推开了花园深处一扇从未见过的小门。
+
+门后是一片令人惊叹的魔法森林！彩虹色的蝴蝶在空中翩翩起舞，会唱歌的花朵正在合唱美妙的旋律。就在这时，一只纯白色的独角兽优雅地走到了小莉面前，它的独角闪着像钻石一样的光芒。
+
+"你好，善良的孩子，"独角兽温柔地说，"我是月光，这片森林的守护者。但最近森林里出现了一些问题，我需要一个纯真善良的朋友来帮助我。"月光告诉小莉，森林里的魔法正在慢慢消失，只有通过帮助别人和传递善意，才能重新点亮森林的魔法光芒...`,
+      initialChoices: [
+        '帮助迷路的小动物找到家',
+        '修复被暴风雨破坏的魔法花园',
+        '寻找传说中的友谊水晶'
+      ],
+      continuation: `在月光独角兽的陪伴下，小莉选择了"${selectedChoice}"。这个善良的决定让她发现了帮助别人带来的快乐。她学会了倾听小动物们的心声，学会了照料受伤的植物，还学会了用真诚的友谊温暖他人的心。每当她做出一个善良的行为，森林里就会有更多的花朵绽放，更多的星光闪烁。"真正的魔法来自于善良的心，"月光说，"你已经在用你的行动让世界变得更美好了。"现在，还有更多需要帮助的朋友在等待着他们...`,
+      continuationChoices: [
+        '帮助解决森林居民之间的小误会',
+        '寻找能治愈忧伤的神奇花朵',
+        '教会其他小朋友分享的快乐'
+      ],
+      ending: `通过这次神奇的冒险，小莉明白了最珍贵的魔法就藏在每个人的心中——那就是善良、友爱和乐于助人的品格。月光独角兽送给她一个闪闪发光的小吊坠，说："无论走到哪里，记住保持善良的心，你就能为这个世界带来真正的魔法。"当小莉回到现实世界时，她发现自己变得更加自信和快乐。从那以后，她总是主动帮助同学和朋友，成为了大家心中的"小天使"，她相信每一个善良的行为都能让世界变得更加美好！`
+    };
+  } else {
+    // 通用冒险故事模板（适合其他主题）
+    return {
+      opening: `十岁的主人公是个充满好奇心的孩子，对世界上的一切都充满了兴趣。今天，在关于"${topic}"的探险中，他/她发现了一个从未见过的神秘地方。这里的景色美得像童话故事一样，空气中飘着淡淡的花香，还能听到远处传来的神秘声音。
+
+当主人公小心翼翼地探索这个地方时，遇到了一位智慧的长者。长者告诉他/她，这里隐藏着关于"${topic}"的重要秘密，但需要通过智慧、勇气和善良才能发现。"年轻的探险家，"长者说，"真正的宝藏不是金银财宝，而是在冒险过程中学到的知识和品格。"
+
+现在，主人公面临着人生中一个重要的选择时刻，每个选择都会带来不同的学习和成长经历...`,
+      initialChoices: [
+        `深入了解${topic}的奥秘`,
+        '寻找志同道合的伙伴一起探索',
+        '学习解决困难的新方法'
+      ],
+      continuation: `主人公做出了明智的选择："${selectedChoice}"。这个决定让他/她在${topic}的世界里有了新的发现和理解。通过亲身体验，主人公学会了观察、思考和解决问题的方法，也明白了坚持不懈的重要性。每一个挑战都让他/她变得更加聪明和勇敢，每一个成功都带来了满满的成就感。"学习是一生的冒险，"智慧长者说，"记住今天学到的知识和品格，它们会陪伴你一辈子。"现在，新的机会又出现了...`,
+      continuationChoices: [
+        '挑战更高难度的探索任务',
+        '把学到的知识教给其他小朋友',
+        '寻找这次冒险的终极意义'
+      ],
+      ending: `这次关于"${topic}"的奇妙冒险让主人公收获满满。他/她不仅学到了很多新知识，更重要的是培养了独立思考、勇于探索和乐于助人的优秀品格。智慧长者送给主人公一本特殊的日记本，说："把你的每一次学习和成长都记录下来，这将是你最珍贵的财富。"当主人公回到日常生活中时，发现自己看待事物的眼光变得更加深入和全面。从此以后，他/她带着这次冒险中学到的智慧和勇气，在学习和生活中不断进步，成为了同龄人中的榜样！`
+    };
+  }
 }
 
 function generateMockStoryTree(topic: string, storyTreeId: string, timestamp: string): GenerateFullStoryResponse {
