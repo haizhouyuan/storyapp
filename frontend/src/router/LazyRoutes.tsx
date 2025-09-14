@@ -38,8 +38,8 @@ const PageLoadingSuspense: React.FC<{ children: React.ReactNode }> = ({ children
 interface LazyRoutesProps {
   storySession: StorySession | null;
   storyTreeSession: StoryTreeSession | null;
-  onStartStory: (session: StorySession) => void;
-  onStartStoryTree: (session: StoryTreeSession) => void;
+  onStartStory: (topic: string) => void;
+  onStartStoryTree: (topic: string) => void;
   onUpdateSession: (session: StorySession) => void;
   onResetSession: () => void;
 }

@@ -13,6 +13,52 @@ function App() {
   const [storySession, setStorySession] = useState<StorySession | null>(null);
   const [storyTreeSession, setStoryTreeSession] = useState<StoryTreeSession | null>(null);
 
+  // 创建故事会话的处理函数
+  const handleStartStory = (topic: string) => {
+    const session: StorySession = {
+      topic,
+      path: [],
+      isComplete: false,
+      startTime: Date.now(),
+      maxChoices: Math.floor(Math.random() * 6) + 5, // 5-10之间随机
+    };
+    setStorySession(session);
+  };
+
+  const handleStartStoryTree = (topic: string) => {
+    // 为故事树创建会话 - 暂时使用简单结构
+    const session: StoryTreeSession = {
+      topic,
+      storyTree: {
+        id: `tree_${Date.now()}`,
+        topic,
+        root: {
+          id: 'root',
+          segment: '',
+          choices: [],
+          isEnding: false,
+          depth: 0,
+          path: '0'
+        },
+        created_at: new Date().toISOString(),
+        totalPaths: 8,
+        maxDepth: 3
+      },
+      currentPath: [],
+      currentNode: {
+        id: 'root',
+        segment: '',
+        choices: [],
+        isEnding: false,
+        depth: 0,
+        path: '0'
+      },
+      isComplete: false,
+      startTime: Date.now(),
+    };
+    setStoryTreeSession(session);
+  };
+
   return (
     <Router>
       <div className="App min-h-screen bg-gradient-to-br from-child-mint via-child-cream to-child-yellow">
@@ -51,8 +97,8 @@ function App() {
         <LazyRoutes
           storySession={storySession}
           storyTreeSession={storyTreeSession}
-          onStartStory={setStorySession}
-          onStartStoryTree={setStoryTreeSession}
+          onStartStory={handleStartStory}
+          onStartStoryTree={handleStartStoryTree}
           onUpdateSession={setStorySession}
           onResetSession={() => setStorySession(null)}
         />

@@ -13,36 +13,52 @@ export async function initializeDatabase(): Promise<void> {
     
     console.log('🔧 正在初始化数据库索引...');
     
-    // 1. 故事集合索引
+    // 1. 故事集合索引 - 使用安全的创建方式
     const storiesCollection = db.collection(COLLECTIONS.STORIES);
     
-    // 现有索引保持不变
-    await storiesCollection.createIndex({ created_at: -1 });
-    await storiesCollection.createIndex({ title: 'text' });
-    console.log('✅ 故事集合索引创建完成');
+    try {
+      // 尝试创建索引，如果失败则跳过
+      await storiesCollection.createIndex({ created_at: -1 });
+      await storiesCollection.createIndex({ title: 'text' });
+      console.log('✅ 故事集合索引创建完成');
+    } catch (indexError: any) {
+      if (indexError.code === 13) {
+        console.log('⚠️  跳过故事集合索引创建 (认证问题)');
+      } else {
+        console.log('ℹ️  故事集合索引可能已存在:', indexError.message);
+      }
+    }
     
-    // 2. 日志集合索引 - 新增
+    // 2. 日志集合索引 - 新增，使用安全的创建方式
     const logsCollection = db.collection(COLLECTIONS.STORY_LOGS);
     
-    // 主要查询索引
-    await logsCollection.createIndex({ sessionId: 1 });
-    await logsCollection.createIndex({ timestamp: -1 });
-    await logsCollection.createIndex({ eventType: 1 });
-    await logsCollection.createIndex({ logLevel: 1 });
-    
-    // 复合索引用于常见查询
-    await logsCollection.createIndex({ sessionId: 1, timestamp: -1 });
-    await logsCollection.createIndex({ eventType: 1, timestamp: -1 });
-    await logsCollection.createIndex({ logLevel: 1, timestamp: -1 });
-    
-    // 过期索引 - 自动清理30天前的日志
-    const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS || '30');
-    await logsCollection.createIndex(
-      { timestamp: 1 }, 
-      { expireAfterSeconds: retentionDays * 24 * 60 * 60 }
-    );
-    
-    console.log('✅ 日志集合索引创建完成');
+    try {
+      // 主要查询索引
+      await logsCollection.createIndex({ sessionId: 1 });
+      await logsCollection.createIndex({ timestamp: -1 });
+      await logsCollection.createIndex({ eventType: 1 });
+      await logsCollection.createIndex({ logLevel: 1 });
+      
+      // 复合索引用于常见查询
+      await logsCollection.createIndex({ sessionId: 1, timestamp: -1 });
+      await logsCollection.createIndex({ eventType: 1, timestamp: -1 });
+      await logsCollection.createIndex({ logLevel: 1, timestamp: -1 });
+      
+      // 过期索引 - 自动清理30天前的日志
+      const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS || '30');
+      await logsCollection.createIndex(
+        { timestamp: 1 }, 
+        { expireAfterSeconds: retentionDays * 24 * 60 * 60 }
+      );
+      
+      console.log('✅ 日志集合索引创建完成');
+    } catch (indexError: any) {
+      if (indexError.code === 13) {
+        console.log('⚠️  跳过日志集合索引创建 (认证问题)');
+      } else {
+        console.log('ℹ️  日志集合索引可能已存在:', indexError.message);
+      }
+    }
     
     // 3. 创建统计视图（可选）
     try {

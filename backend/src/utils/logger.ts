@@ -40,7 +40,12 @@ export enum EventType {
   // 系统相关
   SESSION_START = 'session_start',
   SESSION_END = 'session_end',
-  PERFORMANCE_METRICS = 'performance_metrics'
+  PERFORMANCE_METRICS = 'performance_metrics',
+  PERFORMANCE_OPTIMIZATION = 'performance_optimization',
+  
+  // API恢复相关
+  API_RECOVERY = 'api_recovery',
+  API_ERROR = 'api_error'
 }
 
 import type { 

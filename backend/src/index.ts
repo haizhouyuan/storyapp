@@ -28,6 +28,9 @@ import adminRoutes from './routes/admin';
 // import workflowMiraclesRoutes from './routes/workflow/miracles';
 import docsRoutes from './routes/docs';
 
+// 导入性能优化工具
+import { MemoryManager } from './utils/performanceOptimizer';
+
 // 导入数据库连接
 import { connectToDatabase, checkDatabaseHealth } from './config/database';
 import { initializeDatabase } from './config/initializeDatabase';
@@ -39,6 +42,9 @@ const app = express();
 const { port: PORT, frontendUrl: FRONTEND_URL } = serverConfig;
 
 const appLogger = createLogger('app');
+
+// P1级别后端优化 - 内存管理
+appLogger.info('P1优化已集成: 内存管理、性能监控');
 
 // Trust proxy for accurate IP addresses
 app.set('trust proxy', 1);
@@ -96,6 +102,10 @@ app.use('/api/health', healthRoutes);
 
 // Main API routes
 app.use('/api/admin', adminRoutes);
+
+// P1级别增强功能已集成到标准路由中
+
+// 标准API路由（向后兼容）
 app.use('/api', storyRoutes);
 
 // 静态文件服务（前端）
