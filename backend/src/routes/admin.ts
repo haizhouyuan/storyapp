@@ -60,9 +60,11 @@ router.get('/logs', async (req: Request, res: Response) => {
     }
     
     if (search) {
+      const searchRegex = { $regex: String(search), $options: 'i' };
       filter.$or = [
-        { message: { $regex: search, $options: 'i' } },
-        { 'data.topic': { $regex: search, $options: 'i' } }
+        { message: searchRegex },
+        { 'data.topic': searchRegex },
+        { sessionId: searchRegex }
       ];
     }
 
@@ -72,9 +74,12 @@ router.get('/logs', async (req: Request, res: Response) => {
     // 获取总数
     const total = await logsCollection.countDocuments(filter);
 
+    // 默认不返回较大的字段（例如 stackTrace），除非显式要求
+    const includeStack = String(req.query.includeStackTrace || '').toLowerCase() === 'true';
+
     // 获取日志数据
     const logs = await logsCollection
-      .find(filter)
+      .find(filter, includeStack ? undefined : { projection: { stackTrace: 0 } })
       .sort({ timestamp: -1 })
       .skip(skip)
       .limit(limitNum)

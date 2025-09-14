@@ -79,5 +79,42 @@ describe('Admin API Routes (Appsmith compatibility)', () => {
     expect(res.body.data).toHaveProperty('timeline');
     expect(Array.isArray(res.body.data.timeline)).toBe(true);
   });
-});
 
+  it('GET /api/admin/logs supports search by partial sessionId and excludes stackTrace by default', async () => {
+    const now = new Date();
+    await db.collection('story_logs').insertMany([
+      {
+        timestamp: now,
+        sessionId: 'abc123searchable',
+        logLevel: 'error',
+        eventType: 'story_generation_error',
+        message: 'fail with stack',
+        stackTrace: 'Error: something bad\n at here',
+      },
+      {
+        timestamp: now,
+        sessionId: 'other-session',
+        logLevel: 'info',
+        eventType: 'ai_api_response',
+        message: 'ok',
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/admin/logs')
+      .query({ search: 'abc123' })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    const logs = res.body.data.logs;
+    expect(logs.length).toBe(1);
+    expect(logs[0].sessionId).toBe('abc123searchable');
+    expect(logs[0].stackTrace).toBeUndefined();
+
+    const resWithStack = await request(app)
+      .get('/api/admin/logs')
+      .query({ search: 'abc123', includeStackTrace: 'true' })
+      .expect(200);
+    expect(resWithStack.body.data.logs[0].stackTrace).toBeDefined();
+  });
+});
