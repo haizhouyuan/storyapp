@@ -25,17 +25,6 @@ export default function StoryTreePage() {
   const location = useLocation();
   const topic = location.state?.topic;
 
-  // 如果没有主题，重定向到首页
-  useEffect(() => {
-    if (!topic) {
-      navigate('/');
-      return;
-    }
-    
-    // 开始生成故事树
-    generateStoryTree();
-  }, [topic, generateStoryTree, navigate]);
-
   // 生成完整故事树
   const generateStoryTree = useCallback(async () => {
     if (!topic) return;
@@ -66,6 +55,17 @@ export default function StoryTreePage() {
       setIsGenerating(false);
     }
   }, [topic, navigate]);
+
+  // 如果没有主题，重定向到首页
+  useEffect(() => {
+    if (!topic) {
+      navigate('/');
+      return;
+    }
+    
+    // 开始生成故事树
+    generateStoryTree();
+  }, [topic, generateStoryTree, navigate]);
 
   // 处理选择
   const handleChoice = (choiceIndex: number) => {
