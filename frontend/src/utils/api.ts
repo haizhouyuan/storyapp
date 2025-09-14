@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { sanitizeUserInput, sanitizeAPIResponse, containsPotentialScript } from './security';
 import type { 
   GenerateStoryRequest,
   GenerateStoryResponse,
@@ -14,7 +15,7 @@ import type {
 } from '../../../shared/types';
 
 // API基础配置
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 // 创建axios实例
 const apiClient = axios.create({
@@ -25,10 +26,32 @@ const apiClient = axios.create({
   }
 });
 
-// 请求拦截器 - 添加日志
+// 请求拦截器 - 添加日志和安全验证
 apiClient.interceptors.request.use(
   (config) => {
     console.log(`🚀 API请求: ${config.method?.toUpperCase()} ${config.url}`);
+    
+    // 验证请求数据是否安全
+    if (config.data && typeof config.data === 'object') {
+      // 检查请求数据中是否包含潜在的脚本注入
+      const dataStr = JSON.stringify(config.data);
+      if (containsPotentialScript(dataStr)) {
+        console.warn('🔒 检测到潜在的安全风险，拒绝发送请求');
+        return Promise.reject(new Error('请求包含不安全的内容'));
+      }
+      
+      // 清理请求数据中的字符串字段
+      if (config.data.topic) {
+        config.data.topic = sanitizeUserInput(config.data.topic);
+      }
+      if (config.data.title) {
+        config.data.title = sanitizeUserInput(config.data.title);
+      }
+      if (config.data.content) {
+        config.data.content = sanitizeUserInput(config.data.content);
+      }
+    }
+    
     return config;
   },
   (error) => {
@@ -37,10 +60,38 @@ apiClient.interceptors.request.use(
   }
 );
 
-// 响应拦截器 - 统一错误处理
+// 响应拦截器 - 统一错误处理和响应清理
 apiClient.interceptors.response.use(
   (response) => {
     console.log(`✅ API响应: ${response.config.url}`, response.status);
+    
+    // 清理响应数据中的字符串内容
+    if (response.data && typeof response.data === 'object') {
+      if (response.data.storySegment) {
+        response.data.storySegment = sanitizeAPIResponse(response.data.storySegment);
+      }
+      if (response.data.choices && Array.isArray(response.data.choices)) {
+        response.data.choices = response.data.choices.map((choice: string) => 
+          sanitizeAPIResponse(choice)
+        );
+      }
+      if (response.data.title) {
+        response.data.title = sanitizeAPIResponse(response.data.title);
+      }
+      if (response.data.content) {
+        response.data.content = sanitizeAPIResponse(response.data.content);
+      }
+      
+      // 清理故事列表数据
+      if (response.data.stories && Array.isArray(response.data.stories)) {
+        response.data.stories = response.data.stories.map((story: any) => ({
+          ...story,
+          title: story.title ? sanitizeAPIResponse(story.title) : story.title,
+          content: story.content ? sanitizeAPIResponse(story.content) : story.content
+        }));
+      }
+    }
+    
     return response;
   },
   (error) => {

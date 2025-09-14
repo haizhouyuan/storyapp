@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo, memo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { BookOpenIcon, StarIcon, HomeIcon } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
 
 import Button from '../components/Button';
-import { validateStoryTopic } from '../utils/helpers';
+import { validateAndSanitizeStoryTopic, sanitizeUserInput } from '../utils/security';
 import type { StorySession, StoryTreeSession } from '../../../shared/types';
 
 interface HomePageProps {
@@ -16,35 +16,48 @@ interface HomePageProps {
 type StoryMode = 'progressive' | 'tree';
 
 /**
- * 故事主题输入页（首页）
+ * 故事主题输入页（首页）- 性能优化版
  * 特点：温馨背景、大输入框、醒目按钮、"我的故事"入口、故事模式选择
+ * 优化：使用memo、useCallback、useMemo减少重渲染
  */
-export default function HomePage({ onStartStory, onStartStoryTree }: HomePageProps) {
+const HomePage = memo<HomePageProps>(function HomePage({ onStartStory, onStartStoryTree }) {
   const [topic, setTopic] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [storyMode, setStoryMode] = useState<StoryMode>('progressive');
   const navigate = useNavigate();
 
-  // 处理开始故事
-  const handleStartStory = async () => {
-    // 验证输入
-    const validation = validateStoryTopic(topic);
+  // 缓存处理输入变化的函数
+  const handleTopicChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawInput = e.target.value;
+    // 实时清理用户输入（保留基本清理，不做完整验证）
+    const cleaned = sanitizeUserInput(rawInput);
+    setTopic(cleaned);
+  }, []);
+
+  // 缓存处理开始故事的函数
+  const handleStartStory = useCallback(async () => {
+    // 使用安全验证和清理
+    const validation = validateAndSanitizeStoryTopic(topic);
     if (!validation.isValid) {
       toast.error(validation.error!);
       return;
     }
+
+    // 使用清理后的主题
+    const safeTopic = validation.sanitized;
+    setTopic(safeTopic); // 更新UI显示清理后的内容
 
     setIsLoading(true);
     
     try {
       if (storyMode === 'tree') {
         // 故事树模式：导航到故事树页面，让页面自己生成故事树
-        navigate('/story-tree', { state: { topic: topic.trim() } });
+        navigate('/story-tree', { state: { topic: safeTopic } });
       } else {
         // 渐进模式：使用原有逻辑
         const maxChoices = Math.floor(Math.random() * 6) + 5; // 5-10 次
         const session: StorySession = {
-          topic: topic.trim(),
+          topic: safeTopic,
           path: [],
           isComplete: false,
           startTime: Date.now(),
@@ -60,14 +73,33 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [topic, storyMode, navigate, onStartStory]);
 
-  // 处理键盘事件
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  // 缓存处理键盘事件的函数
+  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isLoading) {
       handleStartStory();
     }
-  };
+  }, [isLoading, handleStartStory]);
+
+  // 缓存模式切换函数
+  const handleModeChange = useCallback((mode: StoryMode) => {
+    setStoryMode(mode);
+  }, []);
+
+  // 缓存示例主题列表
+  const exampleTopics = useMemo(() => [
+    '小兔子的冒险',
+    '神奇的森林',
+    '月亮上的旅行',
+    '彩虹城堡',
+    '友善的小龙'
+  ], []);
+
+  // 缓存示例主题点击处理函数
+  const handleExampleClick = useCallback((example: string) => {
+    setTopic(sanitizeUserInput(example));
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-child-lg relative overflow-hidden">
@@ -306,7 +338,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setStoryMode('tree')}
+              onClick={() => handleModeChange('tree')}
               className={`
                 px-child-lg py-child-md rounded-child-lg border-2 transition-all duration-200
                 ${storyMode === 'tree' 
@@ -327,7 +359,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setStoryMode('progressive')}
+              onClick={() => handleModeChange('progressive')}
               className={`
                 px-child-lg py-child-md rounded-child-lg border-2 transition-all duration-200
                 ${storyMode === 'progressive' 
@@ -358,7 +390,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
             <input
               type="text"
               value={topic}
-              onChange={(e) => setTopic(e.target.value)}
+              onChange={handleTopicChange}
               onKeyPress={handleKeyPress}
               placeholder="请输入你想听的故事主题..."
               disabled={isLoading}
@@ -440,19 +472,13 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
             试试这些主题：
           </p>
           <div className="flex flex-wrap justify-center gap-child-sm">
-            {[
-              '小兔子的冒险',
-              '神奇的森林',
-              '月亮上的旅行',
-              '彩虹城堡',
-              '友善的小龙'
-            ].map((example, index) => (
+            {exampleTopics.map((example, index) => (
               <motion.button
                 key={example}
                 initial={{ opacity: 0, scale: 0 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 1.3 + index * 0.1 }}
-                onClick={() => setTopic(example)}
+                onClick={() => handleExampleClick(example)}
                 disabled={isLoading}
                 className="
                   px-child-md 
@@ -480,4 +506,6 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
       </div>
     </div>
   );
-}
+});
+
+export default HomePage;

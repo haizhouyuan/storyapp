@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { playFeedbackSound } from '../utils/helpers';
 
@@ -16,10 +16,11 @@ interface ButtonProps {
 }
 
 /**
- * 儿童友好的按钮组件
+ * 儿童友好的按钮组件（性能优化版）
  * 特点：大尺寸、圆润边角、鲜艳颜色、动画反馈
+ * 优化：使用memo、useCallback、useMemo避免不必要的重渲染
  */
-export default function Button({
+const Button = memo<ButtonProps>(function Button({
   children,
   onClick,
   disabled = false,
@@ -30,17 +31,18 @@ export default function Button({
   className = '',
   testId,
   tabIndex
-}: ButtonProps) {
+}) {
   
-  const handleClick = () => {
+  // 缓存点击处理函数，只在onClick、disabled、loading变化时重新创建
+  const handleClick = useCallback(() => {
     if (disabled || loading) return;
     
     playFeedbackSound('click');
     onClick?.();
-  };
+  }, [disabled, loading, onClick]);
 
-  // 根据variant选择背景色
-  const getVariantClasses = () => {
+  // 缓存样式类计算，避免每次渲染都重新计算
+  const variantClasses = useMemo(() => {
     switch (variant) {
       case 'primary':
         return 'bg-child-blue hover:bg-blue-300 text-blue-900';
@@ -55,10 +57,9 @@ export default function Button({
       default:
         return 'bg-child-blue hover:bg-blue-300 text-blue-900';
     }
-  };
+  }, [variant]);
 
-  // 根据size选择尺寸类
-  const getSizeClasses = () => {
+  const sizeClasses = useMemo(() => {
     switch (size) {
       case 'small':
         return 'px-child-md py-child-sm text-child-sm min-h-[48px]';
@@ -69,45 +70,53 @@ export default function Button({
       default:
         return 'px-child-lg py-child-md text-child-base min-h-[56px]';
     }
-  };
+  }, [size]);
+
+  // 缓存最终的className字符串
+  const finalClassName = useMemo(() => `
+    relative
+    inline-flex
+    items-center
+    justify-center
+    font-child
+    font-bold
+    rounded-child-lg
+    shadow-child-lg
+    transition-all
+    duration-200
+    focus:outline-none
+    focus:ring-4
+    focus:ring-yellow-300
+    focus:ring-opacity-50
+    disabled:cursor-not-allowed
+    select-none
+    ${variantClasses}
+    ${sizeClasses}
+    ${className}
+  `, [variantClasses, sizeClasses, className]);
+
+  // 缓存动画属性对象，避免每次渲染都创建新对象
+  const motionProps = useMemo(() => ({
+    whileHover: { scale: disabled || loading ? 1 : 1.05 },
+    whileTap: { scale: disabled || loading ? 1 : 0.95 },
+    animate: {
+      opacity: disabled ? 0.6 : 1,
+    },
+    transition: {
+      type: 'spring' as const,
+      stiffness: 400,
+      damping: 17
+    }
+  }), [disabled, loading]);
 
   return (
     <motion.button
-      whileHover={{ scale: disabled || loading ? 1 : 1.05 }}
-      whileTap={{ scale: disabled || loading ? 1 : 0.95 }}
-      animate={{
-        opacity: disabled ? 0.6 : 1,
-      }}
-      transition={{
-        type: 'spring',
-        stiffness: 400,
-        damping: 17
-      }}
+      {...motionProps}
       onClick={handleClick}
       disabled={disabled || loading}
       data-testid={testId}
       tabIndex={tabIndex}
-      className={`
-        relative
-        inline-flex
-        items-center
-        justify-center
-        font-child
-        font-bold
-        rounded-child-lg
-        shadow-child-lg
-        transition-all
-        duration-200
-        focus:outline-none
-        focus:ring-4
-        focus:ring-yellow-300
-        focus:ring-opacity-50
-        disabled:cursor-not-allowed
-        select-none
-        ${getVariantClasses()}
-        ${getSizeClasses()}
-        ${className}
-      `}
+      className={finalClassName}
     >
       {/* 加载状态 */}
       {loading && (
@@ -131,4 +140,6 @@ export default function Button({
       </div>
     </motion.button>
   );
-}
+});
+
+export default Button;

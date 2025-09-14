@@ -1,4 +1,5 @@
 import type { StorySession } from '../../../shared/types';
+import { validateAndSanitizeStoryTopic } from './security';
 
 /**
  * 格式化日期为友好的显示格式
@@ -109,41 +110,18 @@ export function truncateText(text: string, maxLength: number = 50): string {
 }
 
 /**
- * 验证故事主题输入
+ * 验证故事主题输入（使用安全模块）
+ * @deprecated 请使用 validateAndSanitizeStoryTopic 从 security 模块
  */
 export function validateStoryTopic(topic: string): {
   isValid: boolean;
   error?: string;
 } {
-  if (!topic || typeof topic !== 'string') {
-    return { isValid: false, error: '请输入故事主题' };
-  }
-  
-  const trimmed = topic.trim();
-  
-  if (trimmed.length === 0) {
-    return { isValid: false, error: '故事主题不能为空' };
-  }
-  
-  if (trimmed.length < 2) {
-    return { isValid: false, error: '故事主题太短，至少需要2个字符' };
-  }
-  
-  if (trimmed.length > 100) {
-    return { isValid: false, error: '故事主题太长，不能超过100个字符' };
-  }
-  
-  // 检查是否包含不适合的内容（简单过滤）
-  const inappropriate = ['暴力', '恐怖', '血腥', '战争', '死亡'];
-  const hasInappropriate = inappropriate.some(word => 
-    trimmed.toLowerCase().includes(word)
-  );
-  
-  if (hasInappropriate) {
-    return { isValid: false, error: '请输入适合儿童的故事主题' };
-  }
-  
-  return { isValid: true };
+  const result = validateAndSanitizeStoryTopic(topic);
+  return {
+    isValid: result.isValid,
+    error: result.error
+  };
 }
 
 /**

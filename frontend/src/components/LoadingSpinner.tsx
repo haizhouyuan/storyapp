@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 
 interface LoadingSpinnerProps {
@@ -7,15 +7,17 @@ interface LoadingSpinnerProps {
 }
 
 /**
- * 可爱的加载动画组件
+ * 可爱的加载动画组件（性能优化版）
  * 特点：彩色旋转书本图标 + 温馨提示文字
+ * 优化：使用memo和useMemo避免不必要的重渲染
  */
-export default function LoadingSpinner({ 
+const LoadingSpinner = memo<LoadingSpinnerProps>(function LoadingSpinner({ 
   message = '正在创作神奇的故事...', 
   size = 'medium' 
-}: LoadingSpinnerProps) {
+}) {
   
-  const getSizeClasses = () => {
+  // 缓存尺寸样式计算
+  const sizeClasses = useMemo(() => {
     switch (size) {
       case 'small':
         return 'w-8 h-8';
@@ -26,9 +28,9 @@ export default function LoadingSpinner({
       default:
         return 'w-12 h-12';
     }
-  };
+  }, [size]);
 
-  const getTextSize = () => {
+  const textSizeClasses = useMemo(() => {
     switch (size) {
       case 'small':
         return 'text-child-sm';
@@ -39,21 +41,41 @@ export default function LoadingSpinner({
       default:
         return 'text-child-base';
     }
-  };
+  }, [size]);
+
+  // 缓存动画属性对象
+  const bookIconAnimation = useMemo(() => ({
+    animate: { 
+      rotate: 360,
+      scale: [1, 1.1, 1]
+    },
+    transition: { 
+      rotate: { duration: 2, repeat: Infinity, ease: 'linear' },
+      scale: { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
+    }
+  }), []);
+
+  const textAnimation = useMemo(() => ({
+    initial: { opacity: 0, y: 10 },
+    animate: { opacity: 1, y: 0 },
+    transition: { delay: 0.2 }
+  }), []);
+
+  // 缓存最终的className字符串
+  const textClassName = useMemo(() => `
+    font-child 
+    font-semibold 
+    text-center 
+    text-gray-600
+    ${textSizeClasses}
+  `, [textSizeClasses]);
 
   return (
     <div className="flex flex-col items-center justify-center p-child-xl">
       {/* 旋转的书本图标 */}
       <motion.div
-        animate={{ 
-          rotate: 360,
-          scale: [1, 1.1, 1]
-        }}
-        transition={{ 
-          rotate: { duration: 2, repeat: Infinity, ease: 'linear' },
-          scale: { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
-        }}
-        className={`${getSizeClasses()} mb-child-lg`}
+        {...bookIconAnimation}
+        className={`${sizeClasses} mb-child-lg`}
       >
         {/* SVG书本图标 */}
         <svg 
@@ -110,16 +132,8 @@ export default function LoadingSpinner({
 
       {/* 加载消息 */}
       <motion.p
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className={`
-          font-child 
-          font-semibold 
-          text-center 
-          text-gray-600
-          ${getTextSize()}
-        `}
+        {...textAnimation}
+        className={textClassName}
       >
         {message}
       </motion.p>
@@ -145,4 +159,6 @@ export default function LoadingSpinner({
       </div>
     </div>
   );
-}
+});
+
+export default LoadingSpinner;
