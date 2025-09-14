@@ -1,8 +1,8 @@
 import { test, expect, Page } from '@playwright/test';
 
-// 测试配置常量
-const FRONTEND_URL = 'http://localhost:3000';
-const BACKEND_URL = 'http://localhost:5000';
+// 测试配置常量（支持通过环境变量覆盖，便于CI/容器环境运行）
+const FRONTEND_URL = process.env.BASE_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.API_URL || 'http://localhost:5000';
 
 // 测试数据
 const TEST_STORY_TOPICS = [
@@ -144,11 +144,11 @@ test.describe('儿童睡前故事App', () => {
     // 验证跳转到故事页面
     await expect(page).toHaveURL(/\/story$/);
     
-    // 等待故事生成（可能需要较长时间）
+    // 等待故事生成（使用模拟数据时应该很快）
     await expect(page.locator('text=正在为你创作精彩的故事')).toBeVisible();
     
-    // 等待故事内容出现（增加超时时间）
-    await expect(page.locator('[data-testid^="choice-button-"]').first()).toBeVisible({ timeout: 30000 });
+    // 等待故事内容出现（CI环境使用模拟数据，超时时间缩短）
+    await expect(page.locator('[data-testid^="choice-button-"]').first()).toBeVisible({ timeout: 15000 });
     
     // 验证故事页面元素
     await expect(page.locator(`text=${testTopic}`)).toBeVisible();
@@ -167,10 +167,9 @@ test.describe('儿童睡前故事App', () => {
     // 等待新的故事片段生成
     await expect(page.locator('text=故事正在继续')).toBeVisible();
     
-    // 由于故事生成需要时间，我们设置较长的超时
-    // 在实际测试中，可能需要模拟API响应
-    console.log('等待故事生成完成...');
-  }, 60000); // 增加测试超时时间到60秒
+    // CI环境中使用模拟数据，响应更快
+    console.log('故事生成测试完成 (使用模拟数据)');
+  }, 30000); // 减少测试超时时间到30秒（CI环境使用模拟数据）
 
   test('API健康检查', async ({ page }) => {
     // 直接测试后端API

@@ -45,7 +45,11 @@ RUN npm config set registry $NPM_REGISTRY && \
 # 复制构建产物
 COPY --from=builder /app/backend/dist ./backend/dist
 COPY --from=builder /app/shared/dist ./shared/dist
-COPY --from=builder /app/frontend/build ./frontend/build
+# 复制根目录config文件夹（backend依赖）
+COPY --from=builder /app/config ./config
+# 将前端构建产物复制到后端可服务的目录（与后端index.ts保持一致）
+RUN mkdir -p ./backend/public
+COPY --from=builder /app/frontend/build ./backend/public
 
 # 切换到非root用户
 USER storyapp
@@ -53,9 +57,9 @@ USER storyapp
 # 暴露端口
 EXPOSE 5000
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+# 健康检查 - 改进版本，更好的错误处理和超时控制
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "const http=require('http');const req=http.get('http://127.0.0.1:5000/healthz',(res)=>{let data='';res.on('data',chunk=>data+=chunk);res.on('end',()=>{try{const result=JSON.parse(data);process.exit(res.statusCode===200&&result.status==='healthy'?0:1)}catch{process.exit(res.statusCode===200?0:1)}})});req.on('error',()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1)})"
 
 # 启动应用
 CMD ["node", "backend/dist/index.js"]

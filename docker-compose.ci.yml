@@ -10,12 +10,12 @@ services:
     container_name: storyapp-mongo-ci
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: pass123
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_TEST_PASSWORD:-pass123}
       MONGO_INITDB_DATABASE: storyapp
     ports:
       - "27017:27017"
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --username root --password pass123 --authenticationDatabase admin --quiet --eval 'db.runCommand({ ping: 1 }).ok' 2>/dev/null | grep -q 1"]
+      test: ["CMD-SHELL", "mongosh --username root --password $${MONGO_INITDB_ROOT_PASSWORD} --authenticationDatabase admin --quiet --eval 'db.runCommand({ ping: 1 }).ok' 2>/dev/null | grep -q 1"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -28,7 +28,7 @@ services:
     environment:
       - DEEPSEEK_API_KEY=sk-test-dummy
       - DEEPSEEK_API_URL=https://api.deepseek.com
-      - MONGODB_URI=mongodb://root:pass123@mongo:27017/storyapp?authSource=admin
+      - MONGODB_URI=mongodb://root:${MONGO_TEST_PASSWORD:-pass123}@mongo:27017/storyapp?authSource=admin
       - NODE_ENV=test
       - PORT=5000
     depends_on:
@@ -37,8 +37,8 @@ services:
     ports:
       - "5001:5000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const req=http.get('http://127.0.0.1:5000/healthz',(res)=>{let data='';res.on('data',chunk=>data+=chunk);res.on('end',()=>{try{const result=JSON.parse(data);process.exit(res.statusCode===200&&result.status==='healthy'?0:1)}catch{process.exit(res.statusCode===200?0:1)}})});req.on('error',()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1)})\""]
       interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 12
       start_period: 40s
