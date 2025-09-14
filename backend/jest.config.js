@@ -9,9 +9,6 @@ module.exports = {
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
-  moduleNameMapper: {
-    '^axios$': require.resolve('axios')
-  },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/index.ts',
