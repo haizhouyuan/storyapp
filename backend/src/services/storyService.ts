@@ -75,6 +75,19 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
   try {
     const { topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
     
+    // 验证输入参数
+    if (!topic || topic.trim().length === 0) {
+      const customError = new Error('story_topic_required');
+      (customError as any).code = 'VALIDATION_ERROR';
+      throw customError;
+    }
+    
+    // 在没有API Key时使用mock数据（除了生产环境）
+    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== 'production') {
+      console.log('使用模拟数据生成适合8-12岁儿童的故事');
+      return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
+    }
+    
     logger.info(EventType.STORY_GENERATION_START, '开始生成故事片段', {
       topic,
       isNewStory: !currentStory,
@@ -121,16 +134,17 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       
       messages.push({
         role: 'user',
-        content: `请为以下主题创作一个儿童睡前故事的开头：${topic}。
+        content: `请为以下主题创作一个适合8-12岁儿童的睡前故事开头：${topic}。
 
 要求：
-1. 故事内容至少600字，语言温柔、生动，适合3-8岁儿童
-2. 包含详细的场景描述、人物情感和细节
-3. 为故事设定一个有趣的开头情境
-4. 提供3个吸引人的选择选项，让孩子参与故事发展
-5. 使用JSON格式返回：{"storySegment":"故事内容（至少600字）","choices":["选择1","选择2","选择3"],"isEnding":false}
+1. 故事内容800-1200字，语言生动有趣，适合8-12岁儿童的认知水平
+2. 包含丰富的场景描述、角色心理和细节刻画
+3. 设定有挑战性和悬念的开头情境，激发孩子思考
+4. 融入教育元素：科学知识、历史文化或道德品格
+5. 提供3个具有策略性和思考性的选择，每个选择导向不同故事发展
+6. 使用JSON格式返回：{"storySegment":"故事内容（800-1200字）","choices":["选择1","选择2","选择3"],"isEnding":false}
 
-总互动次数预计为 ${Math.max(5, Math.min(10, maxChoices || 6))} 次，请设计好故事节奏。`
+总互动次数预计为 ${Math.max(8, Math.min(15, maxChoices || 10))} 次，支持更复杂的故事发展。`
       });
     }
 
@@ -176,7 +190,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       tokensUsed
     );
 
-    // 解析AI返回的JSON
+    // 解析AI返回的JSON（增强重试机制）
     logger.info(EventType.JSON_PARSE_START, '开始解析AI响应', {
       responseLength: aiResponse.length,
       responsePreview: aiResponse.substring(0, 100) + '...'
@@ -184,13 +198,7 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     
     let parsedResponse;
     try {
-      // 清理可能的markdown格式
-      const cleanedResponse = aiResponse
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
-      
-      parsedResponse = JSON.parse(cleanedResponse);
+      parsedResponse = extractJson(aiResponse);
       
       logger.info(EventType.JSON_PARSE_SUCCESS, 'JSON解析成功', {
         hasStorySegment: !!parsedResponse.storySegment,
@@ -199,18 +207,49 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       }, undefined, sessionId);
       
     } catch (parseError) {
-      logger.error(EventType.JSON_PARSE_ERROR, 'JSON解析失败，使用fallback策略', parseError as Error, {
+      logger.error(EventType.JSON_PARSE_ERROR, 'JSON解析失败，尝试重新请求', parseError as Error, {
         originalResponse: aiResponse,
         parseError: (parseError as Error).message
       }, sessionId);
       
-      // 如果JSON解析失败，尝试从文本中提取故事内容
-      const fallbackStory = aiResponse.substring(0, 200) + '...';
-      parsedResponse = {
-        storySegment: fallbackStory,
-        choices: ['继续探索', '回到家中', '寻求帮助'],
-        isEnding: false
-      };
+      // JSON解析失败时，尝试重新请求纯JSON格式
+      try {
+        logger.info(EventType.JSON_PARSE_START, '尝试JSON重试请求', {}, undefined, sessionId);
+        
+        const retryMessages = [
+          { role: 'system', content: '请仅返回纯JSON格式，不要包含代码块标记或任何额外说明文字。' },
+          { role: 'user', content: `请将以下内容转换为严格的JSON格式：\n\n${aiResponse}\n\n要求格式：{"storySegment": "故事内容", "choices": ["选择1", "选择2", "选择3"], "isEnding": false}` }
+        ];
+        
+        const retryResponse = await deepseekClient.post('/chat/completions', {
+          model: DEEPSEEK_CONFIG.CHAT_MODEL,
+          messages: retryMessages,
+          max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+          temperature: 0.1, // 降低温度确保格式准确
+          stream: DEEPSEEK_CONFIG.STREAM
+        });
+        
+        const retryContent = retryResponse.data?.choices?.[0]?.message?.content;
+        if (retryContent) {
+          parsedResponse = extractJson(retryContent);
+          logger.info(EventType.JSON_PARSE_SUCCESS, 'JSON重试解析成功', {
+            hasStorySegment: !!parsedResponse.storySegment,
+            choicesCount: Array.isArray(parsedResponse.choices) ? parsedResponse.choices.length : 0
+          }, undefined, sessionId);
+        } else {
+          throw new Error('重试请求返回空内容');
+        }
+      } catch (retryError) {
+        logger.error(EventType.JSON_PARSE_ERROR, 'JSON重试也失败，使用fallback策略', retryError as Error, sessionId);
+        
+        // 如果重试也失败，使用更智能的fallback策略
+        const fallbackStory = aiResponse.length > 800 ? aiResponse.substring(0, 800) + '...' : aiResponse;
+        parsedResponse = {
+          storySegment: fallbackStory,
+          choices: ['继续冒险探索', '寻找新的线索', '回到安全地带'],
+          isEnding: false
+        };
+      }
     }
 
     // 验证响应格式
@@ -477,6 +516,11 @@ export async function getStoryByIdService(id: string): Promise<GetStoryResponse 
   try {
     console.log('正在从MongoDB获取故事详情...');
     
+    // 验证ID格式
+    if (!ObjectId.isValid(id)) {
+      throw new Error('无效的故事ID格式');
+    }
+    
     // 获取数据库实例
     const db = getDatabase();
     const storiesCollection = db.collection(TABLES.STORIES);
@@ -501,6 +545,11 @@ export async function getStoryByIdService(id: string): Promise<GetStoryResponse 
     };
   } catch (error: any) {
     console.error('获取故事详情服务错误:', error);
+    
+    // 如果是验证错误，直接抛出
+    if (error.message === '无效的故事ID格式') {
+      throw error;
+    }
     
     if (error.code === 'DATABASE_ERROR') {
       throw error;
@@ -557,6 +606,11 @@ export async function deleteStoryService(params: DeleteStoryRequest): Promise<De
   } catch (error: any) {
     console.error('删除故事服务错误:', error);
     
+    // 如果是验证错误，直接抛出
+    if (error.message === '无效的故事ID格式') {
+      throw error;
+    }
+    
     if (error.message === '要删除的故事不存在') {
       const customError = new Error('要删除的故事不存在');
       (customError as any).code = 'STORY_NOT_FOUND';
@@ -582,16 +636,22 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 检查是否有API密钥，没有则使用模拟数据
-    if (!process.env.DEEPSEEK_API_KEY) {
-      console.log('使用模拟数据生成故事树');
+    // 在没有API Key时使用mock数据（除了生产环境）
+    if (!process.env.DEEPSEEK_API_KEY && process.env.NODE_ENV !== 'production') {
+      console.log('使用模拟数据生成适合8-12岁儿童的故事树');
       const storyTreeId = new ObjectId().toString();
       const timestamp = new Date().toISOString();
       return generateMockStoryTree(topic, storyTreeId, timestamp);
     }
     
-    // 使用基础模式快速生成故事树，避免超时
-    return await generateBasicStoryTreeService({ topic });
+    // 默认启用高级模式（三阶段协作），超时或失败时降级到基础模式
+    try {
+      console.log('尝试使用高级三阶段生成模式...');
+      return await generateAdvancedStoryTree(topic);
+    } catch (advancedError) {
+      console.warn('高级模式失败，降级到基础模式:', advancedError);
+      return await generateBasicStoryTreeService({ topic });
+    }
     
   } catch (error: any) {
     console.error('故事树生成失败:', error);
@@ -1015,10 +1075,10 @@ async function generateStoryTreeNode(
       throw new Error('AI响应缺少故事内容');
     }
     
-    // 验证字数要求
+    // 验证字数要求（800字标准）
     const segmentLength = parsedResponse.segment.replace(/\s/g, '').length;
-    if (segmentLength < 500) {
-      console.warn(`节点字数不足500字: ${segmentLength}字，路径: ${path}`);
+    if (segmentLength < 800) {
+      console.warn(`节点字数不足800字: ${segmentLength}字，路径: ${path}`);
       // 尝试扩展内容
       try {
         const expandResponse = await expandStorySegment(parsedResponse.segment);
@@ -1057,14 +1117,14 @@ async function generateStoryTreeNode(
 }
 
 /**
- * 扩展故事片段到500字以上
+ * 扩展故事片段到800字以上（适合8-12岁）
  */
 async function expandStorySegment(segment: string): Promise<string | null> {
   try {
     const expandMessages = [
       { 
         role: 'system', 
-        content: '你是一个擅长润色儿童故事的助手，请将给定文本保留情节不变地扩展为至少500字，语言温柔、适合3-8岁儿童。只返回扩展后的正文，不要任何额外说明。' 
+        content: '你是一个擅长创作儿童故事的专家，请将给定文本保留情节不变地扩展为800-1200字，语言生动有趣、适合8-12岁儿童的认知水平。增加更多的场景描述、角色心理和细节刑画。只返回扩展后的正文，不要任何额外说明。' 
       },
       { 
         role: 'user', 
@@ -1075,7 +1135,7 @@ async function expandStorySegment(segment: string): Promise<string | null> {
     const expandResp = await deepseekClient.post('/chat/completions', {
       model: DEEPSEEK_CONFIG.CHAT_MODEL,
       messages: expandMessages,
-      max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS - 200, 800),
+      max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS, 1500),
       temperature: 0.7,
       stream: false
     });
@@ -1091,6 +1151,127 @@ async function expandStorySegment(segment: string): Promise<string | null> {
 /**
  * 生成模拟故事树（用于测试）
  */
+/**
+ * 生成模拟故事响应（用于测试环境，针对10岁儿童优化）
+ */
+function generateMockStoryResponse(
+  topic: string, 
+  currentStory?: string, 
+  selectedChoice?: string, 
+  turnIndex?: number, 
+  maxChoices?: number, 
+  forceEnding?: boolean
+): GenerateStoryResponse {
+  const isNewStory = !currentStory;
+  const actualTurnIndex = turnIndex || 0;
+  
+  let storySegment: string;
+  let choices: string[];
+  let isEnding = false;
+  
+  // 基于主题生成更个性化的故事内容
+  const themeBasedContent = generateThemeBasedStory(topic, isNewStory, selectedChoice, actualTurnIndex, forceEnding);
+  
+  if (isNewStory) {
+    storySegment = themeBasedContent.opening;
+    choices = themeBasedContent.initialChoices;
+  } else if (forceEnding || actualTurnIndex >= 4) {
+    storySegment = themeBasedContent.ending;
+    choices = [];
+    isEnding = true;
+  } else {
+    storySegment = themeBasedContent.continuation;
+    choices = themeBasedContent.continuationChoices;
+  }
+  
+  return {
+    storySegment,
+    choices,
+    isEnding
+  };
+}
+
+/**
+ * 根据主题生成适合10岁儿童的故事内容
+ */
+function generateThemeBasedStory(
+  topic: string,
+  isNewStory: boolean,
+  selectedChoice?: string,
+  turnIndex?: number,
+  forceEnding?: boolean
+) {
+  // 分析主题关键词，生成相应的故事元素
+  const lowerTopic = topic.toLowerCase();
+  const isSpace = lowerTopic.includes('太空') || lowerTopic.includes('宇航') || lowerTopic.includes('外星') || lowerTopic.includes('星球');
+  const isUnicorn = lowerTopic.includes('独角兽') || lowerTopic.includes('魔法');
+  const isScience = lowerTopic.includes('科学') || lowerTopic.includes('实验') || lowerTopic.includes('发明');
+  const isAdventure = lowerTopic.includes('冒险') || lowerTopic.includes('探索') || lowerTopic.includes('寻找');
+  
+  if (isSpace) {
+    return {
+      opening: `十岁的小明是个对天空充满好奇的孩子，每天晚上都喜欢看星星。今天，他在后院发现了一个闪闪发光的神秘装置，看起来像是从天空中掉下来的。当他小心翼翼地触碰装置时，突然间，一道温暖的蓝光包围了他，他感觉自己轻飘飘地飞了起来！
+
+眨眼间，小明发现自己站在了一艘超级酷炫的宇宙飞船里。飞船的窗户外面是璀璨的星空，各种颜色的星球在远方闪烁着。这时，一个友好的外星朋友出现了，它有着大大的眼睛和温和的笑容。"欢迎来到银河探险号！"外星朋友说，"我叫星星，我们正在进行一次特殊的太空探索任务。你愿意帮助我们吗？"
+
+小明兴奋地点点头，他从来没有想过会有这样的奇遇！星星告诉他，宇宙中有许多有趣的科学现象等待他们去发现...`,
+      initialChoices: [
+        '先去参观神奇的太空实验室',
+        '选择飞向最亮的那颗星球',
+        '学习如何驾驶宇宙飞船'
+      ],
+      continuation: `跟随星星的指引，小明选择了"${selectedChoice}"。这个决定让他学到了很多关于宇宙的知识：原来星球有不同的重力，有些星球上还有会发光的植物！在星星朋友的帮助下，小明用特殊的太空望远镜观察了遥远的星系，还学会了如何在零重力环境中移动。"每个星球都有它独特的秘密，"星星说，"科学让我们能够理解这些奥妙。"现在，他们面临着新的探索选择...`,
+      continuationChoices: [
+        '探索一颗有奇特生物的星球',
+        '研究黑洞的神秘现象',
+        '帮助修复受损的太空站'
+      ],
+      ending: `经过这次不可思议的太空冒险，小明学到了许多宇宙科学知识，也明白了友谊和勇气的重要性。星星送给他一个特殊的星空指南针，告诉他："只要保持好奇心和学习的热情，科学的奥秘就会一直陪伴你。"当小明回到地球时，他望着夜空中的星星，心中充满了对科学探索的渴望。从此以后，他更加努力地学习，希望将来真的能成为一名宇航员，去探索更多未知的世界！`
+    };
+  } else if (isUnicorn) {
+    return {
+      opening: `十岁的小莉是个特别善良的女孩，她总是相信世界上有魔法存在。一个阳光明媚的周末，当她在奶奶家的花园里玩耍时，突然听到了一阵轻柔的铃声。循着声音，她推开了花园深处一扇从未见过的小门。
+
+门后是一片令人惊叹的魔法森林！彩虹色的蝴蝶在空中翩翩起舞，会唱歌的花朵正在合唱美妙的旋律。就在这时，一只纯白色的独角兽优雅地走到了小莉面前，它的独角闪着像钻石一样的光芒。
+
+"你好，善良的孩子，"独角兽温柔地说，"我是月光，这片森林的守护者。但最近森林里出现了一些问题，我需要一个纯真善良的朋友来帮助我。"月光告诉小莉，森林里的魔法正在慢慢消失，只有通过帮助别人和传递善意，才能重新点亮森林的魔法光芒...`,
+      initialChoices: [
+        '帮助迷路的小动物找到家',
+        '修复被暴风雨破坏的魔法花园',
+        '寻找传说中的友谊水晶'
+      ],
+      continuation: `在月光独角兽的陪伴下，小莉选择了"${selectedChoice}"。这个善良的决定让她发现了帮助别人带来的快乐。她学会了倾听小动物们的心声，学会了照料受伤的植物，还学会了用真诚的友谊温暖他人的心。每当她做出一个善良的行为，森林里就会有更多的花朵绽放，更多的星光闪烁。"真正的魔法来自于善良的心，"月光说，"你已经在用你的行动让世界变得更美好了。"现在，还有更多需要帮助的朋友在等待着他们...`,
+      continuationChoices: [
+        '帮助解决森林居民之间的小误会',
+        '寻找能治愈忧伤的神奇花朵',
+        '教会其他小朋友分享的快乐'
+      ],
+      ending: `通过这次神奇的冒险，小莉明白了最珍贵的魔法就藏在每个人的心中——那就是善良、友爱和乐于助人的品格。月光独角兽送给她一个闪闪发光的小吊坠，说："无论走到哪里，记住保持善良的心，你就能为这个世界带来真正的魔法。"当小莉回到现实世界时，她发现自己变得更加自信和快乐。从那以后，她总是主动帮助同学和朋友，成为了大家心中的"小天使"，她相信每一个善良的行为都能让世界变得更加美好！`
+    };
+  } else {
+    // 通用冒险故事模板（适合其他主题）
+    return {
+      opening: `十岁的主人公是个充满好奇心的孩子，对世界上的一切都充满了兴趣。今天，在关于"${topic}"的探险中，他/她发现了一个从未见过的神秘地方。这里的景色美得像童话故事一样，空气中飘着淡淡的花香，还能听到远处传来的神秘声音。
+
+当主人公小心翼翼地探索这个地方时，遇到了一位智慧的长者。长者告诉他/她，这里隐藏着关于"${topic}"的重要秘密，但需要通过智慧、勇气和善良才能发现。"年轻的探险家，"长者说，"真正的宝藏不是金银财宝，而是在冒险过程中学到的知识和品格。"
+
+现在，主人公面临着人生中一个重要的选择时刻，每个选择都会带来不同的学习和成长经历...`,
+      initialChoices: [
+        `深入了解${topic}的奥秘`,
+        '寻找志同道合的伙伴一起探索',
+        '学习解决困难的新方法'
+      ],
+      continuation: `主人公做出了明智的选择："${selectedChoice}"。这个决定让他/她在${topic}的世界里有了新的发现和理解。通过亲身体验，主人公学会了观察、思考和解决问题的方法，也明白了坚持不懈的重要性。每一个挑战都让他/她变得更加聪明和勇敢，每一个成功都带来了满满的成就感。"学习是一生的冒险，"智慧长者说，"记住今天学到的知识和品格，它们会陪伴你一辈子。"现在，新的机会又出现了...`,
+      continuationChoices: [
+        '挑战更高难度的探索任务',
+        '把学到的知识教给其他小朋友',
+        '寻找这次冒险的终极意义'
+      ],
+      ending: `这次关于"${topic}"的奇妙冒险让主人公收获满满。他/她不仅学到了很多新知识，更重要的是培养了独立思考、勇于探索和乐于助人的优秀品格。智慧长者送给主人公一本特殊的日记本，说："把你的每一次学习和成长都记录下来，这将是你最珍贵的财富。"当主人公回到日常生活中时，发现自己看待事物的眼光变得更加深入和全面。从此以后，他/她带着这次冒险中学到的智慧和勇气，在学习和生活中不断进步，成为了同龄人中的榜样！`
+    };
+  }
+}
+
 function generateMockStoryTree(topic: string, storyTreeId: string, timestamp: string): GenerateFullStoryResponse {
   const mockSegmentText = `在一个美丽的${topic === '小兔子的冒险' ? '花园里' : '神奇的地方'}，我们的主角开始了一段奇妙的旅程。阳光透过绿叶洒下斑驳的光影，微风轻柔地吹过，带来了花朵的香气。在这个充满魔法的世界里，每一步都可能遇到意想不到的惊喜。
 

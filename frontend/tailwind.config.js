@@ -2,7 +2,10 @@
 module.exports = {
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
+    "../shared/**/*.{js,jsx,ts,tsx}",
   ],
+  // 启用JIT模式以获得更快的构建速度
+  mode: 'jit',
   theme: {
     extend: {
       fontFamily: {

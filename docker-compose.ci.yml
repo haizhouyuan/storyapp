@@ -15,10 +15,11 @@ services:
     ports:
       - "27017:27017"
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"]
-      interval: 15s
+      test: ["CMD-SHELL", "mongosh --username root --password pass123 --authenticationDatabase admin --quiet --eval 'db.runCommand({ ping: 1 }).ok' 2>/dev/null | grep -q 1"]
+      interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 15
+      start_period: 30s
 
   # 应用测试服务
   app:
@@ -37,6 +38,7 @@ services:
       - "5001:5000"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
-      interval: 15s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 40s

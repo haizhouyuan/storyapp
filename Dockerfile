@@ -1,98 +1,61 @@
-# 多阶段构建Dockerfile - 前后端统一部署
-
-# 阶段1: 前端构建
-ARG NODE_IMAGE=node:18-alpine
-ARG NPM_REGISTRY=https://registry.npmmirror.com
-FROM ${NODE_IMAGE} AS frontend-builder
-WORKDIR /app
-
-# 安装前端依赖
-RUN npm config set registry $NPM_REGISTRY
-COPY frontend/package.json frontend/package-lock.json ./frontend/
-RUN cd frontend && npm ci --legacy-peer-deps
-
-# 复制前端源码和共享类型
-COPY frontend ./frontend
-COPY shared ./shared
-
-# 构建前端
-RUN cd frontend && npm run build
-
-# 阶段2: 后端构建
-ARG NODE_IMAGE=node:18-alpine
-FROM ${NODE_IMAGE} AS backend-builder
-WORKDIR /app
+# 改进的Dockerfile - 适配NPM Workspaces
+ARG NODE_IMAGE=node:20-alpine
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
-# 设置npm镜像
+FROM ${NODE_IMAGE} AS builder
+WORKDIR /app
+
+# 设置npm镜像源
 RUN npm config set registry $NPM_REGISTRY
 
-# 复制workspace配置
+# 复制根与子包的 package.json（让 npm 能解析 workspaces）
 COPY package.json package-lock.json ./
-COPY tsconfig.base.json ./tsconfig.base.json
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+COPY shared/package.json shared/package.json
 
-# 复制各包的package.json
-COPY shared/package.json ./shared/package.json
-COPY backend/package.json ./backend/package.json
+# 一次性安装整个 monorepo
+RUN npm ci --workspaces
 
-# 安装所有依赖（workspaces会自动处理）
-RUN npm ci
+# 复制全量源码
+COPY . .
 
-# 复制源码
-COPY backend ./backend
-COPY shared ./shared
+# 构建前后端
+RUN npm run -w shared build && \
+    npm run -w frontend build && \
+    npm run -w backend build
 
-# 构建shared包
-RUN npm run -w @storyapp/shared build
-
-# 构建backend包
-RUN npm run -w backend build
-
-# 阶段3: 生产运行时
-ARG NODE_IMAGE=node:18-alpine
-FROM ${NODE_IMAGE}
-
-# 创建应用目录和用户
+# 生产镜像
+FROM ${NODE_IMAGE} AS production
 WORKDIR /app
+
+# 创建非root用户
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S storyapp -u 1001
 
-# 复制整个workspace结构
+# 复制package文件和安装生产依赖
 COPY package.json package-lock.json ./
-COPY backend/package.json ./backend/package.json
-COPY shared/package.json ./shared/package.json
+COPY backend/package.json backend/package.json
+COPY shared/package.json shared/package.json
 
-ARG NPM_REGISTRY=https://registry.npmmirror.com
-RUN npm config set registry $NPM_REGISTRY
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm config set registry $NPM_REGISTRY && \
+    npm ci --omit=dev --workspaces && \
+    npm cache clean --force
 
-# 拷贝编译结果
-COPY --from=backend-builder /app/backend/dist ./backend/dist
-COPY --from=backend-builder /app/shared/dist ./shared/dist
-
-# 拷贝前端到 backend/dist/public，匹配后端静态路径
-COPY --from=frontend-builder /app/frontend/build ./backend/dist/public
-
-# 创建必要的目录
-RUN mkdir -p logs uploads && \
-    chown -R storyapp:nodejs /app
-
-# 安装额外的生产依赖
-RUN npm install axios
+# 复制构建产物
+COPY --from=builder /app/backend/dist ./backend/dist
+COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/frontend/build ./frontend/build
 
 # 切换到非root用户
 USER storyapp
-
-# 设置环境变量
-ENV NODE_ENV=production \
-    PORT=5000
 
 # 暴露端口
 EXPOSE 5000
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+  CMD node -e "require('http').get('http://127.0.0.1:5000/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # 启动应用
-CMD ["node", "backend/dist/src/index.js"]
+CMD ["node", "backend/dist/index.js"]

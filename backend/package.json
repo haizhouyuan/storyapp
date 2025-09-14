@@ -9,6 +9,10 @@
     "start": "node dist/index.js",
     "test": "jest"
   },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^8.1.0",
     "@storyapp/shared": "*",

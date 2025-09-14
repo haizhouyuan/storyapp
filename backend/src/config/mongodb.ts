@@ -1,8 +1,11 @@
 import { MongoClient, Db } from 'mongodb';
 
-// MongoDB配置
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'storyapp';
+// 使用集中化配置加载器
+const { getTypedConfig } = require('../../../config/env-loader');
+
+const typedConfig = getTypedConfig();
+const MONGODB_URI = typedConfig.database.uri;
+const MONGODB_DB_NAME = typedConfig.database.name;
 
 // 数据库集合名称常量
 export const COLLECTIONS = {

@@ -115,7 +115,20 @@ export const updateMemoryMetrics = () => {
 };
 
 // Start memory monitoring
-setInterval(updateMemoryMetrics, 30000); // Update every 30 seconds
+const memoryMetricsInterval = setInterval(updateMemoryMetrics, 30000); // Update every 30 seconds
+
+// 优雅关闭处理
+const cleanupMemoryMetrics = () => {
+  if (memoryMetricsInterval) {
+    clearInterval(memoryMetricsInterval);
+    console.log('🧹 内存监控定时器已清理');
+  }
+};
+
+// 监听进程退出事件
+process.on('SIGINT', cleanupMemoryMetrics);
+process.on('SIGTERM', cleanupMemoryMetrics);
+process.on('exit', cleanupMemoryMetrics);
 
 // Helper function to record HTTP metrics
 export const recordHttpMetrics = (req: any, res: any, startTime: number) => {

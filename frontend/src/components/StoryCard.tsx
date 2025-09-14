@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { BookOpenIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { formatDate } from '../utils/helpers';
@@ -16,8 +16,9 @@ interface StoryCardProps {
 /**
  * 故事卡片组件
  * 用于在"我的故事"页面显示故事列表项
+ * 使用React.memo优化性能，避免不必要的重渲染
  */
-export default function StoryCard({
+const StoryCard = memo(function StoryCard({
   id,
   title,
   preview,
@@ -26,6 +27,32 @@ export default function StoryCard({
   onDelete,
   className = ''
 }: StoryCardProps) {
+  // 使用useMemo缓存格式化后的日期，避免重复计算
+  const formattedDate = useMemo(() => formatDate(createdAt), [createdAt]);
+
+  // 使用useMemo缓存样式类名，避免重复拼接
+  const cardClassName = useMemo(() => `
+    relative
+    bg-white
+    rounded-child-lg
+    shadow-child-lg
+    p-child-lg
+    cursor-pointer
+    border-2
+    border-transparent
+    hover:border-child-blue
+    hover:shadow-child-xl
+    transition-all
+    duration-200
+    ${className}
+  `, [className]);
+
+  // 使用useMemo缓存动画配置，避免重复创建对象
+  const motionTransition = useMemo(() => ({
+    type: 'spring' as const,
+    stiffness: 300,
+    damping: 20
+  }), []);
 
   return (
     <motion.div
@@ -33,27 +60,9 @@ export default function StoryCard({
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ scale: 1.02, y: -2 }}
       whileTap={{ scale: 0.98 }}
-      transition={{
-        type: 'spring',
-        stiffness: 300,
-        damping: 20
-      }}
+      transition={motionTransition}
       onClick={onClick}
-      className={`
-        relative
-        bg-white
-        rounded-child-lg
-        shadow-child-lg
-        p-child-lg
-        cursor-pointer
-        border-2
-        border-transparent
-        hover:border-child-blue
-        hover:shadow-child-xl
-        transition-all
-        duration-200
-        ${className}
-      `}
+      className={cardClassName}
       data-testid={`story-card-${id}`}
     >
       {/* 故事缩略图区域 */}
@@ -91,7 +100,7 @@ export default function StoryCard({
           {/* 创建时间 */}
           <div className="flex items-center gap-2 text-child-xs text-gray-500">
             <CalendarIcon className="w-4 h-4" />
-            <span>{formatDate(createdAt)}</span>
+            <span>{formattedDate}</span>
           </div>
         </div>
 
@@ -179,4 +188,6 @@ export default function StoryCard({
       />
     </motion.div>
   );
-}
+});
+
+export default StoryCard;

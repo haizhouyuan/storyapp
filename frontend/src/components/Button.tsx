@@ -12,6 +12,7 @@ interface ButtonProps {
   icon?: React.ReactNode;
   className?: string;
   testId?: string;
+  tabIndex?: number;
 }
 
 /**
@@ -27,7 +28,8 @@ export default function Button({
   size = 'medium',
   icon,
   className = '',
-  testId
+  testId,
+  tabIndex
 }: ButtonProps) {
   
   const handleClick = () => {
@@ -84,6 +86,7 @@ export default function Button({
       onClick={handleClick}
       disabled={disabled || loading}
       data-testid={testId}
+      tabIndex={tabIndex}
       className={`
         relative
         inline-flex
