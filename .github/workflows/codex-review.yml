@@ -1,8 +1,9 @@
-name: Codex Review
+# DISABLED: 重复的AI评审工作流，已合并到pr-auto-review.yml
+# name: Codex Review
 
-on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+# on:
+#   pull_request:
+#     types: [opened, reopened, synchronize, ready_for_review]
 
 concurrency:
   group: codex-${{ github.ref }}
