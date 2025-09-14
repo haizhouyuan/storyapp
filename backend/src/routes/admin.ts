@@ -32,11 +32,19 @@ router.get('/logs', async (req: Request, res: Response) => {
     }
     
     if (logLevel) {
+      // 单值日志级别
       filter.logLevel = logLevel;
     }
-    
+
     if (eventType) {
-      filter.eventType = eventType;
+      // 支持多事件类型过滤：逗号分隔或重复参数
+      const toArray = (v: any): string[] => {
+        if (Array.isArray(v)) return v.filter(Boolean);
+        if (typeof v === 'string') return v.split(',').map(s => s.trim()).filter(Boolean);
+        return [];
+      };
+      const events = toArray(eventType);
+      filter.eventType = events.length > 1 ? { $in: events } : (events[0] || eventType);
     }
     
     if (startDate || endDate) {
@@ -50,9 +58,11 @@ router.get('/logs', async (req: Request, res: Response) => {
     }
     
     if (search) {
+      const searchRegex = { $regex: String(search), $options: 'i' };
       filter.$or = [
-        { message: { $regex: search, $options: 'i' } },
-        { 'data.topic': { $regex: search, $options: 'i' } }
+        { message: searchRegex },
+        { 'data.topic': searchRegex },
+        { sessionId: searchRegex }
       ];
     }
 
@@ -62,9 +72,12 @@ router.get('/logs', async (req: Request, res: Response) => {
     // 获取总数
     const total = await logsCollection.countDocuments(filter);
 
+    // 默认不返回较大的字段（例如 stackTrace），除非显式要求
+    const includeStack = String(req.query.includeStackTrace || '').toLowerCase() === 'true';
+
     // 获取日志数据
     const logs = await logsCollection
-      .find(filter)
+      .find(filter, includeStack ? undefined : { projection: { stackTrace: 0 } })
       .sort({ timestamp: -1 })
       .skip(skip)
       .limit(limitNum)
