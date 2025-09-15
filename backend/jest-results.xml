@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="8" failures="0" errors="0" time="4.828">
+  <testsuite name="Health API Routes" errors="0" failures="0" skipped="0" timestamp="2025-09-15T07:59:18" time="2.324" tests="8">
+    <testcase classname="Health API Routes GET /healthz 应该返回健康状态" name="Health API Routes GET /healthz 应该返回健康状态" time="0.027">
+    </testcase>
+    <testcase classname="Health API Routes GET /healthz 应该包含必要的健康检查项" name="Health API Routes GET /healthz 应该包含必要的健康检查项" time="0.006">
+    </testcase>
+    <testcase classname="Health API Routes GET /healthz 应该在所有检查通过时返回健康状态" name="Health API Routes GET /healthz 应该在所有检查通过时返回健康状态" time="0.005">
+    </testcase>
+    <testcase classname="Health API Routes GET /healthz 应该返回正确的响应格式" name="Health API Routes GET /healthz 应该返回正确的响应格式" time="0.005">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容) 应该返回健康状态" name="Health API Routes GET /api/health (向后兼容) 应该返回健康状态" time="0.005">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容) 应该包含必要的健康检查项" name="Health API Routes GET /api/health (向后兼容) 应该包含必要的健康检查项" time="0.009">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容) 应该在所有检查通过时返回健康状态" name="Health API Routes GET /api/health (向后兼容) 应该在所有检查通过时返回健康状态" time="0.004">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容) 应该返回正确的响应格式" name="Health API Routes GET /api/health (向后兼容) 应该返回正确的响应格式" time="0.004">
+    </testcase>
+  </testsuite>
+</testsuites>

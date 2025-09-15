@@ -31,19 +31,7 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  // 生成JUnit XML报告用于CI
-  reporters: [
-    'default',
-    ['jest-junit', {
-      outputDirectory: '.',
-      outputName: 'jest-results.xml',
-    }],
-  ],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  
-  // 全局设置和清理（用于内存数据库）
-  globalSetup: '<rootDir>/tests/globalSetup.ts',
-  globalTeardown: '<rootDir>/tests/globalTeardown.ts',
   testTimeout: 10000,
   // 为避免并发测试之间对同一Mongo集合的相互清理/干扰，序列化执行测试
   maxWorkers: 1,
