@@ -430,7 +430,15 @@ router.post('/logs/export', async (req: Request, res: Response) => {
     
     if (sessionId) filter.sessionId = sessionId;
     if (logLevel) filter.logLevel = logLevel;
-    if (eventType) filter.eventType = eventType;
+    if (eventType) {
+      const toArray = (v: any): string[] => {
+        if (Array.isArray(v)) return v.filter(Boolean);
+        if (typeof v === 'string') return v.split(',').map((s) => s.trim()).filter(Boolean);
+        return [];
+      };
+      const events = toArray(eventType);
+      filter.eventType = events.length > 1 ? { $in: events } : (events[0] || eventType);
+    }
     
     if (startDate || endDate) {
       filter.timestamp = {};
