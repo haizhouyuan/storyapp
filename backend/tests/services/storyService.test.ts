@@ -1,6 +1,8 @@
 import { generateStoryService, saveStoryService, getStoriesService, getStoryByIdService, deleteStoryService } from '../../src/services/storyService';
 import { getConnectionForTesting } from '../../src/config/database';
 import { MongoClient, Db, Collection } from 'mongodb';
+// 临时patch数据库连接以支持测试环境
+import * as mongodb from '../../src/config/mongodb';
 
 describe('Story Service', () => {
   let client: MongoClient;
@@ -12,10 +14,17 @@ describe('Story Service', () => {
     client = connection.client;
     db = connection.db;
     collection = db.collection('stories');
+    
+    // Patch getDatabase to return our test database
+    jest.spyOn(mongodb, 'getDatabase').mockImplementation(() => db);
   });
 
   afterAll(async () => {
-    await client?.close();
+    // Restore mocked functions
+    jest.restoreAllMocks();
+    
+    const { teardownTestDatabase } = require('../config/mongodb.test');
+    await teardownTestDatabase();
   });
 
   beforeEach(async () => {
