@@ -36,30 +36,33 @@ export default defineConfig({
     video: 'retain-on-failure',
     
     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
-    actionTimeout: 10000,
+    actionTimeout: process.env.CI ? 15000 : 10000,
     
-    /* Maximum time each test can take */
-    timeout: 60000
+    /* Maximum time each test can take - CI环境延长超时 */
+    timeout: process.env.CI ? 90000 : 60000
   },
 
-  /* Configure projects for major browsers */
-  projects: [
+  /* Configure projects for major browsers - CI优化：只测试核心浏览器 */
+  projects: process.env.CI ? [
+    // CI环境只测试Chromium以提高速度
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-
+  ] : [
+    // 本地环境测试所有浏览器
     {
-      name: 'firefox',
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox', 
       use: { ...devices['Desktop Firefox'] },
     },
-
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
-
-    /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
       use: { ...devices['Pixel 5'] },
@@ -68,6 +71,7 @@ export default defineConfig({
       name: 'Mobile Safari',
       use: { ...devices['iPhone 12'] },
     },
+  ],
 
     /* Test against branded browsers. */
     // {

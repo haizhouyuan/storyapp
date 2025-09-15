@@ -66,20 +66,16 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
           echo "deploy_branch=$DEPLOY_BRANCH" >> $GITHUB_OUTPUT
-          echo "deploy_url=https://staging-$DEPLOY_BRANCH.storyapp.dandanbaba.xyz" >> $GITHUB_OUTPUT
+          echo "deploy_url=http://localhost:5001" >> $GITHUB_OUTPUT
 
       - name: Deploy to staging environment
         id: deploy
         env:
-          # 根据你的实际部署方式配置这些环境变量
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY || 'sk-test-dummy' }}
           DEPLOY_BRANCH: ${{ steps.prepare.outputs.deploy_branch }}
         run: |
-          # 方案1: Docker部署示例
-          echo "🚀 开始部署到测试环境..."
+          # 本地容器化部署 - 避免外部服务器依赖
+          echo "🚀 开始本地容器化部署到测试环境..."
           
           # 创建部署用的docker-compose配置
           cat > docker-compose.staging.yml << EOF
@@ -134,7 +130,7 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
           
           echo "✅ 部署完成！"
-          echo "🔗 测试环境: ${{ steps.prepare.outputs.deploy_url }}"
+          echo "🔗 本地测试环境: http://localhost:5001"
 
       - name: Run deployment verification tests
         if: steps.deploy.outputs.status == 'success'

@@ -1,0 +1,25 @@
+{
+  "name": "@storyapp/shared",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rimraf dist",
+    "dev": "tsc -p tsconfig.build.json --watch"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  }
+}

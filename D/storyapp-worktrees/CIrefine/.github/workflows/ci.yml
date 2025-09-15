@@ -1,0 +1,201 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  merge_group:
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  # 快速检查作业：构建+后端单元测试
+  unit-tests:
+    name: Unit Tests & Build
+    runs-on: ubuntu-latest
+    
+    services:
+      mongodb:
+        image: mongo:6.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}
+          MONGO_INITDB_DATABASE: storyapp
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --username root --password $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep -q 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 15
+          --health-start-period 30s
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm run -w shared build
+
+      - name: Build backend
+        run: npm run -w backend build
+        
+      - name: Build frontend
+        run: npm run -w frontend build
+
+      - name: Run backend tests
+        run: npm run -w backend test
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@localhost:27017/storyapp_test?authSource=admin
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            backend/coverage/
+            backend/jest-results.xml
+          retention-days: 7
+
+  # E2E测试作业：完整Docker Compose栈+Playwright
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests  # 依赖单元测试通过
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create CI environment file
+        run: |
+          cat > .env.ci << 'EOF'
+          DEEPSEEK_API_KEY=sk-test-dummy
+          DEEPSEEK_API_URL=https://api.deepseek.com
+          MONGODB_URI=mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@mongo:27017/storyapp?authSource=admin
+          MONGODB_DB_NAME=storyapp
+          NODE_ENV=test
+          PORT=5000
+          EOF
+
+      - name: Build and start services
+        run: |
+          docker compose -f docker-compose.ci.yml up -d --build
+        env:
+          COMPOSE_FILE: docker-compose.ci.yml
+
+      - name: Wait for services to be healthy
+        run: |
+          timeout 180 bash -c '
+            echo "Waiting for MongoDB to be healthy..."
+            until docker compose -f docker-compose.ci.yml ps mongo | grep -q "healthy"; do 
+              echo "MongoDB not ready yet..."
+              sleep 5
+            done
+            echo "MongoDB is healthy!"
+            
+            echo "Waiting for app to be healthy..."
+            until docker compose -f docker-compose.ci.yml ps app | grep -q "healthy"; do 
+              echo "App not ready yet..."
+              docker compose -f docker-compose.ci.yml logs app --tail=10
+              sleep 5
+            done
+            echo "All services are healthy!"
+          '
+
+      - name: Seed test data
+        run: node scripts/ci/seed-test-data.js
+        env:
+          BASE_URL: http://localhost:5001
+
+      - name: Install Playwright browsers
+        run: npx playwright install
+
+      - name: Run E2E tests
+        run: npm test
+        env:
+          BASE_URL: http://localhost:5001
+
+      - name: Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Upload service logs
+        if: failure()
+        run: |
+          mkdir -p logs
+          docker compose -f docker-compose.ci.yml logs mongo > logs/mongo.log
+          docker compose -f docker-compose.ci.yml logs app > logs/app.log
+          
+      - name: Upload service logs as artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-logs
+          path: logs/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f docker-compose.ci.yml down -v
+
+  # 汇总作业：收集所有测试结果
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, e2e-tests]
+    if: always()
+    
+    steps:
+      - name: Download test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+
+      - name: Generate test summary
+        run: |
+          echo "# 测试结果汇总" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.unit-tests.result }}" == "success" ]; then
+            echo "✅ 单元测试: 通过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ 单元测试: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.e2e-tests.result }}" == "success" ]; then
+            echo "✅ E2E测试: 通过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ E2E测试: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "详细测试报告请查看Actions artifacts。" >> $GITHUB_STEP_SUMMARY
