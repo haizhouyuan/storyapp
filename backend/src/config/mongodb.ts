@@ -90,11 +90,9 @@ export async function checkDatabaseHealth(): Promise<boolean> {
 
 /**
  * 获取数据库连接信息（用于测试）
+ * 自动使用内存数据库（本地）或真实MongoDB（CI）
  */
 export async function getConnectionForTesting(): Promise<{ client: MongoClient; db: Db }> {
-  const database = await connectToDatabase();
-  if (!client) {
-    throw new Error('数据库客户端未初始化');
-  }
-  return { client, db: database };
+  const { setupTestDatabase } = require('../../tests/config/mongodb.test');
+  return await setupTestDatabase();
 }

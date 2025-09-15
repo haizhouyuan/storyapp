@@ -3,6 +3,8 @@ import express from 'express';
 import adminRouter from '../../src/routes/admin';
 import { getConnectionForTesting } from '../../src/config/database';
 import { Db, MongoClient } from 'mongodb';
+// 临时patch数据库连接以支持测试环境
+import * as mongodb from '../../src/config/mongodb';
 
 const app = express();
 app.use(express.json());
@@ -16,10 +18,17 @@ describe('Admin API Routes (Appsmith compatibility)', () => {
     const conn = await getConnectionForTesting();
     client = conn.client;
     db = conn.db;
+    
+    // Patch getDatabase to return our test database
+    jest.spyOn(mongodb, 'getDatabase').mockImplementation(() => db);
   });
 
   afterAll(async () => {
-    await client?.close();
+    // Restore mocked functions
+    jest.restoreAllMocks();
+    
+    const { teardownTestDatabase } = require('../config/mongodb.test');
+    await teardownTestDatabase();
   });
 
   beforeEach(async () => {

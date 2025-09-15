@@ -47,3 +47,5 @@ export const clearTestDatabase = async (db: Db): Promise<void> => {
     await db.collection(collection.name).deleteMany({});
   }
 };
+
+// Configuration file - tests should be in separate test file
