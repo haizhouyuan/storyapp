@@ -91,10 +91,11 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       throw customError;
     }
     
-    // 在没有有效API Key时使用mock数据（除了生产环境）
-    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY) && process.env.NODE_ENV !== 'production') {
-      console.log('使用模拟数据生成适合8-12岁儿童的故事');
-      return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
+    // 检查API Key有效性
+    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY)) {
+      const customError = new Error('DeepSeek API Key 未配置或无效');
+      (customError as any).code = 'DEEPSEEK_API_KEY_INVALID';
+      throw customError;
     }
     
     logger.info(EventType.STORY_GENERATION_START, '开始生成故事片段', {
@@ -185,35 +186,12 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     } catch (error: any) {
       const apiDuration = Date.now() - apiStartTime;
       
-      // 检查是否是认证错误或测试环境
-      if (error.response?.status === 401 || 
-          (error.response?.data?.error?.message?.includes('Invalid API key') || 
-           process.env.DEEPSEEK_API_KEY === 'sk-test-dummy' || 
-           process.env.NODE_ENV === 'test')) {
-        
-        logger.info(EventType.AI_API_ERROR, '使用测试环境模拟数据', {
-          reason: 'API key invalid or test environment',
-          errorMessage: error.message
-        }, undefined, sessionId);
-        
-        // 返回测试用模拟数据
-        aiResponse = JSON.stringify({
-          storySegment: `【测试模式】这是一个关于"${topic}"的精彩故事片段。小主人公踏上了充满想象力的冒险之旅，遇到了许多有趣的角色和挑战。在这个奇妙的世界里，每个选择都会带来不同的发现和成长。通过勇气、智慧和善良，主人公学会了珍贵的人生道理。故事中融入了丰富的教育元素，让孩子们在娱乐中学习，在想象中成长。这个充满温暖和正能量的故事片段，为后续的冒险奠定了基础。`,
-          choices: [
-            "选择勇敢面对挑战，展现主人公的勇气",
-            "选择用智慧解决问题，体现思考的力量", 
-            "选择与伙伴合作，学习团队精神的重要"
-          ],
-          isEnding: false
-        });
-      } else {
-        logger.error(EventType.AI_API_ERROR, 'DeepSeek API调用失败', error, {
-          errorMessage: error.message,
-          status: error.response?.status,
-          duration: apiDuration
-        }, sessionId);
-        throw error;
-      }
+      logger.error(EventType.AI_API_ERROR, 'DeepSeek API调用失败', error, {
+        errorMessage: error.message,
+        status: error.response?.status,
+        duration: apiDuration
+      }, sessionId);
+      throw error;
     }
     
     const apiDuration = Date.now() - apiStartTime;
@@ -683,12 +661,11 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 在没有有效API Key时使用mock数据（除了生产环境）
-    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY) && process.env.NODE_ENV !== 'production') {
-      console.log('使用模拟数据生成适合8-12岁儿童的故事树');
-      const storyTreeId = new ObjectId().toString();
-      const timestamp = new Date().toISOString();
-      return generateMockStoryTree(topic, storyTreeId, timestamp);
+    // 检查API Key有效性
+    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY)) {
+      const customError = new Error('DeepSeek API Key 未配置或无效');
+      (customError as any).code = 'DEEPSEEK_API_KEY_INVALID';
+      throw customError;
     }
     
     // 默认启用高级模式（三阶段协作），超时或失败时降级到基础模式
@@ -779,28 +756,8 @@ async function callDeepSeekReasoner(systemPrompt: string, userMessage: string): 
       throw new Error('思考模式响应格式解析失败');
     }
   } catch (error: any) {
-    // 检查是否是认证错误或测试环境
-    if (error.response?.status === 401 || 
-        (error.response?.data?.error?.message?.includes('Invalid API key') || 
-         process.env.DEEPSEEK_API_KEY === 'sk-test-dummy' || 
-         process.env.NODE_ENV === 'test')) {
-      
-      // 返回测试用模拟数据
-      return {
-        story_outline: {
-          theme: userMessage.includes('主题') ? userMessage.match(/主题：(.+)/)?.[1] || '测试主题' : '测试主题',
-          first_choices: ["选择勇敢面对挑战", "选择用智慧解决问题", "选择与伙伴合作"],
-          branches: [
-            { choice: "选择勇敢面对挑战", development: "主角鼓起勇气，决定直面困难" },
-            { choice: "选择用智慧解决问题", development: "主角冷静思考，寻找巧妙的解决方案" },
-            { choice: "选择与伙伴合作", development: "主角意识到团队合作的重要性" }
-          ]
-        }
-      };
-    } else {
-      console.error('DeepSeek Reasoner API调用失败:', error.message);
-      throw error;
-    }
+    console.error('DeepSeek Reasoner API调用失败:', error.message);
+    throw error;
   }
 }
 
@@ -839,22 +796,8 @@ async function callDeepSeekChat(systemPrompt: string, userMessage: string): Prom
       throw new Error('快速模式响应格式解析失败');
     }
   } catch (error: any) {
-    // 检查是否是认证错误或测试环境
-    if (error.response?.status === 401 || 
-        (error.response?.data?.error?.message?.includes('Invalid API key') || 
-         process.env.DEEPSEEK_API_KEY === 'sk-test-dummy' || 
-         process.env.NODE_ENV === 'test')) {
-      
-      // 返回测试用模拟数据
-      return {
-        segment: `【测试模式】这是一个关于故事创作的测试片段。在这个测试环境中，我们模拟真实的故事内容，确保应用程序的各项功能能够正常运行。这个故事片段包含了适合儿童阅读的内容，充满了想象力和教育意义。通过这种方式，我们可以验证故事生成、解析和显示的完整流程。`,
-        choices: ["继续测试冒险", "选择另一个测试路径"],
-        isEnding: false
-      };
-    } else {
-      console.error('DeepSeek Chat API调用失败:', error.message);
-      throw error;
-    }
+    console.error('DeepSeek Chat API调用失败:', error.message);
+    throw error;
   }
 }
 
@@ -1028,10 +971,11 @@ export async function generateBasicStoryTreeService(params: GenerateFullStoryReq
     const storyTreeId = new ObjectId().toString();
     const timestamp = new Date().toISOString();
 
-    // 检查是否有有效API密钥，没有则使用模拟数据
+    // 检查API Key有效性
     if (!isValidApiKey(process.env.DEEPSEEK_API_KEY)) {
-      console.log('使用模拟数据生成故事树');
-      return generateMockStoryTree(topic, storyTreeId, timestamp);
+      const customError = new Error('DeepSeek API Key 未配置或无效');
+      (customError as any).code = 'DEEPSEEK_API_KEY_INVALID';
+      throw customError;
     }
     
     // 使用渐进式生成策略：先生成根节点，再分别生成各个分支
@@ -1152,22 +1096,8 @@ async function generateStoryTreeNode(
       
       aiResponse = response.data.choices[0].message.content;
     } catch (error: any) {
-      // 检查是否是认证错误或测试环境
-      if (error.response?.status === 401 || 
-          (error.response?.data?.error?.message?.includes('Invalid API key') || 
-           process.env.DEEPSEEK_API_KEY === 'sk-test-dummy' || 
-           process.env.NODE_ENV === 'test')) {
-        
-        // 返回测试用模拟数据
-        aiResponse = JSON.stringify({
-          segment: `【测试模式】故事节点测试片段 - 深度${depth}，路径${path}。这是一个关于"${topic}"的模拟故事节点，用于验证故事树生成功能。这个片段包含了适合儿童的内容，展现了故事的连贯性和教育意义。通过这种方式，我们可以测试完整的故事树结构和节点关系。`,
-          choices: isLastLevel ? [] : ["测试选择1", "测试选择2"],
-          isEnding: isLastLevel
-        });
-      } else {
-        console.error('DeepSeek API调用失败:', error.message);
-        throw error;
-      }
+      console.error('DeepSeek API调用失败:', error.message);
+      throw error;
     }
     console.log(`节点生成完成，深度: ${depth}, 路径: ${path}`);
     
@@ -1264,18 +1194,8 @@ async function expandStorySegment(segment: string): Promise<string | null> {
       const expanded = expandResp.data.choices[0].message.content?.trim();
       return expanded || null;
     } catch (error: any) {
-      // 检查是否是认证错误或测试环境
-      if (error.response?.status === 401 || 
-          (error.response?.data?.error?.message?.includes('Invalid API key') || 
-           process.env.DEEPSEEK_API_KEY === 'sk-test-dummy' || 
-           process.env.NODE_ENV === 'test')) {
-        
-        // 在测试环境中，简单返回带前缀的原文本
-        return `【测试模式扩展】${segment}。这是一个扩展版本的测试故事片段，用于验证故事扩展功能。在真实环境中，这里会包含更丰富的故事细节和更生动的描述。`;
-      } else {
-        console.warn('扩展故事片段失败:', error.message);
-        return null;
-      }
+      console.warn('扩展故事片段失败:', error.message);
+      return null;
     }
   } catch (e) {
     console.warn('扩展故事片段失败:', e);
