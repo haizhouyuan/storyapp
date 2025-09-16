@@ -1,0 +1,59 @@
+name: Inspect Production Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: SSH Inspect .env and Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: SSH and inspect
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script_stop: true
+          envs: PROD_PROJECT_PATH
+          script: |
+            set -euo pipefail
+            PROJECT_DIR=${{ secrets.PROD_PROJECT_PATH || '/root/projects/storyapp' }}
+            echo "📍 Project dir: ${PROJECT_DIR}"
+            cd "${PROJECT_DIR}"
+
+            echo "\n== .env keys (no values) =="
+            if [ -f .env ]; then
+              awk -F= '/^[A-Z0-9_]+=/{print $1}' .env | sort || true
+            else
+              echo ".env not found"
+            fi
+
+            echo "\n== critical values (non-secret) =="
+            grep -E '^(APP_PORT|NODE_ENV|FRONTEND_URL)=' .env || true
+
+            echo "\n== mongodb (redacted) =="
+            grep -E '^(MONGO_USER|MONGO_PASS|MONGO_DB)=' .env | sed -E 's/=.*/=<redacted>/' || true
+
+            echo "\n== deepseek (redacted) =="
+            grep -E '^(DEEPSEEK_API_KEY|DEEPSEEK_API_URL)=' .env | sed -E 's/=.*/=<redacted>/' || true
+
+            echo "\n== docker compose status =="
+            docker compose -f docker-compose.yml -f docker-compose.ghcr.yml ps || true
+
+            echo "\n== health check =="
+            PORT=$(awk -F= '/^APP_PORT=/{print $2}' .env || true); PORT=${PORT:-5001}
+            echo "Using APP_PORT=${PORT}"
+            set +e
+            curl -fsS "http://localhost:${PORT}/healthz" || true
+            curl -fsS "http://localhost:${PORT}/api/health" || true
+            set -e
+
+            echo "\n== tail app logs =="
+            docker compose -f docker-compose.yml -f docker-compose.ghcr.yml logs --tail=50 app || true
+

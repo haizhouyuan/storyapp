@@ -6,6 +6,7 @@
 ✅ **Secret统一配置**: 所有工作流使用`ANTHROPIC_API_KEY`  
 ✅ **完整CI/CD流水线**: 已部署并运行  
 ✅ **Docker镜像构建**: 自动推送到GHCR  
+✅ **镜像安全与SBOM**: 启用Trivy漏洞扫描（High/Critical拦截）+ 生成SBOM并上传  
 
 ## 📋 工作流概览
 
@@ -23,8 +24,9 @@
 **功能**:
 - 🐳 **自动构建**: 多阶段Docker构建优化
 - 📦 **GHCR推送**: 推送到GitHub Container Registry
-- 🔍 **漏洞扫描**: Trivy安全扫描，高危漏洞直接失败
+- 🔍 **漏洞扫描**: Trivy安全扫描，高危/严重漏洞直接失败
 - 🏷️ **智能标签**: SHA、分支、tag多重标签策略
+- 📄 **SBOM生成**: 生成 SPDX SBOM 并作为 artifact 上传
 
 ### 3. Production Deployment (`.github/workflows/deploy-prod.yml`)
 **触发条件**: 手动触发 (workflow_dispatch)  

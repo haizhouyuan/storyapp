@@ -1,0 +1,90 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Container tag to deploy (e.g., sha-latest or v1.0.0)"
+        required: true
+        default: sha-latest
+      run_prod_tests:
+        description: "Run Playwright production tests on server after deploy"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  deploy:
+    name: Deploy over SSH
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Prepare variables
+        id: prep
+        run: |
+          echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script_stop: true
+          envs: IMAGE_NAME
+          script: |
+            set -euo pipefail
+            export PROJECT_DIR=${{ secrets.PROD_PROJECT_PATH || '/root/projects/storyapp' }}
+            export DEPLOY_TAG='${{ steps.prep.outputs.tag }}'
+            export GHCR_USER='${{ secrets.GHCR_USERNAME || github.repository_owner }}'
+            export GHCR_PAT='${{ secrets.GHCR_PAT }}'
+
+            echo "📍 Using project dir: $PROJECT_DIR"
+            cd "$PROJECT_DIR"
+
+            echo "🔐 Login GHCR"
+            echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            echo "⬇️  Pull image ${IMAGE_NAME}:${DEPLOY_TAG}"
+            export APP_TAG="$DEPLOY_TAG"
+            docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull app
+
+            echo "🚀 Upgrading app"
+            docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d app
+
+            echo "⏳ Waiting for health"
+            # Expect APP_PORT=5001 on server .env (see docs). Fallback to 5001 for checks.
+            PORT=${APP_PORT:-5001}
+            for i in {1..30}; do
+              if curl -fsS "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then echo OK; break; fi
+              echo "waiting..." && sleep 5
+            done
+            curl -fsS "http://localhost:${PORT}/api/health"
+
+            echo "🧹 Prune dangling images"
+            docker image prune -f || true
+
+      - name: Run production Playwright tests (optional)
+        if: ${{ inputs.run_prod_tests == true }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.PROD_PROJECT_PATH || '/root/projects/storyapp' }}
+            # Ensure Node and browsers are present
+            if ! command -v node >/dev/null 2>&1; then echo "Node.js not installed on server" && exit 1; fi
+            npx playwright install
+            npx playwright test -c playwright.prod.config.ts
+

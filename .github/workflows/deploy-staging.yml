@@ -2,7 +2,7 @@ name: Deploy to Staging on CI Success
 
 on:
   workflow_run:
-    workflows: ["CI"]  # 对应ci.yml的name: CI
+    workflows: ["CI/CD Pipeline"]  # 对应ci.yml的name，确保触发匹配
     types: [completed]
 
 jobs:

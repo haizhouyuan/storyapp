@@ -74,7 +74,7 @@ services:
       app:
         condition: service_healthy
     volumes:
-      - ./ops/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
     networks:
       - storyapp-net
     ports:

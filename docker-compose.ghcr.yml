@@ -6,26 +6,34 @@ services:
     # 使用GHCR镜像而非本地构建
     image: ghcr.io/haizhouyuan/storyapp:${APP_TAG:-sha-latest}
     container_name: storyapp-ghcr
-    
-    # 生产环境变量
+
+    # 生产环境变量（与基座保持一致）
     environment:
       - NODE_ENV=production
       - FRONTEND_URL=http://localhost:3000
       - ENABLE_DETAILED_LOGGING=false
       - LOG_LEVEL=info
-      - MONGODB_URI=mongodb://mongo:27017/storyapp_ghcr
+      # 使用带认证的URI，并与mongo的root账户保持一致
+      - MONGODB_URI=mongodb://root:${MONGO_PASS:-pass123}@mongo:27017/storyapp_ghcr?authSource=admin
       - MONGODB_DB_NAME=storyapp_ghcr
-    
-    # GHCR验证端口映射 - 避免与dev环境冲突
-    ports:
-      - "5002:5000"  # 外部5002映射到容器5000
+
+    # 端口映射继承自基座（docker-compose.yml）的 app 服务
+    # 如需单独端口，可在服务器 .env 设置 APP_PORT 覆盖
   
   mongo:
     # GHCR验证数据库配置
     environment:
+      # 与应用连接的数据库名称
       MONGO_INITDB_DATABASE: storyapp_ghcr
-      # 生产模式使用认证
+      # 生产模式使用认证（与 app 的 MONGODB_URI 对齐）
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-pass123}
+    # 覆盖健康检查以使用认证方式
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --username ${MONGO_USER:-root} --password ${MONGO_PASS:-pass123} --authenticationDatabase admin --quiet --eval 'db.runCommand({ ping: 1 }).ok' 2>/dev/null | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     # 不暴露端口，增强安全性
     # ports: []

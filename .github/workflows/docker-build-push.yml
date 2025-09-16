@@ -1,0 +1,104 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  SHORT_SHA: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract tags
+        id: meta
+        run: |
+          echo "sha_tag=sha-${SHORT_SHA::7}" >> $GITHUB_OUTPUT
+          echo "latest_tag=sha-latest" >> $GITHUB_OUTPUT
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "ref_tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha_tag }}
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.latest_tag }}
+            ${{ steps.meta.outputs.ref_tag && format('{0}:{1}', env.IMAGE_NAME, steps.meta.outputs.ref_tag) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image runs (smoke)
+        run: |
+          docker run -d --name storyapp-smoke -p 5002:5000 $IMAGE_NAME:${{ steps.meta.outputs.latest_tag }}
+          for i in {1..24}; do
+            if curl -fsS http://localhost:5002/healthz >/dev/null 2>&1; then echo OK; break; fi; sleep 5;
+          done
+          curl -fsS http://localhost:5002/api/health
+          docker logs storyapp-smoke --tail=50 || true
+          docker rm -f storyapp-smoke
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.latest_tag }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: true
+
+      - name: Trivy vulnerability scan (fail on High/Critical)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.latest_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            sbom.spdx.json
+            trivy-results.sarif
+          retention-days: 7
