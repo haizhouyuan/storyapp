@@ -98,7 +98,8 @@ jobs:
           DEEPSEEK_API_URL=https://api.deepseek.com
           MONGODB_URI=mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@mongo:27017/storyapp?authSource=admin
           MONGODB_DB_NAME=storyapp
-          NODE_ENV=test
+          NODE_ENV=production
+          SERVE_STATIC=1
           PORT=5000
           # 注意：如果未配置DEEPSEEK_API_KEY secret，将使用mock模式
           EOF
@@ -128,13 +129,25 @@ jobs:
             echo "All services are healthy!"
           '
 
+      - name: Smoke check UI is served
+        run: |
+          # 等 30s，直到首页包含<title>儿童睡前故事
+          for i in {1..30}; do
+            HTML=$(curl -sS http://localhost:5001/ || true)
+            echo "$HTML" | grep -qi '<title>.*儿童睡前故事.*</title>' && echo "UI OK" && exit 0
+            echo "UI not ready yet..."
+            sleep 1
+          done
+          echo "UI did not become ready"; exit 1
+
       - name: Seed test data
         run: node scripts/ci/seed-test-data.js
         env:
           BASE_URL: http://localhost:5001
 
-      - name: Install Playwright browsers
-        run: npx playwright install
+      - name: Install Playwright (browsers + system deps)
+        run: |
+          sudo npx playwright install --with-deps
 
       - name: Run E2E tests
         run: npm test

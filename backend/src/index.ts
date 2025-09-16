@@ -99,16 +99,22 @@ app.use('/api/admin', adminRoutes);
 app.use('/api', storyRoutes);
 
 // 静态文件服务（前端）
-if (process.env.NODE_ENV === 'production') {
+// ✅ 改成"在非开发环境，或显式要求时，一律服务静态资源"
+const STATIC_DIR = path.resolve(__dirname, '../public');
+const serveStatic =
+  process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development';
+
+if (serveStatic) {
   // 服务React构建的静态文件
-  app.use(express.static(path.join(__dirname, '../public')));
+  app.use(express.static(STATIC_DIR));
   
-  // 对于所有非API路由，返回React应用的index.html（用于React Router）
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(__dirname, '../public/index.html'));
-    }
-  });
+  // 首页与前端路由回退
+  app.get(['/', '/index.html'], (_req, res) =>
+    res.sendFile(path.join(STATIC_DIR, 'index.html'))
+  );
+  app.get(/^(?!\/api\/).+/, (_req, res) =>
+    res.sendFile(path.join(STATIC_DIR, 'index.html'))
+  );
 }
 
 // 404处理
