@@ -222,7 +222,12 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
         throw new Error('DeepSeek API返回数据格式不正确');
       }
       
-      aiResponse = response.data.choices[0].message.content;
+      const choice = response.data.choices[0];
+      if (!choice || !choice.message || !choice.message.content) {
+        throw new Error('DeepSeek API返回的消息内容格式不正确');
+      }
+      
+      aiResponse = choice.message.content;
     } catch (error: any) {
       const apiDuration = Date.now() - apiStartTime;
       
@@ -789,7 +794,12 @@ async function callDeepSeekReasoner(systemPrompt: string, userMessage: string): 
       throw new Error('DeepSeek Reasoner API返回数据格式不正确');
     }
     
-    const content = response.data.choices[0].message.content;
+    const choice = response.data.choices[0];
+    if (!choice || !choice.message || !choice.message.content) {
+      throw new Error('DeepSeek Reasoner API返回的消息内容格式不正确');
+    }
+    
+    const content = choice.message.content;
     try {
       return extractJson(content);
     } catch (parseError) {
@@ -829,7 +839,12 @@ async function callDeepSeekChat(systemPrompt: string, userMessage: string): Prom
       throw new Error('DeepSeek Chat API返回数据格式不正确');
     }
     
-    const content = response.data.choices[0].message.content;
+    const choice = response.data.choices[0];
+    if (!choice || !choice.message || !choice.message.content) {
+      throw new Error('DeepSeek Chat API返回的消息内容格式不正确');
+    }
+    
+    const content = choice.message.content;
     try {
       return extractJson(content);
     } catch (parseError) {
@@ -1134,7 +1149,12 @@ async function generateStoryTreeNode(
         throw new Error('DeepSeek API返回数据格式不正确');
       }
       
-      aiResponse = response.data.choices[0].message.content;
+      const choice = response.data.choices[0];
+      if (!choice || !choice.message || !choice.message.content) {
+        throw new Error('DeepSeek API返回的消息内容格式不正确');
+      }
+      
+      aiResponse = choice.message.content;
     } catch (error: any) {
       console.error('DeepSeek API调用失败:', error.message);
       throw error;

@@ -1,0 +1,190 @@
+name: PR Auto Review with Claude
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [master, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  # 主要的代码评审任务
+  claude-review:
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 15
+    
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+    
+    outputs:
+      review_completed: ${{ steps.claude_review.outputs.completed }}
+      review_status: ${{ steps.claude_review.outputs.status }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Auto Review PR with Claude
+        id: claude_review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_sticky_comment: true
+          track_progress: true
+          prompt: |
+            请对这个PR进行全面的代码评审。重点关注：
+            
+            ## 评审要点
+            1. **代码质量**：代码结构、可读性、最佳实践
+            2. **安全性**：潜在的安全漏洞和风险  
+            3. **性能**：性能问题和优化建议
+            4. **测试**：测试覆盖度和测试质量
+            5. **儿童应用特殊要求**：
+               - COPPA合规性（儿童隐私保护）
+               - 内容安全性和过滤
+               - 用户体验友好性
+            6. **项目特定检查**：
+               - StoryApp功能完整性
+               - API接口安全性
+               - MongoDB查询优化
+               - React组件最佳实践
+            
+            ## 评审格式（必须严格遵循）
+            ### 📋 代码评审报告
+            
+            **PR概述**: [简要描述PR的主要变更]
+            
+            **🔍 详细评审**:
+            
+            #### 🔴 严重问题
+            [列出必须修复的问题，如果没有则写"无"]
+            
+            #### 🟡 建议改进
+            [列出建议改进的地方，如果没有则写"无"]
+            
+            #### 🟢 良好实践
+            [列出做得好的地方，如果没有则写"无"]
+            
+            **📊 评审评分**: X/10 分
+            **✅ 建议状态**: [批准/需要修改/拒绝]
+            **💬 总体建议**: [总结性建议]
+            
+            ---
+            *🤖 本评审由Claude Code自动生成 | 时间: $(date)*
+            
+            ## 输出要求
+            - 必须使用上述格式模板
+            - 每个部分都必须填写，即使是"无"
+            - 提供具体的文件名和行号
+            - 给出代码改进示例
+            - 评分必须基于实际发现的问题
+            
+            **重要**: 无论评审结果如何，都必须在PR中留下评论。
+
+      - name: Set review completion flag
+        if: always()
+        run: |
+          echo "completed=true" >> $GITHUB_OUTPUT
+          echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
+
+  # 确保回帖的守护任务
+  ensure-response:
+    runs-on: ubuntu-latest
+    needs: claude-review
+    if: always()
+    timeout-minutes: 5
+    
+    steps:
+      - name: Check if review was posted
+        id: check_review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComments = comments.filter(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('📋 代码评审报告')
+            );
+            
+            console.log(`Found ${botComments.length} bot review comments`);
+            return botComments.length > 0;
+
+      - name: Post fallback response if needed
+        if: steps.check_review.outputs.result == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fallbackMessage = `### 📋 代码评审报告
+            
+            **PR概述**: 自动代码评审
+            
+            **🤖 评审状态**: 评审服务暂时不可用，但我们已收到您的PR提交。
+            
+            **🔍 基础检查**:
+            - ✅ PR已成功提交
+            - ⏳ 等待人工评审
+            
+            **📊 后续步骤**:
+            1. 请确保代码符合项目规范
+            2. 运行本地测试确保功能正常
+            3. 等待维护者人工审核
+            
+            **💬 说明**: 本次自动评审遇到技术问题，将安排人工评审。感谢您的贡献！
+            
+            ---
+            *🛠️ 备用评审系统 | 时间: ${new Date().toISOString()}*
+            `;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: fallbackMessage
+            });
+
+  # 评审状态总结任务
+  review-summary:
+    runs-on: ubuntu-latest
+    needs: [claude-review, ensure-response]
+    if: always()
+    timeout-minutes: 3
+    
+    steps:
+      - name: Update PR status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reviewStatus = '${{ needs.claude-review.result }}';
+            const fallbackStatus = '${{ needs.ensure-response.result }}';
+            
+            let statusEmoji = '✅';
+            let statusMessage = 'Code review completed successfully';
+            
+            if (reviewStatus === 'failure') {
+              statusEmoji = '⚠️';
+              statusMessage = 'Code review completed with fallback system';
+            } else if (reviewStatus === 'cancelled') {
+              statusEmoji = '🚫';
+              statusMessage = 'Code review was cancelled';
+            }
+            
+            console.log(`${statusEmoji} ${statusMessage}`);
+            console.log(`Review job status: ${reviewStatus}`);
+            console.log(`Fallback job status: ${fallbackStatus}`);
+            
+            // 可以在这里添加更多的状态处理逻辑
+            // 比如设置PR labels、发送通知等
