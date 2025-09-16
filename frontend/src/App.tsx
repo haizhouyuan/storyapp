@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import { PointsToaster } from './components/points';
 
 // 导入页面组件
 import HomePage from './pages/HomePage';
@@ -26,37 +26,8 @@ function App() {
 
   return (
     <Router>
-      <div className="App min-h-screen bg-gradient-to-br from-child-mint via-child-cream to-child-yellow">
-        {/* 全局Toast通知 */}
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            duration: 3000,
-            style: {
-              background: '#fff',
-              color: '#333',
-              borderRadius: '16px',
-              padding: '16px 20px',
-              fontSize: '18px',
-              fontWeight: '600',
-              fontFamily: 'Nunito, sans-serif',
-              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-              maxWidth: '500px',
-            },
-            success: {
-              iconTheme: {
-                primary: '#10B981',
-                secondary: '#fff',
-              },
-            },
-            error: {
-              iconTheme: {
-                primary: '#EF4444',
-                secondary: '#fff',
-              },
-            },
-          }}
-        />
+      <div className="App min-h-screen text-points-text">
+        <PointsToaster />
 
         {/* 路由配置 */}
         <Routes>

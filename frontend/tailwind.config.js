@@ -1,89 +1,105 @@
+const defaultTheme = require('tailwindcss/defaultTheme');
+
+const withOpacity = (variable) => ({ opacityValue }) => {
+  if (opacityValue === undefined) {
+    return `rgb(var(${variable}))`;
+  }
+  return `rgb(var(${variable}) / ${opacityValue})`;
+};
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
     "../shared/**/*.{js,jsx,ts,tsx}",
   ],
-  // 启用JIT模式以获得更快的构建速度
   mode: 'jit',
   theme: {
     extend: {
       fontFamily: {
-        'child': ['Nunito', 'sans-serif'],
+        quicksand: ['Quicksand', ...defaultTheme.fontFamily.sans],
+        nunito: ['Nunito', ...defaultTheme.fontFamily.sans],
       },
       colors: {
-        // 儿童友好的色彩系统
+        points: {
+          primary: withOpacity('--points-primary'),
+          'primary-dark': withOpacity('--points-primary-dark'),
+          secondary: withOpacity('--points-secondary'),
+          accent: withOpacity('--points-accent'),
+          'accent-soft': withOpacity('--points-accent-soft'),
+          magenta: withOpacity('--points-magenta'),
+          success: withOpacity('--points-success'),
+          warning: withOpacity('--points-warning'),
+          danger: withOpacity('--points-danger'),
+          surface: withOpacity('--points-surface'),
+          'surface-elevated': withOpacity('--points-surface-elevated'),
+          hud: withOpacity('--points-hud-bg'),
+          border: withOpacity('--points-border'),
+          'border-strong': withOpacity('--points-border-strong'),
+          disabled: withOpacity('--points-disabled'),
+          text: withOpacity('--points-text'),
+          'text-strong': withOpacity('--points-text-strong'),
+          'text-muted': withOpacity('--points-text-muted'),
+          'text-inverse': withOpacity('--points-text-inverse'),
+        },
+        // legacy 子主题，逐步替换
         child: {
-          // 主色调：柔和的粉彩色
-          'mint': '#A8E6CF',      // 薄荷绿
-          'cream': '#FFF8DC',     // 奶油白
-          'yellow': '#FFEB9C',    // 温暖浅黄
-          
-          // 按钮色彩
-          'blue': '#B3D9FF',      // 淡蓝
-          'green': '#B8E6B8',     // 浅绿
-          'orange': '#FFD4A3',    // 淡橙
-          'pink': '#FFB3BA',      // 淡粉
-          
-          // 强调色
-          'gold': '#FFD700',      // 金色
-          'purple': '#DDA0DD',    // 淡紫色
-          
-          // 中性色
-          'gray': {
+          mint: '#A8E6CF',
+          cream: '#FFF8DC',
+          yellow: '#FFEB9C',
+          blue: '#B3D9FF',
+          green: '#B8E6B8',
+          orange: '#FFD4A3',
+          pink: '#FFB3BA',
+          gold: '#FFD700',
+          purple: '#DDA0DD',
+          gray: {
             100: '#F7FAFC',
             200: '#EDF2F7',
             300: '#E2E8F0',
             400: '#CBD5E0',
             500: '#A0AEC0',
-          }
-        }
-      },
-      fontSize: {
-        // 儿童友好的字体尺寸
-        'child-xs': ['14px', { lineHeight: '1.6' }],
-        'child-sm': ['16px', { lineHeight: '1.6' }],
-        'child-base': ['18px', { lineHeight: '1.6' }],
-        'child-lg': ['20px', { lineHeight: '1.6' }],
-        'child-xl': ['24px', { lineHeight: '1.5' }],
-        'child-2xl': ['28px', { lineHeight: '1.4' }],
-        'child-3xl': ['32px', { lineHeight: '1.3' }],
-        'child-4xl': ['36px', { lineHeight: '1.2' }],
-      },
-      spacing: {
-        // 适合儿童操作的间距
-        'child-xs': '8px',
-        'child-sm': '12px',
-        'child-md': '16px',
-        'child-lg': '20px',
-        'child-xl': '24px',
-        'child-2xl': '32px',
-        'child-3xl': '48px',
+          },
+        },
       },
       borderRadius: {
-        // 圆润的边框
-        'child': '16px',
-        'child-lg': '20px',
-        'child-xl': '24px',
+        'points-sm': 'var(--radius-sm)',
+        'points-md': 'var(--radius-md)',
+        'points-lg': 'var(--radius-lg)',
+        'points-xl': 'var(--radius-xl)',
+        'points-pill': 'var(--radius-pill)',
       },
       boxShadow: {
-        // 柔和的阴影
-        'child': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-        'child-lg': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-        'child-xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-        'child-glow': '0 0 20px rgba(255, 217, 61, 0.3)',
+        'points-soft': 'var(--shadow-soft)',
+        'points-glow': '0 0 0 3px rgba(88, 204, 2, 0.25)',
+        'points-pressed': 'var(--shadow-pressed)',
+      },
+      backgroundImage: {
+        'points-hero': 'var(--gradient-primary)',
+        'points-surface-glass': 'var(--gradient-surface)',
+        'points-magenta-wave': 'var(--gradient-magenta)',
+      },
+      spacing: {
+        'points-gutter': 'var(--radius-lg)',
+        'points-stack': 'clamp(1.5rem, 3vw, 3rem)',
+      },
+      dropShadow: {
+        points: '0 12px 18px rgba(88, 204, 2, 0.22)',
       },
       animation: {
-        'bounce-gentle': 'bounce 2s infinite',
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'wiggle': 'wiggle 1s ease-in-out infinite',
+        'pulse-celebrate': 'pulseCelebration 2.5s var(--transition-snappy) infinite',
+        'float-soft': 'floatSoft 6s ease-in-out infinite',
       },
       keyframes: {
-        wiggle: {
-          '0%, 100%': { transform: 'rotate(-3deg)' },
-          '50%': { transform: 'rotate(3deg)' },
-        }
-      }
+        pulseCelebration: {
+          '0%, 100%': { transform: 'scale(1)', filter: 'saturate(110%)' },
+          '50%': { transform: 'scale(1.05)', filter: 'saturate(130%)' },
+        },
+        floatSoft: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-10px)' },
+        },
+      },
     },
   },
   plugins: [
@@ -91,4 +107,4 @@ module.exports = {
       strategy: 'class',
     }),
   ],
-}
+};
