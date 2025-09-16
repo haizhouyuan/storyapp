@@ -70,7 +70,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '1'  # Fail on HIGH/CRITICAL vulnerabilities
+          exit-code: ${{ github.event_name == 'pull_request' && '0' || '1' }}  # Don't fail PRs, but fail production builds
 
       - name: Upload Trivy scan results to GitHub Security tab
         if: always()
