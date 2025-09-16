@@ -5,6 +5,7 @@ import { getDatabase, TABLES } from '../config/database';
 function isValidApiKey(apiKey: string | undefined): boolean {
   return !!(apiKey && 
     apiKey !== 'your_deepseek_api_key_here' && 
+    apiKey !== 'mock-mode-key' &&
     apiKey.trim().length > 0 &&
     !apiKey.includes('placeholder') &&
     !apiKey.includes('example') &&
