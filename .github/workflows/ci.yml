@@ -147,7 +147,10 @@ jobs:
 
       - name: Install Playwright (browsers + system deps)
         run: |
-          sudo npx playwright install --with-deps
+          # First install system dependencies with sudo
+          sudo npx playwright install-deps
+          # Then install browsers without sudo to user directory
+          npx playwright install
 
       - name: Run E2E tests
         run: npm test
