@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--headless",
+        "--isolated",
+        "--timeout-navigation", "60000",
+        "--timeout-action", "8000",
+        "--image-responses", "omit"
+      ],
+      "env": {},
+      "description": "Playwright MCP server for browser automation and testing"
+    }
+  }
+}

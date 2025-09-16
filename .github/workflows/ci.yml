@@ -58,6 +58,9 @@ jobs:
         env:
           NODE_ENV: test
           MONGODB_URI: mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@localhost:27017/storyapp_test?authSource=admin
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY || 'mock-mode-key' }}
+          DEEPSEEK_API_URL: https://api.deepseek.com
+          # 如果没有配置 DEEPSEEK_API_KEY secret，测试将使用mock模式
 
       - name: Upload test results
         if: always()
@@ -91,12 +94,13 @@ jobs:
       - name: Create CI environment file
         run: |
           cat > .env.ci << 'EOF'
-          DEEPSEEK_API_KEY=sk-test-dummy
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY || 'mock-mode-key' }}
           DEEPSEEK_API_URL=https://api.deepseek.com
           MONGODB_URI=mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@mongo:27017/storyapp?authSource=admin
           MONGODB_DB_NAME=storyapp
           NODE_ENV=test
           PORT=5000
+          # 注意：如果未配置DEEPSEEK_API_KEY secret，将使用mock模式
           EOF
 
       - name: Build and start services

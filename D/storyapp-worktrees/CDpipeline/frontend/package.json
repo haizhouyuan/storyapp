@@ -1,0 +1,68 @@
+{
+  "name": "story-app-frontend",
+  "version": "1.0.0",
+  "description": "儿童故事应用前端界面",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "@heroicons/react": "^2.0.18",
+    "ajv": "^8.17.1",
+    "axios": "^1.6.2",
+    "framer-motion": "^10.16.16",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.20.1"
+  },
+  "devDependencies": {
+    "@craco/craco": "^7.1.0",
+    "@tailwindcss/forms": "^0.5.7",
+    "@types/node": "^20.10.4",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "autoprefixer": "^10.4.16",
+    "babel-plugin-import": "^1.13.8",
+    "babel-plugin-transform-remove-console": "^6.9.4",
+    "babel-plugin-transform-remove-debugger": "^6.9.4",
+    "compression-webpack-plugin": "^10.0.0",
+    "cross-env": "^7.0.3",
+    "cssnano": "^6.0.1",
+    "postcss": "^8.4.32",
+    "react-scripts": "^5.0.1",
+    "tailwindcss": "^3.3.6",
+    "typescript": "^4.9.5",
+    "webpack-bundle-analyzer": "^4.10.1"
+  },
+  "scripts": {
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test",
+    "build:analyze": "cross-env ANALYZE_BUNDLE=true npm run build",
+    "build:production": "cross-env NODE_ENV=production craco build",
+    "build:cdn": "cross-env USE_CDN=true NODE_ENV=production craco build",
+    "lint": "eslint src --ext .ts,.tsx --fix",
+    "lint:check": "eslint src --ext .ts,.tsx",
+    "type-check": "tsc --noEmit",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

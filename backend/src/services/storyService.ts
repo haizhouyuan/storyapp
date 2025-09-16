@@ -5,9 +5,31 @@ import { getDatabase, TABLES } from '../config/database';
 function isValidApiKey(apiKey: string | undefined): boolean {
   return !!(apiKey && 
     apiKey !== 'your_deepseek_api_key_here' && 
+    apiKey !== 'mock-mode-key' &&
     apiKey.trim().length > 0 &&
     !apiKey.includes('placeholder') &&
-    !apiKey.includes('example'));
+    !apiKey.includes('example') &&
+    apiKey.startsWith('sk-') &&
+    apiKey.length > 20);
+}
+
+// 智能判断是否应该使用mock模式
+function shouldUseMockMode(): boolean {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const nodeEnv = process.env.NODE_ENV;
+  
+  // 如果明确是测试环境且没有有效API key，使用mock模式
+  if (nodeEnv === 'test' && !isValidApiKey(apiKey)) {
+    return true;
+  }
+  
+  // 如果API key无效，使用mock模式
+  if (!isValidApiKey(apiKey)) {
+    console.warn('⚠️  DeepSeek API Key无效，使用mock模式');
+    return true;
+  }
+  
+  return false;
 }
 import { 
   StoryDocument, 
@@ -91,10 +113,29 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       throw customError;
     }
     
-    // 在没有有效API Key时使用mock数据（除了生产环境）
-    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY) && process.env.NODE_ENV !== 'production') {
-      console.log('使用模拟数据生成适合8-12岁儿童的故事');
-      return generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
+    // 智能API Key检查与Mock模式降级
+    if (shouldUseMockMode()) {
+      logger.info(EventType.STORY_GENERATION_START, '使用Mock模式生成故事', {
+        reason: 'API key invalid or test environment',
+        nodeEnv: process.env.NODE_ENV,
+        hasApiKey: !!process.env.DEEPSEEK_API_KEY
+      }, undefined, sessionId);
+      
+      const mockResponse = generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
+      
+      logger.info(EventType.STORY_GENERATION_COMPLETE, 'Mock故事生成完成', {
+        storyLength: mockResponse.storySegment.length,
+        choicesCount: mockResponse.choices.length,
+        isEnding: mockResponse.isEnding,
+        success: true
+      }, {
+        startTime,
+        endTime: Date.now(),
+        duration: Date.now() - startTime
+      }, sessionId);
+      
+      endSession(sessionId, true);
+      return mockResponse;
     }
     
     logger.info(EventType.STORY_GENERATION_START, '开始生成故事片段', {
@@ -165,20 +206,40 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
     
     // 调用DeepSeek API
     const apiStartTime = Date.now();
-    const response = await deepseekClient.post('/chat/completions', {
-      model: DEEPSEEK_CONFIG.CHAT_MODEL,
-      messages,
-      max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
-      temperature: DEEPSEEK_CONFIG.TEMPERATURE,
-      stream: DEEPSEEK_CONFIG.STREAM
-    });
-    const apiDuration = Date.now() - apiStartTime;
-
-    if (!response.data || !response.data.choices || response.data.choices.length === 0) {
-      throw new Error('DeepSeek API返回数据格式不正确');
+    let response;
+    let aiResponse: string;
+    
+    try {
+      response = await deepseekClient.post('/chat/completions', {
+        model: DEEPSEEK_CONFIG.CHAT_MODEL,
+        messages,
+        max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+        temperature: DEEPSEEK_CONFIG.TEMPERATURE,
+        stream: DEEPSEEK_CONFIG.STREAM
+      });
+      
+      if (!response || !response.data || !response.data.choices || response.data.choices.length === 0) {
+        throw new Error('DeepSeek API返回数据格式不正确');
+      }
+      
+      const choice = response.data.choices[0];
+      if (!choice || !choice.message || !choice.message.content) {
+        throw new Error('DeepSeek API返回的消息内容格式不正确');
+      }
+      
+      aiResponse = choice.message.content;
+    } catch (error: any) {
+      const apiDuration = Date.now() - apiStartTime;
+      
+      logger.error(EventType.AI_API_ERROR, 'DeepSeek API调用失败', error, {
+        errorMessage: error.message,
+        status: error.response?.status,
+        duration: apiDuration
+      }, sessionId);
+      throw error;
     }
-
-    const aiResponse = response.data.choices[0].message.content;
+    
+    const apiDuration = Date.now() - apiStartTime;
     
     // 简单的token估算
     const estimateTokens = (text: string): number => {
@@ -645,9 +706,9 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 在没有有效API Key时使用mock数据（除了生产环境）
-    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY) && process.env.NODE_ENV !== 'production') {
-      console.log('使用模拟数据生成适合8-12岁儿童的故事树');
+    // 智能API Key检查与Mock模式降级
+    if (shouldUseMockMode()) {
+      console.log('使用Mock模式生成故事树');
       const storyTreeId = new ObjectId().toString();
       const timestamp = new Date().toISOString();
       return generateMockStoryTree(topic, storyTreeId, timestamp);
@@ -710,33 +771,44 @@ async function generateAdvancedStoryTree(topic: string): Promise<GenerateFullSto
  * 调用DeepSeek思考模式
  */
 async function callDeepSeekReasoner(systemPrompt: string, userMessage: string): Promise<any> {
-  const response = await deepseekClient.post('/chat/completions', {
-    model: DEEPSEEK_CONFIG.REASONER_MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: systemPrompt
-      },
-      {
-        role: 'user', 
-        content: userMessage
-      }
-    ],
-    max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
-    temperature: DEEPSEEK_CONFIG.TEMPERATURE,
-    stream: DEEPSEEK_CONFIG.STREAM
-  });
-  
-  if (!response.data?.choices?.[0]?.message?.content) {
-    throw new Error('DeepSeek Reasoner API返回数据格式不正确');
-  }
-  
-  const content = response.data.choices[0].message.content;
+  let response;
   try {
-    return extractJson(content);
-  } catch (parseError) {
-    console.error('解析Reasoner响应失败:', parseError, '原始输出片段:', String(content).slice(0, 200));
-    throw new Error('思考模式响应格式解析失败');
+    response = await deepseekClient.post('/chat/completions', {
+      model: DEEPSEEK_CONFIG.REASONER_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt
+        },
+        {
+          role: 'user', 
+          content: userMessage
+        }
+      ],
+      max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+      temperature: DEEPSEEK_CONFIG.TEMPERATURE,
+      stream: DEEPSEEK_CONFIG.STREAM
+    });
+    
+    if (!response || !response.data || !response.data.choices || response.data.choices.length === 0) {
+      throw new Error('DeepSeek Reasoner API返回数据格式不正确');
+    }
+    
+    const choice = response.data.choices[0];
+    if (!choice || !choice.message || !choice.message.content) {
+      throw new Error('DeepSeek Reasoner API返回的消息内容格式不正确');
+    }
+    
+    const content = choice.message.content;
+    try {
+      return extractJson(content);
+    } catch (parseError) {
+      console.error('解析Reasoner响应失败:', parseError, '原始输出片段:', String(content).slice(0, 200));
+      throw new Error('思考模式响应格式解析失败');
+    }
+  } catch (error: any) {
+    console.error('DeepSeek Reasoner API调用失败:', error.message);
+    throw error;
   }
 }
 
@@ -744,33 +816,44 @@ async function callDeepSeekReasoner(systemPrompt: string, userMessage: string): 
  * 调用DeepSeek快速模式
  */
 async function callDeepSeekChat(systemPrompt: string, userMessage: string): Promise<any> {
-  const response = await deepseekClient.post('/chat/completions', {
-    model: DEEPSEEK_CONFIG.CHAT_MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: systemPrompt
-      },
-      {
-        role: 'user',
-        content: userMessage
-      }
-    ],
-    max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
-    temperature: DEEPSEEK_CONFIG.TEMPERATURE,
-    stream: DEEPSEEK_CONFIG.STREAM
-  });
-  
-  if (!response.data?.choices?.[0]?.message?.content) {
-    throw new Error('DeepSeek Chat API返回数据格式不正确');
-  }
-  
-  const content = response.data.choices[0].message.content;
+  let response;
   try {
-    return extractJson(content);
-  } catch (parseError) {
-    console.error('解析Chat响应失败:', parseError, '原始输出片段:', String(content).slice(0, 200));
-    throw new Error('快速模式响应格式解析失败');
+    response = await deepseekClient.post('/chat/completions', {
+      model: DEEPSEEK_CONFIG.CHAT_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt
+        },
+        {
+          role: 'user',
+          content: userMessage
+        }
+      ],
+      max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+      temperature: DEEPSEEK_CONFIG.TEMPERATURE,
+      stream: DEEPSEEK_CONFIG.STREAM
+    });
+    
+    if (!response || !response.data || !response.data.choices || response.data.choices.length === 0) {
+      throw new Error('DeepSeek Chat API返回数据格式不正确');
+    }
+    
+    const choice = response.data.choices[0];
+    if (!choice || !choice.message || !choice.message.content) {
+      throw new Error('DeepSeek Chat API返回的消息内容格式不正确');
+    }
+    
+    const content = choice.message.content;
+    try {
+      return extractJson(content);
+    } catch (parseError) {
+      console.error('解析Chat响应失败:', parseError, '原始输出片段:', String(content).slice(0, 200));
+      throw new Error('快速模式响应格式解析失败');
+    }
+  } catch (error: any) {
+    console.error('DeepSeek Chat API调用失败:', error.message);
+    throw error;
   }
 }
 
@@ -944,9 +1027,9 @@ export async function generateBasicStoryTreeService(params: GenerateFullStoryReq
     const storyTreeId = new ObjectId().toString();
     const timestamp = new Date().toISOString();
 
-    // 检查是否有有效API密钥，没有则使用模拟数据
-    if (!isValidApiKey(process.env.DEEPSEEK_API_KEY)) {
-      console.log('使用模拟数据生成故事树');
+    // 智能API Key检查与Mock模式降级
+    if (shouldUseMockMode()) {
+      console.log('使用Mock模式生成基础故事树');
       return generateMockStoryTree(topic, storyTreeId, timestamp);
     }
     
@@ -1050,19 +1133,32 @@ async function generateStoryTreeNode(
     }
     
     // 调用DeepSeek API
-    const response = await deepseekClient.post('/chat/completions', {
-      model: DEEPSEEK_CONFIG.CHAT_MODEL,
-      messages,
-      max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
-      temperature: DEEPSEEK_CONFIG.TEMPERATURE,
-      stream: DEEPSEEK_CONFIG.STREAM
-    });
+    let response;
+    let aiResponse: string;
     
-    if (!response.data?.choices?.[0]?.message?.content) {
-      throw new Error('DeepSeek API返回数据格式不正确');
+    try {
+      response = await deepseekClient.post('/chat/completions', {
+        model: DEEPSEEK_CONFIG.CHAT_MODEL,
+        messages,
+        max_tokens: DEEPSEEK_CONFIG.MAX_TOKENS,
+        temperature: DEEPSEEK_CONFIG.TEMPERATURE,
+        stream: DEEPSEEK_CONFIG.STREAM
+      });
+      
+      if (!response || !response.data || !response.data.choices || response.data.choices.length === 0) {
+        throw new Error('DeepSeek API返回数据格式不正确');
+      }
+      
+      const choice = response.data.choices[0];
+      if (!choice || !choice.message || !choice.message.content) {
+        throw new Error('DeepSeek API返回的消息内容格式不正确');
+      }
+      
+      aiResponse = choice.message.content;
+    } catch (error: any) {
+      console.error('DeepSeek API调用失败:', error.message);
+      throw error;
     }
-    
-    const aiResponse = response.data.choices[0].message.content;
     console.log(`节点生成完成，深度: ${depth}, 路径: ${path}`);
     
     // 解析AI返回的JSON
@@ -1141,16 +1237,26 @@ async function expandStorySegment(segment: string): Promise<string | null> {
       }
     ];
     
-    const expandResp = await deepseekClient.post('/chat/completions', {
-      model: DEEPSEEK_CONFIG.CHAT_MODEL,
-      messages: expandMessages,
-      max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS, 1500),
-      temperature: 0.7,
-      stream: false
-    });
-    
-    const expanded = expandResp?.data?.choices?.[0]?.message?.content?.trim();
-    return expanded || null;
+    let expandResp;
+    try {
+      expandResp = await deepseekClient.post('/chat/completions', {
+        model: DEEPSEEK_CONFIG.CHAT_MODEL,
+        messages: expandMessages,
+        max_tokens: Math.max(DEEPSEEK_CONFIG.MAX_TOKENS, 1500),
+        temperature: 0.7,
+        stream: false
+      });
+      
+      if (!expandResp || !expandResp.data || !expandResp.data.choices || expandResp.data.choices.length === 0) {
+        throw new Error('DeepSeek API返回数据格式不正确');
+      }
+      
+      const expanded = expandResp.data.choices[0].message.content?.trim();
+      return expanded || null;
+    } catch (error: any) {
+      console.warn('扩展故事片段失败:', error.message);
+      return null;
+    }
   } catch (e) {
     console.warn('扩展故事片段失败:', e);
     return null;

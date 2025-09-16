@@ -1,0 +1,114 @@
+# Prometheus配置文件
+# StoryApp应用监控配置
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'storyapp-monitor'
+    environment: 'production'
+
+# 告警规则文件
+rule_files:
+  - "alerting-rules.yml"
+
+# 抓取配置
+scrape_configs:
+  # StoryApp后端应用
+  - job_name: 'storyapp-backend'
+    static_configs:
+      - targets: ['app:5000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: app:5000
+
+  # Node.js进程指标
+  - job_name: 'nodejs-metrics'
+    static_configs:
+      - targets: ['app:5000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'nodejs_.*'
+        target_label: service
+        replacement: 'nodejs'
+
+  # MongoDB监控（如果暴露指标）
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongo:27017']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Docker容器监控
+  - job_name: 'docker-containers'
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        target_label: container_name
+      - source_labels: [__meta_docker_container_id]
+        target_label: container_id
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+
+  # 系统监控（如果有node_exporter）
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+  # 健康检查端点
+  - job_name: 'health-checks'
+    static_configs:
+      - targets: ['app:5000']
+    metrics_path: '/healthz'
+    scrape_interval: 30s
+    scrape_timeout: 5s
+    params:
+      format: ['prometheus']
+
+# 告警管理器配置
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+      scheme: http
+      timeout: 10s
+      api_version: v1
+
+# 存储配置
+storage:
+  tsdb:
+    path: /prometheus/data
+    retention.time: 30d
+    retention.size: 10GB
+    wal-compression: true
+
+# 查询配置
+query:
+  timeout: 2m
+  max_concurrent_queries: 20
+  max_samples: 50000000
+
+# Web配置
+web:
+  listen-address: '0.0.0.0:9090'
+  enable-lifecycle: true
+  enable-admin-api: true
+  console.templates: '/etc/prometheus/consoles'
+  console.libraries: '/etc/prometheus/console_libraries'
