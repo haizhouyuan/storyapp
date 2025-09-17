@@ -1,0 +1,138 @@
+name: Production Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      run_tests:
+        description: 'Run Playwright tests after deployment'
+        required: false
+        default: true
+        type: boolean
+      image_tag:
+        description: 'Docker image tag to deploy (default: latest)'
+        required: false
+        default: 'latest'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup deployment variables
+        id: vars
+        run: |
+          echo "image_tag=${{ inputs.image_tag || 'latest' }}" >> $GITHUB_OUTPUT
+          echo "deploy_timestamp=$(date '+%Y%m%d_%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Deploy to server via SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASS: ${{ secrets.MONGO_PASS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          # Setup SSH key
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+
+          # Deploy via SSH
+          ssh -i ~/.ssh/deploy_key $SSH_USERNAME@$SSH_HOST << 'EOF'
+            set -e
+            
+            echo "🚀 Starting deployment..."
+            cd /root/projects/storyapp || { echo "❌ Project directory not found"; exit 1; }
+            
+            # Create production environment file
+            cat > .env << ENVEOF
+          DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY
+          DEEPSEEK_API_URL=https://api.deepseek.com
+          MONGODB_URI=mongodb://mongo:27017/storyapp
+          MONGODB_DB_NAME=storyapp
+          NODE_ENV=production
+          PORT=5000
+          FRONTEND_URL=https://storyapp.dandanbaba.xyz
+          ENABLE_DETAILED_LOGGING=false
+          LOG_LEVEL=info
+          ENVEOF
+            
+            # Login to GHCR
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull latest image
+            docker pull $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
+            
+            # Stop existing services
+            docker compose down || true
+            
+            # Start services with new image
+            APP_TAG=$IMAGE_TAG docker compose up -d
+            
+            # Cleanup old images (keep last 3)
+            docker image prune -af --filter "until=72h" || true
+            
+            echo "✅ Deployment completed"
+          EOF
+
+      - name: Wait for service to be healthy
+        run: |
+          echo "⏳ Waiting for service to be healthy..."
+          
+          # Wait up to 5 minutes for service to be ready
+          timeout 300 bash -c '
+            while true; do
+              if curl -f ${{ secrets.SSH_HOST }}/healthz >/dev/null 2>&1; then
+                echo "✅ Service is healthy"
+                break
+              fi
+              echo "⏳ Waiting for service..."
+              sleep 10
+            done
+          ' || {
+            echo "❌ Service health check failed"
+            exit 1
+          }
+
+      - name: Run Playwright tests
+        if: inputs.run_tests
+        run: |
+          echo "🧪 Running production tests..."
+          
+          # Install Playwright
+          npm ci
+          npx playwright install --with-deps chromium
+          
+          # Run production tests
+          PLAYWRIGHT_BASE_URL=${{ secrets.SSH_HOST }} npx playwright test -c playwright.prod.config.ts
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ steps.vars.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: ${{ steps.vars.outputs.deploy_timestamp }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests**: ${{ inputs.run_tests && '✅ Enabled' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL**: ${{ secrets.SSH_HOST }}" >> $GITHUB_STEP_SUMMARY
