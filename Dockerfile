@@ -78,4 +78,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD node -e "const http=require('http');const req=http.get('http://127.0.0.1:5000/healthz',(res)=>{let data='';res.on('data',chunk=>data+=chunk);res.on('end',()=>{try{const result=JSON.parse(data);process.exit(res.statusCode===200&&result.status==='healthy'?0:1)}catch{process.exit(res.statusCode===200?0:1)}})});req.on('error',()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1)})"
 
 # 启动应用
-CMD ["node", "dist/backend/src/index.js"]
+CMD ["node", "dist/backend/index.js"]

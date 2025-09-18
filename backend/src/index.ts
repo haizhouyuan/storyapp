@@ -42,7 +42,9 @@ const { port: PORT, frontendUrl: FRONTEND_URL } = serverConfig;
 const appLogger = createLogger('app');
 
 // Trust proxy for accurate IP addresses
-app.set('trust proxy', 1);
+if (securityConfig.trustProxy) {
+  app.set('trust proxy', securityConfig.trustProxy);
+}
 
 // Apply middleware in order of priority:
 

@@ -2,18 +2,19 @@ import { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import compression from 'compression';
-import { 
-  httpRequestsInFlight, 
-  recordHttpMetrics, 
+import {
+  httpRequestsInFlight,
+  recordHttpMetrics,
   rateLimitHits,
   recordError 
 } from '../config/metrics';
 import { logHttpRequest, logError, createLogger } from '../config/logger';
+import { securityConfig } from '../config';
 
 const logger = createLogger('middleware');
 
 // Security middleware using Helmet
-export const securityMiddleware = helmet({
+const baseHelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -27,13 +28,33 @@ export const securityMiddleware = helmet({
       frameSrc: ["'none'"],
     },
   },
-  crossOriginEmbedderPolicy: false, // 允许嵌入
-  hsts: {
+  crossOriginEmbedderPolicy: false,
+  strictTransportSecurity: {
     maxAge: 31536000,
     includeSubDomains: true,
-    preload: true
+    preload: true,
   },
-});
+};
+
+const userHelmetOptions = { ...(securityConfig.helmetOptions ?? {}) } as Record<string, unknown>;
+const hstsOverride = userHelmetOptions.hsts;
+delete userHelmetOptions.hsts;
+
+const helmetOptions: Record<string, unknown> = {
+  ...baseHelmetOptions,
+  ...userHelmetOptions,
+};
+
+if (hstsOverride === false) {
+  helmetOptions.strictTransportSecurity = false;
+} else {
+  helmetOptions.strictTransportSecurity = {
+    ...(baseHelmetOptions.strictTransportSecurity as Record<string, unknown>),
+    ...((hstsOverride as Record<string, unknown>) || {}),
+  };
+}
+
+export const securityMiddleware = helmet(helmetOptions as Parameters<typeof helmet>[0]);
 
 // Compression middleware for response optimization
 export const compressionMiddleware = compression({
