@@ -12,6 +12,7 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm run -w backend dev",
     "dev:frontend": "npm run -w frontend start",
+    "dev:mongo": "node scripts/start-memory-mongo.js",
     "build": "npm run build:shared && npm run build:backend && npm run build:frontend",
     "build:shared": "npm run -w @storyapp/shared build",
     "build:backend": "npm run -w backend build",
@@ -38,6 +39,7 @@
     "axios": "^1.11.0",
     "concurrently": "^8.2.2",
     "jest-util": "^30.0.5",
+    "mongodb-memory-server": "^10.2.1",
     "shadcn": "^3.3.1"
   }
 }

@@ -18,10 +18,10 @@ interface PointsTabsProps {
 
 export function PointsTabs({ items, activeId, onChange, className, align = 'center' }: PointsTabsProps) {
   return (
-    <div className={cn('flex flex-col gap-3', className)}>
+    <div className={cn('flex flex-col gap-2', className)}>
       <div
         className={cn(
-          'flex flex-wrap gap-3 rounded-points-pill bg-white/70 p-2 shadow-points-soft backdrop-blur-md',
+          'flex flex-wrap gap-2 rounded-points-pill border border-points-border/60 bg-white/80 p-1',
           align === 'center' ? 'justify-center' : 'justify-start',
         )}
       >
@@ -33,10 +33,10 @@ export function PointsTabs({ items, activeId, onChange, className, align = 'cent
               type="button"
               onClick={() => onChange(item.id)}
               className={cn(
-                'points-focus relative flex items-center gap-2 rounded-points-pill px-5 py-2 text-sm font-semibold transition-all duration-200',
+                'points-focus relative flex items-center gap-2 rounded-points-pill px-4 py-2 text-sm font-medium transition-colors duration-200',
                 isActive
-                  ? 'bg-points-hero text-white shadow-points-soft drop-shadow-points'
-                  : 'text-points-text-muted hover:bg-white/90',
+                  ? 'bg-points-primary text-white shadow-sm'
+                  : 'text-points-text-muted hover:bg-points-muted/60',
               )}
             >
               {item.icon && <span className="text-lg">{item.icon}</span>}
@@ -48,10 +48,7 @@ export function PointsTabs({ items, activeId, onChange, className, align = 'cent
       {items.map((item) => {
         if (item.id !== activeId || !item.description) return null;
         return (
-          <div
-            key={item.id}
-            className="mx-auto max-w-3xl text-center text-sm text-points-text-muted"
-          >
+          <div key={item.id} className="mx-auto max-w-3xl text-center text-sm text-points-text-muted">
             {item.description}
           </div>
         );
