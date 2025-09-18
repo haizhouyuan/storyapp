@@ -11,7 +11,7 @@ const withOpacity = (variable) => ({ opacityValue }) => {
 module.exports = {
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
-    "../shared/**/*.{js,jsx,ts,tsx}",
+    "../shared/src/**/*.{js,jsx,ts,tsx}",
   ],
   mode: 'jit',
   theme: {
