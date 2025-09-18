@@ -57,13 +57,15 @@ RUN npm config set registry $NPM_REGISTRY && \
     npm cache clean --force
 
 # 复制构建产物
-COPY --from=builder /app/backend/dist ./backend/dist
-COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/backend/dist ./dist/backend
+COPY --from=builder /app/shared/dist ./dist/shared
 # 复制根目录config文件夹（backend依赖）
 COPY --from=builder /app/config ./config
-# 将前端构建产物复制到后端可服务的目录（与后端index.ts保持一致）
-RUN mkdir -p ./backend/public
-COPY --from=builder /app/frontend/build ./backend/public
+# 将前端构建产物复制到后端可服务的目录
+RUN mkdir -p ./dist/backend/public
+COPY --from=builder /app/frontend/build ./dist/backend/public
+# 为历史逻辑保留软链接，兼容 ../public 与 ./public 两种查找方式
+RUN ln -s /app/dist/backend/public /app/dist/public || true
 
 # 切换到非root用户
 USER storyapp
@@ -76,4 +78,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD node -e "const http=require('http');const req=http.get('http://127.0.0.1:5000/healthz',(res)=>{let data='';res.on('data',chunk=>data+=chunk);res.on('end',()=>{try{const result=JSON.parse(data);process.exit(res.statusCode===200&&result.status==='healthy'?0:1)}catch{process.exit(res.statusCode===200?0:1)}})});req.on('error',()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1)})"
 
 # 启动应用
-CMD ["node", "backend/dist/index.js"]
+CMD ["node", "dist/backend/src/index.js"]
