@@ -62,5 +62,10 @@ coverage/
 D:/
 D:\storyapp-worktrees/
 
+# Transient automation artifacts
+.playwright-mcp/
+.specstory/
+
+
 # Ignore MS Office lock files
 ~

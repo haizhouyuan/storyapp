@@ -64,6 +64,8 @@ COPY --from=builder /app/config ./config
 # 将前端构建产物复制到后端可服务的目录
 RUN mkdir -p ./dist/backend/public
 COPY --from=builder /app/frontend/build ./dist/backend/public
+# 确保运行时代码能解析到 workspace 依赖
+RUN ln -s /app/backend/node_modules /app/dist/backend/node_modules || true
 # 为历史逻辑保留软链接，兼容 ../public 与 ./public 两种查找方式
 RUN ln -s /app/dist/backend/public /app/dist/public || true
 
