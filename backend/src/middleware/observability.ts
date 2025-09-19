@@ -9,7 +9,7 @@ import {
   recordError 
 } from '../config/metrics';
 import { logHttpRequest, logError, createLogger } from '../config/logger';
-import { securityConfig } from '../config';
+import { securityConfig, rateLimitConfig } from '../config';
 
 const logger = createLogger('middleware');
 
@@ -115,29 +115,29 @@ export const createRateLimiter = (windowMs: number, max: number, message: string
 
 // Different rate limiters for different endpoints
 export const generalRateLimit = createRateLimiter(
-  15 * 60 * 1000, // 15 minutes
-  100, // 100 requests per window
+  rateLimitConfig.general.windowMs,
+  rateLimitConfig.general.max,
   'Too many requests, please try again later',
   'general'
 );
 
 export const authRateLimit = createRateLimiter(
-  15 * 60 * 1000, // 15 minutes  
-  5, // 5 login attempts per window
+  rateLimitConfig.auth.windowMs,
+  rateLimitConfig.auth.max,
   'Too many login attempts, please try again later',
   'auth'
 );
 
 export const createProjectRateLimit = createRateLimiter(
-  60 * 60 * 1000, // 1 hour
-  10, // 10 project creations per hour
+  rateLimitConfig.createProject.windowMs,
+  rateLimitConfig.createProject.max,
   'Too many project creations, please try again later',
   'create_project'
 );
 
 export const validationRateLimit = createRateLimiter(
-  5 * 60 * 1000, // 5 minutes
-  20, // 20 validation requests per 5 minutes
+  rateLimitConfig.validation.windowMs,
+  rateLimitConfig.validation.max,
   'Too many validation requests, please try again later',
   'validation'
 );
