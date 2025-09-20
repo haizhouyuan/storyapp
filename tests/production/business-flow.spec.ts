@@ -6,8 +6,8 @@ import { test, expect, Page } from '@playwright/test';
  */
 
 // 测试配置
-const APP_URL = 'http://localhost:5001';
-const API_URL = 'http://localhost:5001/api';
+const APP_URL = 'http://127.0.0.1:5001';
+const API_URL = 'http://127.0.0.1:5001/api';
 
 // 测试数据
 const TEST_STORIES = [

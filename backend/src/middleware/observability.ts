@@ -54,6 +54,13 @@ if (hstsOverride === false) {
   };
 }
 
+if (process.env.DISABLE_UPGRADE_INSECURE === 'true') {
+  const directives = (helmetOptions.contentSecurityPolicy as { directives?: Record<string, unknown> })?.directives;
+  if (directives) {
+    directives['upgrade-insecure-requests'] = null;
+  }
+}
+
 export const securityMiddleware = helmet(helmetOptions as Parameters<typeof helmet>[0]);
 
 // Compression middleware for response optimization

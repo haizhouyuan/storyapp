@@ -1,6 +1,6 @@
 import { test, expect, request } from '@playwright/test';
 
-const BASE_URL = process.env.STAGING_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:5001';
+const BASE_URL = process.env.STAGING_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://127.0.0.1:5001';
 const API_URL = process.env.STAGING_API_URL || `${BASE_URL.replace(/\/$/, '')}/api`;
 
 const withTrailingSlash = (url: string) => (url.endsWith('/') ? url : `${url}/`);

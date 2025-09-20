@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const APP_URL = 'http://localhost:5001';
+const APP_URL = 'http://127.0.0.1:5001';
 
 test.describe('调试测试 - 检查页面元素', () => {
   test('检查页面加载和元素存在', async ({ page }) => {
