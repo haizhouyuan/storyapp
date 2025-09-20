@@ -23,18 +23,18 @@ test.describe('儿童睡前故事App', () => {
   test.beforeEach(async ({ page }) => {
     // 每个测试前都访问首页
     await page.goto(FRONTEND_URL);
-    
-    // 等待页面加载完成
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+
+    // 等待动画完成后的主标题出现
+    await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
   });
 
   test('应用首页加载和基本元素显示', async ({ page }) => {
     // 验证页面标题
     await expect(page).toHaveTitle(/儿童睡前故事/);
-    
+
     // 验证主要UI元素
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
-    await expect(page.locator('text=告诉我你想听什么故事')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toHaveText(/睡前故事时间/);
+    await expect(page.getByTestId('hero-subtitle')).toContainText('告诉我你想听什么故事');
     
     // 验证输入框
     const topicInput = page.getByTestId('topic-input');
@@ -128,7 +128,7 @@ test.describe('儿童睡前故事App', () => {
     
     // 验证回到首页
     await expect(page).toHaveURL(FRONTEND_URL);
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
   });
 
   test('故事创作完整流程', async ({ page }) => {
@@ -203,7 +203,7 @@ test.describe('儿童睡前故事App', () => {
     await page.setViewportSize({ width: 375, height: 667 });
     
     // 验证页面仍然可用
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
     await expect(page.getByTestId('topic-input')).toBeVisible();
     await expect(page.getByTestId('my-stories-button')).toBeVisible();
     
@@ -302,7 +302,7 @@ test.describe('Accessibility Tests', () => {
     await page.goto(FRONTEND_URL);
     
     // 验证重要元素可见性
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
     await expect(page.getByTestId('topic-input')).toBeVisible();
     await expect(page.getByTestId('start-story-button')).toBeVisible();
     

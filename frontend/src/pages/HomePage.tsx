@@ -254,6 +254,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
 
         {/* 标题 */}
         <motion.h1
+          data-testid="hero-title"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
@@ -275,6 +276,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
 
         {/* 副标题 */}
         <motion.p
+          data-testid="hero-subtitle"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.7 }}
