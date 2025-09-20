@@ -156,6 +156,7 @@ jobs:
         run: npm test
         env:
           BASE_URL: http://localhost:5001
+          API_URL: http://localhost:5001
 
       - name: Upload E2E test results
         if: always()
