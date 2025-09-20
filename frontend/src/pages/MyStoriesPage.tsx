@@ -267,9 +267,15 @@ export default function MyStoriesPage() {
                 <div className="text-5xl">📚</div>
                 <h3 className="text-xl font-semibold text-points-text-strong">还没有保存的故事</h3>
                 <p className="text-sm text-points-text-muted">和孩子一起创作第一个互动故事，开启晚安仪式。</p>
-                <Button onClick={handleNewStory} variant="primary" size="large" icon={<PlusIcon className="h-5 w-5" />}>
-                  创作第一个故事
-                </Button>
+        <Button
+          onClick={handleNewStory}
+          variant="primary"
+          size="large"
+          icon={<PlusIcon className="h-5 w-5" />}
+          testId="create-first-story-button"
+        >
+          创作第一个故事
+        </Button>
               </>
             )}
           </div>

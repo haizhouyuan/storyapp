@@ -47,6 +47,9 @@ export default function HomePage({ onStartStory }: HomePageProps) {
   const [storyMode, setStoryMode] = useState<StoryMode>('progressive');
   const navigate = useNavigate();
 
+  const topicValidation = validateStoryTopic(topic);
+  const canStartStory = topicValidation.isValid;
+
   const handleStartStory = async () => {
     const validation = validateStoryTopic(topic);
     if (!validation.isValid) {
@@ -144,7 +147,7 @@ export default function HomePage({ onStartStory }: HomePageProps) {
               <Button
                 onClick={handleStartStory}
                 loading={isLoading}
-                disabled={isLoading}
+                disabled={isLoading || !canStartStory}
                 icon={<RocketLaunchIcon className="h-5 w-5" />}
                 className="w-full sm:w-auto"
                 testId="start-story-button"
