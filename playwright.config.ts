@@ -28,7 +28,10 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
-    
+
+    /* Disable motion animations when possible to stabilise visual assertions */
+    reducedMotion: 'reduce',
+
     /* Take screenshot on failure */
     screenshot: 'only-on-failure',
     

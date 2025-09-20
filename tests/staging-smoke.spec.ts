@@ -22,16 +22,20 @@ test.describe('Staging smoke', () => {
     await page.goto(HOME_URL, { waitUntil: 'domcontentloaded' });
     await expect(page).toHaveTitle(/儿童睡前故事/i);
     await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId('topic-input')).toBeVisible();
+    await expect(page.getByTestId('topic-input')).toBeVisible({ timeout: 10000 });
   });
 
   test('storybook flow basic interaction', async ({ page }) => {
     await page.goto(HOME_URL, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
+    const topicInput = page.getByTestId('topic-input');
+    await expect(topicInput).toBeVisible({ timeout: 10000 });
+
     const sampleButton = page.locator('text=小兔子的冒险').first();
     if (await sampleButton.isVisible()) {
       await sampleButton.click();
     } else {
-      await page.getByTestId('topic-input').fill('测试冒险');
+      await topicInput.fill('测试冒险');
     }
     await page.getByTestId('start-story-button').click();
     await page.waitForURL(/\/story/, { timeout: 15_000 });

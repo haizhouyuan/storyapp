@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { BookOpenIcon, StarIcon, HomeIcon } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
@@ -20,6 +20,20 @@ type StoryMode = 'progressive' | 'tree';
  * 特点：温馨背景、大输入框、醒目按钮、"我的故事"入口、故事模式选择
  */
 export default function HomePage({ onStartStory, onStartStoryTree }: HomePageProps) {
+  const prefersReducedMotion = useReducedMotion();
+
+  const fadeInUp = (delay = 0) =>
+    prefersReducedMotion
+      ? {
+          initial: { opacity: 1, y: 0 },
+          animate: { opacity: 1, y: 0 },
+        }
+      : {
+          initial: { opacity: 0, y: 20 },
+          animate: { opacity: 1, y: 0 },
+          transition: { delay },
+        };
+
   const [topic, setTopic] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [storyMode, setStoryMode] = useState<StoryMode>('progressive');
@@ -146,9 +160,9 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
       <div className="max-w-2xl mx-auto text-center z-10">
         {/* 欢迎插画 */}
         <motion.div
-          initial={{ opacity: 0, y: -50 }}
+          initial={prefersReducedMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -50 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ type: 'spring', stiffness: 100, damping: 10 }}
+          transition={prefersReducedMotion ? undefined : { type: 'spring', stiffness: 100, damping: 10 }}
           className="mb-child-3xl"
         >
           {/* SVG卡通动物拿着故事书 */}
@@ -255,9 +269,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
         {/* 标题 */}
         <motion.h1
           data-testid="hero-title"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
+          {...fadeInUp(0.6)}
           className="
             font-child 
             font-bold 
@@ -277,9 +289,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
         {/* 副标题 */}
         <motion.p
           data-testid="hero-subtitle"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
+          {...fadeInUp(0.7)}
           className="
             font-child 
             text-child-lg 
@@ -294,9 +304,7 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
 
         {/* 故事模式选择 */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.75 }}
+          {...fadeInUp(0.75)}
           className="mb-child-2xl"
         >
           <p className="text-child-base font-child font-medium text-gray-700 mb-child-md text-center">
