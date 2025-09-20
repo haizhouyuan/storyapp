@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
  */
 
 // 测试配置
-const BASE_URL = process.env.BASE_URL || 'http://localhost:5001';
+const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:5001';
 
 // 预期的种子数据（与seed-e2e-data.js保持同步）
 const EXPECTED_SEED_STORIES = [
@@ -41,7 +41,7 @@ test.describe('确定性种子数据E2E测试', () => {
   test.beforeEach(async ({ page }) => {
     // 访问应用首页
     await page.goto('/');
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
   });
 
   test('验证种子数据已正确创建', async ({ page }) => {
@@ -204,7 +204,7 @@ test.describe('确定性种子数据E2E测试', () => {
 
   test('E2E流程测试：从首页到故事交互（基于种子数据）', async ({ page }) => {
     // 步骤1：验证首页
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
     
     // 步骤2：导航到我的故事
     await page.getByTestId('my-stories-button').click();
@@ -228,7 +228,7 @@ test.describe('确定性种子数据E2E测试', () => {
     // 步骤8：返回首页
     await page.getByTestId('home-button').click();
     await expect(page).toHaveURL('/');
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
   });
 });
 

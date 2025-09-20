@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const APP_URL = 'http://localhost:5001';
+const APP_URL = 'http://127.0.0.1:5001';
 
 test.describe('调试测试 - 检查页面元素', () => {
   test('检查页面加载和元素存在', async ({ page }) => {
@@ -22,7 +22,7 @@ test.describe('调试测试 - 检查页面元素', () => {
     console.log('📝 页面内容前200字符:', bodyContent?.substring(0, 200));
     
     // 检查是否有常见的文本
-    const hasStoryTime = await page.locator('text=睡前故事时间').isVisible();
+    const hasStoryTime = await page.getByTestId('hero-title').isVisible();
     console.log('🌙 是否有"睡前故事时间":', hasStoryTime);
     
     // 查找所有按钮

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { serverConfig, securityConfig, validateConfig } from './config';
 
 // Import observability and security middleware
@@ -41,7 +42,9 @@ const { port: PORT, frontendUrl: FRONTEND_URL } = serverConfig;
 const appLogger = createLogger('app');
 
 // Trust proxy for accurate IP addresses
-app.set('trust proxy', 1);
+if (securityConfig.trustProxy) {
+  app.set('trust proxy', securityConfig.trustProxy);
+}
 
 // Apply middleware in order of priority:
 
@@ -100,14 +103,23 @@ app.use('/api', storyRoutes);
 
 // 静态文件服务（前端）
 // ✅ 改成"在非开发环境，或显式要求时，一律服务静态资源"
-const STATIC_DIR = path.resolve(__dirname, '../public');
-const serveStatic =
-  process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development';
+const staticCandidates = [
+  path.resolve(__dirname, '../public'),
+  path.resolve(__dirname, './public'),
+  path.resolve(process.cwd(), 'public')
+];
 
-if (serveStatic) {
+const STATIC_DIR = staticCandidates.find((candidate) =>
+  fs.existsSync(candidate)
+);
+
+const serveStatic =
+  !!STATIC_DIR && (process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development');
+
+if (serveStatic && STATIC_DIR) {
   // 服务React构建的静态文件
   app.use(express.static(STATIC_DIR));
-  
+
   // 首页与前端路由回退
   app.get(['/', '/index.html'], (_req, res) =>
     res.sendFile(path.join(STATIC_DIR, 'index.html'))
@@ -115,6 +127,8 @@ if (serveStatic) {
   app.get(/^(?!\/api\/).+/, (_req, res) =>
     res.sendFile(path.join(STATIC_DIR, 'index.html'))
   );
+} else {
+  appLogger.warn({ STATIC_DIR, candidates: staticCandidates }, 'Static assets directory not found; frontend routes will not be served');
 }
 
 // 404处理

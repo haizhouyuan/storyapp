@@ -6,8 +6,8 @@ import { test, expect, Page } from '@playwright/test';
  */
 
 // 测试配置
-const APP_URL = 'http://localhost:5001';
-const API_URL = 'http://localhost:5001/api';
+const APP_URL = 'http://127.0.0.1:5001';
+const API_URL = 'http://127.0.0.1:5001/api';
 
 // 测试数据
 const TEST_STORIES = [
@@ -44,7 +44,7 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
 
     // 步骤1: 验证首页加载
     console.log('🔍 步骤1: 验证首页元素');
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=告诉我你想听什么故事')).toBeVisible();
     
     const topicInput = page.locator('[data-testid="topic-input"]');
@@ -281,17 +281,17 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
     // 测试桌面端
     console.log('🖥️ 测试桌面端视图');
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
     
     // 测试平板端
     console.log('📱 测试平板端视图');
     await page.setViewportSize({ width: 768, height: 1024 });
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
     
     // 测试手机端
     console.log('📲 测试手机端视图');
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
+    await expect(page.getByTestId('hero-title')).toBeVisible();
     
     // 验证按钮在移动端足够大
     const startButton = page.locator('[data-testid="start-story-button"]');

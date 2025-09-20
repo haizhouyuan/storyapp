@@ -66,5 +66,10 @@ D:/
 D:\storyapp-worktrees/
 storyapp-worktrees/
 
+# Transient automation artifacts
+.playwright-mcp/
+.specstory/
+
+
 # Ignore MS Office lock files
 ~

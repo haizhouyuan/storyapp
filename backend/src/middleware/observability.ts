@@ -2,18 +2,19 @@ import { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import compression from 'compression';
-import { 
-  httpRequestsInFlight, 
-  recordHttpMetrics, 
+import {
+  httpRequestsInFlight,
+  recordHttpMetrics,
   rateLimitHits,
   recordError 
 } from '../config/metrics';
 import { logHttpRequest, logError, createLogger } from '../config/logger';
+import { securityConfig, rateLimitConfig } from '../config';
 
 const logger = createLogger('middleware');
 
 // Security middleware using Helmet
-export const securityMiddleware = helmet({
+const baseHelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -27,13 +28,40 @@ export const securityMiddleware = helmet({
       frameSrc: ["'none'"],
     },
   },
-  crossOriginEmbedderPolicy: false, // 允许嵌入
-  hsts: {
+  crossOriginEmbedderPolicy: false,
+  strictTransportSecurity: {
     maxAge: 31536000,
     includeSubDomains: true,
-    preload: true
+    preload: true,
   },
-});
+};
+
+const userHelmetOptions = { ...(securityConfig.helmetOptions ?? {}) } as Record<string, unknown>;
+const hstsOverride = userHelmetOptions.hsts;
+delete userHelmetOptions.hsts;
+
+const helmetOptions: Record<string, unknown> = {
+  ...baseHelmetOptions,
+  ...userHelmetOptions,
+};
+
+if (hstsOverride === false) {
+  helmetOptions.strictTransportSecurity = false;
+} else {
+  helmetOptions.strictTransportSecurity = {
+    ...(baseHelmetOptions.strictTransportSecurity as Record<string, unknown>),
+    ...((hstsOverride as Record<string, unknown>) || {}),
+  };
+}
+
+if (process.env.DISABLE_UPGRADE_INSECURE === 'true') {
+  const directives = (helmetOptions.contentSecurityPolicy as { directives?: Record<string, unknown> })?.directives;
+  if (directives) {
+    directives['upgrade-insecure-requests'] = null;
+  }
+}
+
+export const securityMiddleware = helmet(helmetOptions as Parameters<typeof helmet>[0]);
 
 // Compression middleware for response optimization
 export const compressionMiddleware = compression({
@@ -94,29 +122,29 @@ export const createRateLimiter = (windowMs: number, max: number, message: string
 
 // Different rate limiters for different endpoints
 export const generalRateLimit = createRateLimiter(
-  15 * 60 * 1000, // 15 minutes
-  100, // 100 requests per window
+  rateLimitConfig.general.windowMs,
+  rateLimitConfig.general.max,
   'Too many requests, please try again later',
   'general'
 );
 
 export const authRateLimit = createRateLimiter(
-  15 * 60 * 1000, // 15 minutes  
-  5, // 5 login attempts per window
+  rateLimitConfig.auth.windowMs,
+  rateLimitConfig.auth.max,
   'Too many login attempts, please try again later',
   'auth'
 );
 
 export const createProjectRateLimit = createRateLimiter(
-  60 * 60 * 1000, // 1 hour
-  10, // 10 project creations per hour
+  rateLimitConfig.createProject.windowMs,
+  rateLimitConfig.createProject.max,
   'Too many project creations, please try again later',
   'create_project'
 );
 
 export const validationRateLimit = createRateLimiter(
-  5 * 60 * 1000, // 5 minutes
-  20, // 20 validation requests per 5 minutes
+  rateLimitConfig.validation.windowMs,
+  rateLimitConfig.validation.max,
   'Too many validation requests, please try again later',
   'validation'
 );

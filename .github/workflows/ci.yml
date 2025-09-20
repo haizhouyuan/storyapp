@@ -91,9 +91,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create CI environment file
+      - name: Prepare CI environment file
         run: |
-          cat > .env.ci << 'EOF'
+          cat > .env <<EOF
           DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY || 'mock-mode-key' }}
           DEEPSEEK_API_URL=https://api.deepseek.com
           MONGODB_URI=mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@mongo:27017/storyapp?authSource=admin
@@ -101,14 +101,16 @@ jobs:
           NODE_ENV=production
           SERVE_STATIC=1
           PORT=5000
+          RATE_LIMIT_MAX_REQUESTS=1000
+          RATE_LIMIT_WINDOW_MS=300000
+          BASE_URL=http://127.0.0.1:5001
+          HSTS_DISABLED=true
+          DISABLE_UPGRADE_INSECURE=true
           # 注意：如果未配置DEEPSEEK_API_KEY secret，将使用mock模式
           EOF
 
       - name: Build and start services
-        run: |
-          docker compose -f docker-compose.ci.yml up -d --build
-        env:
-          COMPOSE_FILE: docker-compose.ci.yml
+        run: docker compose -f docker-compose.ci.yml up -d --build
 
       - name: Wait for services to be healthy
         run: |
@@ -199,6 +201,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: test-results
+          if-no-files-found: ignore
 
       - name: Generate test summary
         run: |
