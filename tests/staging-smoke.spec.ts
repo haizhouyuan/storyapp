@@ -1,6 +1,6 @@
 import { test, expect, request } from '@playwright/test';
 
-const BASE_URL = process.env.STAGING_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:5002';
+const BASE_URL = process.env.STAGING_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:5001';
 const API_URL = process.env.STAGING_API_URL || `${BASE_URL.replace(/\/$/, '')}/api`;
 
 const withTrailingSlash = (url: string) => (url.endsWith('/') ? url : `${url}/`);
@@ -19,14 +19,14 @@ test.describe('Staging smoke', () => {
   });
 
   test('homepage renders key hero copy', async ({ page }) => {
-    await page.goto(HOME_URL, { waitUntil: 'domcontentloaded' });
+    await page.goto(HOME_URL, { waitUntil: 'networkidle' });
     await expect(page).toHaveTitle(/儿童睡前故事/i);
     await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('topic-input')).toBeVisible({ timeout: 10000 });
   });
 
   test('storybook flow basic interaction', async ({ page }) => {
-    await page.goto(HOME_URL, { waitUntil: 'domcontentloaded' });
+    await page.goto(HOME_URL, { waitUntil: 'networkidle' });
     await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
     const topicInput = page.getByTestId('topic-input');
     await expect(topicInput).toBeVisible({ timeout: 10000 });
