@@ -12,27 +12,38 @@ import { logHttpRequest, logError, createLogger } from '../config/logger';
 
 const logger = createLogger('middleware');
 
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+
+const contentSecurityPolicyDirectives: Record<string, string[] | null> = {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  imgSrc: ["'self'", "data:", "https:"],
+  connectSrc: ["'self'"],
+  fontSrc: ["'self'"],
+  objectSrc: ["'none'"],
+  mediaSrc: ["'self'"],
+  frameSrc: ["'none'"],
+};
+
+if (isTestEnvironment) {
+  // 避免测试环境强制升级为 HTTPS
+  contentSecurityPolicyDirectives['upgrade-insecure-requests'] = null;
+}
+
 // Security middleware using Helmet
 export const securityMiddleware = helmet({
   contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      mediaSrc: ["'self'"],
-      frameSrc: ["'none'"],
-    },
+    directives: contentSecurityPolicyDirectives,
   },
   crossOriginEmbedderPolicy: false, // 允许嵌入
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  },
+  hsts: isTestEnvironment
+    ? false
+    : {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true
+      },
 });
 
 // Compression middleware for response optimization
