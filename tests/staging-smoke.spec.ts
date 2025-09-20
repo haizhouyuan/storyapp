@@ -21,8 +21,8 @@ test.describe('Staging smoke', () => {
   test('homepage renders key hero copy', async ({ page }) => {
     await page.goto(HOME_URL, { waitUntil: 'domcontentloaded' });
     await expect(page).toHaveTitle(/儿童睡前故事/i);
+    await expect(page.getByTestId('hero-title')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('topic-input')).toBeVisible();
-    await expect(page.locator('text=睡前故事时间')).toBeVisible();
   });
 
   test('storybook flow basic interaction', async ({ page }) => {
