@@ -125,17 +125,17 @@
   - `frontend/src/App.tsx`
 
 - 容器化（complete-containerization）：
-  - `.playwright-mcp/classic-mode-success-final.png`
-  - `.playwright-mcp/homepage-deployed.png`
-  - `.playwright-mcp/homepage-initial.png`
-  - `.playwright-mcp/story-continuation-success.png`
-  - `.playwright-mcp/story-generation-success.png`
-  - `debug-after-click.png`
-  - `debug-homepage-after-wait.png`
-  - `debug-homepage-http.png`
-  - `debug-homepage.png`
-  - `old/image copy.png`
-  - `old/image.png`
+- `../media/playwright/classic-mode-success-final.png`
+- `../media/playwright/homepage-deployed.png`
+- `../media/playwright/homepage-initial.png`
+- `../media/playwright/story-continuation-success.png`
+- `../media/playwright/story-generation-success.png`
+- `../media/debug/debug-after-click.png`
+- `../media/debug/debug-homepage-after-wait.png`
+- `../media/debug/debug-homepage-http.png`
+- `../media/debug/debug-homepage.png`
+- `../media/archive/image-copy.png`
+- `../media/archive/old-image.png`
 
 - CI 工作流（fix/gha-claude-secrets-precheck）：
   - `.github/workflows/ci.yml`（内容冲突）
@@ -194,4 +194,3 @@
 - 在本地出一版合并后的 `backend/src/routes/admin.ts` 与 `frontend/src/App.tsx` 冲突消解草稿（不推送），供 PR 整合参考。
 - 对 `feat/complete-containerization` 出一版“去除二进制冲突”的精简补丁草稿。
 - 为 `fix/gha-claude-secrets-precheck` 做 rebase 与工作流文件清理，并生成新的对比报告。
-

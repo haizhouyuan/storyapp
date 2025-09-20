@@ -295,3 +295,6 @@ node test-logging-system.js
 - `content_validation` - 内容验证
 - `quality_check` - 质量检查
 - `db_save_start/success/error` - 数据库操作
+
+# Language & Style
+- 所有解释性输出与讨论，请使用「简体中文」。

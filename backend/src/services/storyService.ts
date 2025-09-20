@@ -104,20 +104,24 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
   const startTime = Date.now();
   
   try {
-    const { topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
+    const { topic: rawTopic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
+    let topic = (rawTopic || '').trim();
     
     // 验证输入参数
-    if (!topic || topic.trim().length === 0) {
+    if (!topic) {
       const customError = new Error('story_topic_required');
       (customError as any).code = 'VALIDATION_ERROR';
       throw customError;
     }
     
-    // 加强输入验证：主题长度限制
+    // 加强输入验证：主题长度限制，超出时自动截断
     if (topic.length > 100) {
-      const customError = new Error('story_topic_too_long');
-      (customError as any).code = 'VALIDATION_ERROR';
-      throw customError;
+      logger.warn(EventType.STORY_GENERATION_START, '故事主题过长，已自动截断', {
+        originalLength: topic.length,
+        truncatedLength: 100
+      }, sessionId);
+
+      topic = topic.slice(0, 100);
     }
     
     // 儿童内容安全检查：过滤不适当关键词

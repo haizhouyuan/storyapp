@@ -12,6 +12,7 @@ backend/dist/
 test-results/
 playwright-report/
 coverage/
+.playwright-mcp/
 
 # Environment variables
 .env
@@ -30,6 +31,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+# Debug screenshots dropped at repo root
+/debug-*.png
 
 # Package manager locks (keep package-lock.json but ignore others)
 yarn.lock
@@ -61,6 +64,7 @@ coverage/
 # Ignore accidental Windows drive mount
 D:/
 D:\storyapp-worktrees/
+storyapp-worktrees/
 
 # Ignore MS Office lock files
 ~
