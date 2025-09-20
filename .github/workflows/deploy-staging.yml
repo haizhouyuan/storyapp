@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows: ["CI/CD Pipeline"]
     types: [completed]
-  workflow_dispatch:
 
 env:
   STAGING_PORT: 5002
