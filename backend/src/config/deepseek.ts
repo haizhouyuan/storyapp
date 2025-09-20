@@ -7,7 +7,7 @@ const typedConfig = getTypedConfig();
 const DEEPSEEK_API_URL = typedConfig.api.deepseek.apiUrl;
 const DEEPSEEK_API_KEY = typedConfig.api.deepseek.apiKey;
 
-console.log('🔑 DeepSeek API Key 加载状态:', DEEPSEEK_API_KEY ? '已加载 (*****)' : '未找到');
+// API密钥状态检查（安全起见，不在日志中显示）
 
 if (!DEEPSEEK_API_KEY) {
   console.warn('⚠️  未配置DeepSeek API Key，将使用模拟数据进行测试');
@@ -85,7 +85,7 @@ export const STORY_SYSTEM_PROMPT = `你是一个专业的儿童故事创作助�
    - 适合8-12岁儿童，内容富有想象力和适度挑战性
    - 语言生动有趣，可使用丰富词汇和复杂句式
    - 情节可以更加曲折，包含悬念、转折和问题解决
-   - 避免暴力、恐怖内容，但可包含冒险和轻微紧张情节
+   - 内容必须温馨平和，适合睡前阅读，避免任何紧张或刺激情节
    - 融入教育元素：科学知识、历史文化、逻辑思维
 
 2. 格式要求：
@@ -129,7 +129,7 @@ export const STORY_TREE_SYSTEM_PROMPT = `你是一个专业的儿童故事创作
 要求：
 1. 故事结构：3轮互动，每轮2个选择，形成8条完整的故事路径
 2. 内容要求：
-   - 适合3-8岁儿童，内容温馨正面
+   - 适合3-8岁儿童，内容必须温馨正面，完全适合睡前阅读
    - 每个故事片段不少于500字
    - 语言简单易懂，富有想象力
    - 所有8个结局都要温馨完整
@@ -274,7 +274,7 @@ export const STORY_REVIEW_PROMPT = (content: string, expected_length: number = 5
 ${content}
 
 检查标准：
-1. 内容是否适合3-8岁儿童（无暴力、恐怖内容）
+1. 内容是否适合3-8岁儿童（温馨平和，完全适合睡前阅读）
 2. 字数是否达到${expected_length}字以上
 3. 语言是否简单易懂，有趣生动
 4. 情节是否合理，有教育意义

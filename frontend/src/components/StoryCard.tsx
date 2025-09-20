@@ -2,6 +2,7 @@ import React, { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { BookOpenIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { formatDate } from '../utils/helpers';
+import { cn } from '../utils/cn';
 
 interface StoryCardProps {
   id: string;
@@ -14,9 +15,8 @@ interface StoryCardProps {
 }
 
 /**
- * 故事卡片组件
- * 用于在"我的故事"页面显示故事列表项
- * 使用React.memo优化性能，避免不必要的重渲染
+ * 积分主题的故事卡片组件
+ * 提供更统一的阴影、圆角与悬停反馈，适配新的 Points HUD 风格
  */
 const StoryCard = memo(function StoryCard({
   id,
@@ -25,168 +25,59 @@ const StoryCard = memo(function StoryCard({
   createdAt,
   onClick,
   onDelete,
-  className = ''
+  className = '',
 }: StoryCardProps) {
-  // 使用useMemo缓存格式化后的日期，避免重复计算
   const formattedDate = useMemo(() => formatDate(createdAt), [createdAt]);
 
-  // 使用useMemo缓存样式类名，避免重复拼接
-  const cardClassName = useMemo(() => `
-    relative
-    bg-white
-    rounded-child-lg
-    shadow-child-lg
-    p-child-lg
-    cursor-pointer
-    border-2
-    border-transparent
-    hover:border-child-blue
-    hover:shadow-child-xl
-    transition-all
-    duration-200
-    ${className}
-  `, [className]);
-
-  // 使用useMemo缓存动画配置，避免重复创建对象
-  const motionTransition = useMemo(() => ({
-    type: 'spring' as const,
-    stiffness: 300,
-    damping: 20
-  }), []);
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
+    <motion.button
+      type="button"
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.02, y: -2 }}
-      whileTap={{ scale: 0.98 }}
-      transition={motionTransition}
+      whileHover={{ y: -4, scale: 1.01 }}
+      whileTap={{ scale: 0.99 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 20 }}
       onClick={onClick}
-      className={cardClassName}
+      className={cn(
+        'group relative w-full rounded-points-lg border border-points-border/60 bg-white/95 p-5 text-left shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-points-primary/20 hover:shadow-md',
+        className,
+      )}
       data-testid={`story-card-${id}`}
     >
-      {/* 故事缩略图区域 */}
-      <div className="flex items-start gap-child-md">
-        {/* 书本图标 */}
-        <div className="flex-shrink-0 w-16 h-16 bg-gradient-to-br from-child-mint to-child-blue rounded-child p-3">
-          <BookOpenIcon className="w-full h-full text-white" />
+      <div className="flex items-start gap-4">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-points-md bg-points-accent-soft text-points-secondary">
+          <BookOpenIcon className="h-8 w-8" />
         </div>
 
-        {/* 故事信息 */}
-        <div className="flex-1 min-w-0">
-          {/* 故事标题 */}
-          <h3 className="
-            font-child 
-            font-bold 
-            text-child-lg 
-            text-gray-800 
-            mb-2
-            truncate
-          ">
-            {title}
-          </h3>
+        <div className="flex-1 space-y-3">
+          <div>
+            <h3 className="line-clamp-1 text-lg font-semibold text-points-text-strong">{title}</h3>
+            <p className="mt-1 line-clamp-3 text-sm text-points-text-muted">{preview}</p>
+          </div>
 
-          {/* 故事预览 */}
-          <p className="
-            font-child 
-            text-child-sm 
-            text-gray-600 
-            mb-3
-            line-clamp-2
-          ">
-            {preview}
-          </p>
-
-          {/* 创建时间 */}
-          <div className="flex items-center gap-2 text-child-xs text-gray-500">
-            <CalendarIcon className="w-4 h-4" />
+          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-points-text-muted">
+            <CalendarIcon className="h-4 w-4" />
             <span>{formattedDate}</span>
           </div>
         </div>
-
-        {/* 播放按钮 */}
-        <motion.div
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          className="
-            flex-shrink-0 
-            w-12 h-12 
-            bg-gradient-to-r from-child-green to-child-blue 
-            rounded-full 
-            flex 
-            items-center 
-            justify-center
-            shadow-child
-            hover:shadow-child-lg
-            transition-shadow
-            duration-200
-          "
-        >
-          {/* 播放图标 */}
-          <svg 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            className="w-6 h-6 text-white ml-0.5"
-          >
-            <path
-              d="M8 5v14l11-7L8 5z"
-              fill="currentColor"
-            />
-          </svg>
-        </motion.div>
       </div>
 
-      {/* 删除按钮（隐藏在右上角） */}
       {onDelete && (
-        <motion.button
-          initial={{ opacity: 0 }}
-          whileHover={{ opacity: 1 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={(e) => {
-            e.stopPropagation();
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
             onDelete();
           }}
-          className="
-            absolute 
-            -top-2 
-            -right-2 
-            w-8 h-8 
-            bg-red-400 
-            hover:bg-red-500 
-            rounded-full 
-            flex 
-            items-center 
-            justify-center
-            shadow-child
-            transition-colors
-            duration-200
-          "
-          title="删除故事"
+          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-points-border/60 text-points-text-muted transition hover:bg-points-muted/60 hover:text-points-danger"
+          aria-label="删除故事"
         >
-          <svg viewBox="0 0 24 24" className="w-4 h-4 text-white">
-            <path
-              fill="currentColor"
-              d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12L19 6.41z"
-            />
-          </svg>
-        </motion.button>
+          ×
+        </button>
       )}
 
-      {/* 悬停发光效果 */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        whileHover={{ opacity: 1 }}
-        className="
-          absolute 
-          inset-0 
-          rounded-child-lg 
-          bg-gradient-to-r 
-          from-child-mint/20 
-          to-child-blue/20 
-          pointer-events-none
-        "
-      />
-    </motion.div>
+      <span className="pointer-events-none absolute inset-0 rounded-points-lg bg-gradient-to-br from-points-accent-soft/0 via-points-accent-soft/0 to-points-accent-soft/40 opacity-0 transition group-hover:opacity-100" />
+    </motion.button>
   );
 });
 

@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -49,8 +49,18 @@ export const compressionMiddleware = compression({
   threshold: 1024, // Only compress if response is larger than 1KB
 });
 
+// 环境下禁用速率限制（测试或显式设置）
+const isRateLimitingDisabled =
+  process.env.NODE_ENV === 'test' || process.env.DISABLE_RATE_LIMIT === '1';
+
+const passthroughRateLimiter: RequestHandler = (_req, _res, next) => next();
+
 // Rate limiting middleware
-export const createRateLimiter = (windowMs: number, max: number, message: string, keyPrefix: string) => {
+export const createRateLimiter = (windowMs: number, max: number, message: string, keyPrefix: string): RequestHandler => {
+  if (isRateLimitingDisabled) {
+    return passthroughRateLimiter;
+  }
+
   return rateLimit({
     windowMs,
     max,

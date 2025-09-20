@@ -3,9 +3,13 @@ import { MongoClient, Db } from 'mongodb';
 // 使用集中化配置加载器
 const { getTypedConfig } = require('../../../config/env-loader');
 
-const typedConfig = getTypedConfig();
-const MONGODB_URI = typedConfig.database.uri;
-const MONGODB_DB_NAME = typedConfig.database.name;
+const resolveDatabaseConfig = () => {
+  const typedConfig = getTypedConfig();
+  return {
+    uri: process.env.MONGODB_URI || typedConfig.database.uri,
+    name: process.env.MONGODB_DB_NAME || typedConfig.database.name,
+  };
+};
 
 // 数据库集合名称常量
 export const COLLECTIONS = {
@@ -27,7 +31,9 @@ export async function connectToDatabase(): Promise<Db> {
   try {
     console.log('正在连接到MongoDB...');
     
-    client = new MongoClient(MONGODB_URI, {
+    const { uri, name } = resolveDatabaseConfig();
+
+    client = new MongoClient(uri, {
       // 连接选项
       maxPoolSize: 10,
       minPoolSize: 2,
@@ -36,11 +42,11 @@ export async function connectToDatabase(): Promise<Db> {
     });
 
     await client.connect();
-    db = client.db(MONGODB_DB_NAME);
-    
+    db = client.db(name);
+
     console.log('✅ MongoDB连接成功');
-    console.log(`📍 数据库: ${MONGODB_DB_NAME}`);
-    console.log(`🔗 URI: ${MONGODB_URI}`);
+    console.log(`📍 数据库: ${name}`);
+    console.log(`🔗 URI: ${uri}`);
     
     return db;
   } catch (error) {

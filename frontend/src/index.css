@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 自定义字体导入 */
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800&display=swap');
+@import './theme/points-tokens.css';
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Quicksand:wght@400;600;700&display=swap');
 
 /* 儿童友好的全局样式 */
 * {
@@ -12,13 +12,12 @@
 
 body {
   margin: 0;
-  font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Quicksand', 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+    'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   min-height: 100vh;
+  background-attachment: fixed;
 }
 
 /* 自定义滚动条样式 */
@@ -40,11 +39,10 @@ body {
   background: linear-gradient(45deg, #FF5252, #26C6DA);
 }
 
-/* 儿童友好的focus样式 */
-.child-focus:focus {
-  outline: 3px solid #FFD93D;
-  outline-offset: 2px;
-  box-shadow: 0 0 0 6px rgba(255, 217, 61, 0.3);
+/* points 风格 focus 状态 */
+.points-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(var(--points-accent), 0.35), 0 0 0 1px rgba(var(--points-primary), 0.9);
 }
 
 /* 动画关键帧 */
@@ -79,23 +77,21 @@ body {
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
-/* 渐变背景类 */
-.bg-child-primary {
-  background: linear-gradient(135deg, #A8E6CF 0%, #88D8A3 100%);
+/* Points 渐变背景 */
+.bg-points-hero {
+  background: var(--gradient-primary);
 }
 
-.bg-child-secondary {
-  background: linear-gradient(135deg, #FFB3BA 0%, #FFCCCB 100%);
+.bg-points-surface-glass {
+  background: var(--gradient-surface);
 }
 
-.bg-child-accent {
-  background: linear-gradient(135deg, #B3D9FF 0%, #87CEEB 100%);
+.bg-points-magenta-wave {
+  background: var(--gradient-magenta);
 }
 
-.bg-child-warning {
-  background: linear-gradient(135deg, #FFD4A3 0%, #FFAB91 100%);
-}
-
-.bg-child-success {
-  background: linear-gradient(135deg, #C8E6C9 0%, #A5D6A7 100%);
+.glass-elevated {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(22px);
+  border: 1px solid rgba(var(--points-border), 0.6);
 }

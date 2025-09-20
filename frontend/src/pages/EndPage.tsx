@@ -1,17 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { 
-  HeartIcon, 
-  BookOpenIcon, 
-  HomeIcon,
-  SparklesIcon 
-} from '@heroicons/react/24/outline';
+import { HeartIcon, BookOpenIcon, HomeIcon, SparklesIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
 
 import Button from '../components/Button';
 import { saveStory } from '../utils/api';
 import { generateStoryContent, extractStoryTitle } from '../utils/helpers';
+import { PointsBadge, PointsPageShell, PointsSection, PointsStatCard } from '../components/points';
 import type { StorySession, StoryTree } from '../../../shared/types';
 
 interface EndPageProps {
@@ -19,55 +15,41 @@ interface EndPageProps {
   onResetSession: () => void;
 }
 
-// 故事树模式传入的数据接口
 interface StoryTreeEndState {
   topic: string;
   storyTree: StoryTree;
   finalPath: number[];
 }
 
-/**
- * 故事结束页面
- * 支持两种模式：
- * 1. 渐进式故事模式 (storySession)
- * 2. 故事树模式 (location.state)
- */
 export default function EndPage({ storySession, onResetSession }: EndPageProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  
-  // 获取故事树模式传入的数据
+
   const storyTreeData = location.state as StoryTreeEndState | undefined;
 
-  // 检查数据有效性并处理重定向
   useEffect(() => {
     const hasValidSession = storySession && storySession.isComplete;
     const hasValidTreeData = storyTreeData && storyTreeData.topic && storyTreeData.storyTree && storyTreeData.finalPath;
-    
+
     if (!hasValidSession && !hasValidTreeData) {
       navigate('/');
-      return;
     }
   }, [storySession, storyTreeData, navigate]);
 
-  // 保存故事 - 支持两种模式
   const handleSaveStory = async () => {
     if (isSaving || isSaved) return;
 
     setIsSaving(true);
-    
     try {
       let storyContent: string;
       let storyTitle: string;
 
       if (storySession) {
-        // 渐进式故事模式
         storyContent = generateStoryContent(storySession);
         storyTitle = extractStoryTitle(storyContent, storySession.topic);
       } else if (storyTreeData) {
-        // 故事树模式 - 生成完整故事内容
         const fullStoryContent = generateStoryTreeContent(storyTreeData);
         storyContent = JSON.stringify(fullStoryContent);
         storyTitle = extractStoryTitle(fullStoryContent.fullStory, storyTreeData.topic);
@@ -75,17 +57,11 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
         throw new Error('没有有效的故事数据');
       }
 
-      const response = await saveStory({
-        title: storyTitle,
-        content: storyContent
-      });
+      const response = await saveStory({ title: storyTitle, content: storyContent });
 
       if (response.success) {
         setIsSaved(true);
-        toast.success('故事已保存到"我的故事"中！', {
-          duration: 4000,
-          icon: '💾'
-        });
+        toast.success('故事已保存到"我的故事"中！', { duration: 4000, icon: '💾' });
       }
     } catch (error: any) {
       console.error('保存故事失败:', error);
@@ -95,411 +71,203 @@ export default function EndPage({ storySession, onResetSession }: EndPageProps) 
     }
   };
 
-  // 从故事树生成完整故事内容
   const generateStoryTreeContent = (treeData: StoryTreeEndState) => {
     const { storyTree, finalPath, topic } = treeData;
-    let fullStorySegments: string[] = [];
+    const segments: string[] = [];
     let currentNode = storyTree.root;
-    
-    // 添加开始节点
-    fullStorySegments.push(currentNode.segment);
-    
-    // 根据选择路径收集故事片段
-    for (let i = 0; i < finalPath.length; i++) {
-      const choiceIndex = finalPath[i];
+
+    segments.push(currentNode.segment);
+
+    for (let index = 0; index < finalPath.length; index += 1) {
+      const choiceIndex = finalPath[index];
       if (currentNode.children && currentNode.children[choiceIndex]) {
         currentNode = currentNode.children[choiceIndex];
-        fullStorySegments.push(currentNode.segment);
+        segments.push(currentNode.segment);
       }
     }
-    
+
     return {
       topic,
       mode: 'story-tree',
-      fullStory: fullStorySegments.join('\n\n'),
+      fullStory: segments.join('\n\n'),
       path: finalPath,
       storyTreeId: storyTree.id,
-      totalSegments: fullStorySegments.length,
-      created_at: new Date().toISOString()
+      totalSegments: segments.length,
+      created_at: new Date().toISOString(),
     };
   };
 
-  // 返回首页
   const handleGoHome = () => {
     onResetSession();
     navigate('/');
   };
 
-  // 查看我的故事
   const handleViewMyStories = () => {
     onResetSession();
     navigate('/my-stories');
   };
 
-  // 开始新故事
   const handleNewStory = () => {
     onResetSession();
     navigate('/');
   };
 
-  // 如果两种模式都没有有效数据，返回null等待重定向
+  const summary = useMemo(() => {
+    if (storySession) {
+      const choiceCount = storySession.path.filter((item) => item.choice).length;
+      const segmentCount = storySession.path.length;
+      const storyDuration = Math.max(1, Math.round((Date.now() - storySession.startTime) / 1000 / 60));
+      return { topic: storySession.topic, choiceCount, segmentCount, storyDuration };
+    }
+
+    if (storyTreeData) {
+      return {
+        topic: storyTreeData.topic,
+        choiceCount: storyTreeData.finalPath.length,
+        segmentCount: storyTreeData.finalPath.length + 1,
+        storyDuration: 5,
+      };
+    }
+
+    return { topic: '', choiceCount: 0, segmentCount: 0, storyDuration: 0 };
+  }, [storySession, storyTreeData]);
+
   if ((!storySession || !storySession.isComplete) && !storyTreeData) {
     return null;
   }
 
-  // 计算故事统计信息 - 支持两种模式
-  let storyDuration = 0;
-  let choiceCount = 0;
-  let segmentCount = 0;
-
-  if (storySession) {
-    // 渐进式故事模式
-    storyDuration = Math.round((Date.now() - storySession.startTime) / 1000 / 60);
-    choiceCount = storySession.path.filter(p => p.choice).length;
-    segmentCount = storySession.path.length;
-  } else if (storyTreeData) {
-    // 故事树模式
-    storyDuration = 5; // 估算值，因为故事树模式通常较快
-    choiceCount = storyTreeData.finalPath.length;
-    segmentCount = storyTreeData.finalPath.length + 1; // 包含开始节点
-  }
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-child-gold/30 via-child-cream to-child-mint p-child-lg overflow-hidden">
-      {/* 庆祝背景动画 */}
-      <div className="fixed inset-0 pointer-events-none">
-        {/* 飘落的星星 */}
-        {[...Array(20)].map((_, i) => (
-          <motion.div
-            key={i}
-            initial={{ 
-              y: -50, 
-              x: Math.random() * window.innerWidth,
-              rotate: 0,
-              opacity: 0
-            }}
-            animate={{ 
-              y: window.innerHeight + 50, 
-              rotate: 360,
-              opacity: [0, 1, 1, 0]
-            }}
-            transition={{ 
-              duration: 3 + Math.random() * 2, 
-              delay: Math.random() * 5,
-              repeat: Infinity
-            }}
-            className="absolute"
-          >
-            <SparklesIcon className="w-6 h-6 text-child-gold" />
-          </motion.div>
-        ))}
-
-        {/* 彩色气泡 */}
-        {[...Array(10)].map((_, i) => (
-          <motion.div
-            key={`bubble-${i}`}
-            initial={{ 
-              y: window.innerHeight + 50,
-              x: Math.random() * window.innerWidth,
-              scale: 0
-            }}
-            animate={{ 
-              y: -50,
-              scale: [0, 1, 1, 0],
-              x: Math.random() * window.innerWidth
-            }}
-            transition={{ 
-              duration: 4 + Math.random() * 2,
-              delay: Math.random() * 3,
-              repeat: Infinity
-            }}
-            className={`
-              absolute 
-              w-8 h-8 
-              rounded-full 
-              ${i % 3 === 0 ? 'bg-child-blue/30' : 
-                i % 3 === 1 ? 'bg-child-green/30' : 'bg-child-pink/30'}
-            `}
-          />
-        ))}
-      </div>
-
-      {/* 主要内容 */}
-      <div className="max-w-4xl mx-auto text-center relative z-10">
-        {/* 完结插画 */}
-        <motion.div
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 100, damping: 10, delay: 0.2 }}
-          className="mb-child-3xl"
-        >
-          <div className="w-64 h-64 mx-auto">
-            <svg viewBox="0 0 200 200" className="w-full h-full">
-              {/* 夜空背景 */}
-              <motion.circle
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.5, type: 'spring' }}
-                cx="100"
-                cy="100"
-                r="90"
-                fill="url(#nightGradient)"
-              />
-              
-              {/* 月亮 */}
-              <motion.circle
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.7, type: 'spring' }}
-                cx="130"
-                cy="70"
-                r="25"
-                fill="#FFF8DC"
-              />
-              
-              {/* 小熊睡觉 */}
-              <motion.g
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.9, type: 'spring' }}
-              >
-                {/* 床 */}
-                <rect x="60" y="140" width="80" height="20" rx="10" fill="#8B4513" />
-                
-                {/* 被子 */}
-                <ellipse cx="100" cy="130" rx="35" ry="15" fill="#FFB3BA" />
-                
-                {/* 小熊头部 */}
-                <circle cx="100" cy="120" r="20" fill="#DEB887" />
-                
-                {/* 小熊耳朵 */}
-                <circle cx="90" cy="105" r="8" fill="#D2B48C" />
-                <circle cx="110" cy="105" r="8" fill="#D2B48C" />
-                
-                {/* 睡眠眼睛 */}
-                <path d="M 92 118 Q 96 122 100 118" stroke="#333" strokeWidth="2" fill="none" />
-                <path d="M 100 118 Q 104 122 108 118" stroke="#333" strokeWidth="2" fill="none" />
-                
-                {/* Z字母表示睡觉 */}
-                <motion.g
-                  animate={{ 
-                    opacity: [0.3, 1, 0.3],
-                    y: [0, -5, 0]
-                  }}
-                  transition={{ 
-                    duration: 2, 
-                    repeat: Infinity 
-                  }}
-                >
-                  <text x="140" y="85" fontSize="14" fill="#4ECDC4" fontWeight="bold">Z</text>
-                  <text x="145" y="70" fontSize="12" fill="#4ECDC4" fontWeight="bold">Z</text>
-                  <text x="150" y="60" fontSize="10" fill="#4ECDC4" fontWeight="bold">Z</text>
-                </motion.g>
-              </motion.g>
-              
-              {/* 星星 */}
-              {[...Array(6)].map((_, i) => (
-                <motion.g
-                  key={i}
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ 
-                    scale: [0, 1, 1],
-                    opacity: [0, 1, 0.7],
-                    rotate: [0, 180]
-                  }}
-                  transition={{ 
-                    delay: 1 + i * 0.2, 
-                    duration: 0.5,
-                    rotate: { duration: 4, repeat: Infinity }
-                  }}
-                >
-                  <SparklesIcon 
-                    x={30 + (i % 3) * 40} 
-                    y={30 + Math.floor(i / 3) * 30} 
-                    width="12" 
-                    height="12" 
-                    className="text-child-gold"
-                  />
-                </motion.g>
-              ))}
-              
-              {/* 渐变定义 */}
-              <defs>
-                <radialGradient id="nightGradient">
-                  <stop offset="0%" stopColor="#1e3a8a" />
-                  <stop offset="100%" stopColor="#312e81" />
-                </radialGradient>
-              </defs>
-            </svg>
+    <PointsPageShell
+      backgroundVariant="hud"
+      maxWidth="xl"
+      topBar={
+        <>
+          <div className="flex items-center gap-2 text-sm text-points-text-muted">
+            <SparklesIcon className="h-5 w-5 text-points-primary" />
+            <span>晚安故事 · 完结总结</span>
           </div>
-        </motion.div>
-
-        {/* 庆祝标题 */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.2 }}
-          className="mb-child-3xl"
-        >
-          <h1 className="
-            font-child 
-            font-bold 
-            text-child-4xl 
-            text-gray-800 
-            mb-child-lg
-          ">
-            🎉 故事完结啦！🎉
-          </h1>
-          
-          <p className="
-            font-child 
-            text-child-lg 
-            text-gray-600 
-            mb-child-lg
-          ">
-            你创造了一个精彩的冒险故事！
-          </p>
-          
-          {/* 故事统计 */}
-          <div className="
-            bg-white/80 
-            rounded-child-lg 
-            p-child-lg 
-            shadow-child 
-            max-w-md 
-            mx-auto
-          ">
-            <div className="flex justify-around text-center">
-              <div>
-                <div className="text-child-2xl font-bold text-child-blue">
-                  {choiceCount}
-                </div>
-                <div className="text-child-sm text-gray-600">个选择</div>
-              </div>
-              <div>
-                <div className="text-child-2xl font-bold text-child-green">
-                  {storyDuration}
-                </div>
-                <div className="text-child-sm text-gray-600">分钟</div>
-              </div>
-              <div>
-                <div className="text-child-2xl font-bold text-child-orange">
-                  {segmentCount}
-                </div>
-                <div className="text-child-sm text-gray-600">段落</div>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* 操作按钮区域 */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.5 }}
-          className="space-y-child-lg max-w-lg mx-auto"
-        >
-          {/* 保存故事按钮 */}
-          {!isSaved && (
-            <Button
-              onClick={handleSaveStory}
-              loading={isSaving}
-              disabled={isSaving}
-              variant="warning"
-              size="large"
-              icon={!isSaving && <HeartIcon className="w-6 h-6" />}
-              className="w-full animate-pulse-glow"
-              testId="save-story-button"
-            >
-              {isSaving ? '正在保存...' : '保存到我的故事'}
-            </Button>
-          )}
-
-          {/* 已保存状态 */}
-          {isSaved && (
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="
-                bg-child-success 
-                text-green-800 
-                px-child-xl 
-                py-child-lg 
-                rounded-child-lg 
-                shadow-child
-                font-child
-                font-bold
-                text-child-lg
-              "
-            >
-              ✅ 故事已保存成功！
-            </motion.div>
-          )}
-
-          {/* 查看我的故事 */}
-          {isSaved && (
-            <Button
-              onClick={handleViewMyStories}
-              variant="secondary"
-              size="large"
-              icon={<BookOpenIcon className="w-6 h-6" />}
-              className="w-full"
-              testId="view-stories-button"
-            >
-              去我的故事查看
-            </Button>
-          )}
-
-          {/* 开始新故事 */}
-          <Button
-            onClick={handleNewStory}
-            variant="primary"
-            size="large"
-            icon={<SparklesIcon className="w-6 h-6" />}
-            className="w-full"
-            testId="new-story-button"
-          >
-            创作新故事
-          </Button>
-
-          {/* 返回首页 */}
           <Button
             onClick={handleGoHome}
-            variant="accent"
-            size="medium"
-            icon={<HomeIcon className="w-5 h-5" />}
-            className="w-full"
+            variant="ghost"
+            size="small"
+            icon={<HomeIcon className="h-5 w-5" />}
+            className="shadow-none"
             testId="home-button"
           >
             返回首页
           </Button>
+        </>
+      }
+      header={
+        <div className="flex flex-col gap-4">
+          <PointsBadge variant="neutral">故事完成</PointsBadge>
+          <div className="space-y-2">
+            <h1 className="text-3xl font-semibold text-points-text-strong">今晚的冒险圆满结束啦！</h1>
+            <p className="text-base text-points-text-muted">
+              和孩子一起回顾故事亮点，保存珍贵瞬间，并继续下一段奇妙旅程。
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <PointsSection layout="card" className="relative overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 120, damping: 16 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center gap-3 text-lg font-semibold text-points-text-strong">
+            <SparklesIcon className="h-6 w-6 text-points-primary" />
+            <span>故事主题：{summary.topic}</span>
+          </div>
+          <p className="text-base text-points-text-muted">
+            孩子完成了一个充满惊喜的冒险。趁热打铁，保存或分享故事，让睡前记忆更长久。
+          </p>
         </motion.div>
 
-        {/* 鼓励话语 */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 2 }}
-          className="mt-child-3xl"
-        >
-          <p className="
-            font-child 
-            text-child-base 
-            text-gray-600 
-            italic
-          ">
-            "每一个故事都是独一无二的冒险，就像你一样特别！"
+        <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-points-accent-soft blur-3xl" aria-hidden />
+      </PointsSection>
+
+      <PointsSection layout="plain">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <PointsStatCard label="互动次数" value={summary.choiceCount} helperText="孩子亲自做出的选择数量" />
+          <PointsStatCard label="故事段落" value={summary.segmentCount} helperText="故事一共经历的章节数" />
+          <PointsStatCard label="陪伴时长" value={`${summary.storyDuration} 分钟`} helperText="本次故事陪伴的估算时长" />
+        </div>
+      </PointsSection>
+
+      <PointsSection
+        layout="card"
+        title="想怎么处理这个故事？"
+        description="保存到故事库、立刻开始新的冒险，或回顾历史故事。"
+        actions={
+          <div className="flex flex-wrap gap-3">
+            {!isSaved && (
+              <Button
+                onClick={handleSaveStory}
+                loading={isSaving}
+                disabled={isSaving}
+                variant="warning"
+                size="large"
+                icon={!isSaving && <HeartIcon className="h-6 w-6" />}
+                className="min-w-[180px]"
+                testId="save-story-button"
+              >
+                {isSaving ? '正在保存...' : '保存到我的故事'}
+              </Button>
+            )}
+
+            {isSaved && (
+              <Button
+                onClick={handleViewMyStories}
+                variant="secondary"
+                size="large"
+                icon={<BookOpenIcon className="h-6 w-6" />}
+                className="min-w-[180px]"
+                testId="view-stories-button"
+              >
+                去我的故事查看
+              </Button>
+            )}
+
+            <Button
+              onClick={handleNewStory}
+              variant="primary"
+              size="large"
+              icon={<SparklesIcon className="h-6 w-6" />}
+              className="min-w-[170px]"
+              testId="new-story-button"
+            >
+              创作新故事
+            </Button>
+          </div>
+        }
+      >
+        <div className="rounded-points-lg border border-points-border/40 bg-white/95 p-6 text-base leading-relaxed text-points-text shadow-inner">
+          <p className="font-semibold text-points-text-strong">温馨提示</p>
+          <p className="mt-2 text-sm text-points-text-muted">
+            - 保存故事后，可在“我的故事”中随时查看完整版内容。<br />
+            - 若想产生更多分支，可以重新输入主题再生成一次。<br />
+            - 若孩子意犹未尽，马上开始新故事吧！
           </p>
-          <p className="
-            font-child 
-            text-child-sm 
-            text-gray-500 
-            mt-child-sm
-          ">
-            晚安，做个好梦 🌙
-          </p>
-        </motion.div>
+        </div>
+      </PointsSection>
+
+      <div className="rounded-points-lg border border-dashed border-points-border/50 bg-white/80 px-5 py-4 text-center text-sm text-points-text-muted">
+        "每一个故事都是独一无二的冒险，就像你一样特别。晚安，做个好梦 🌙"
       </div>
-    </div>
+
+      <div className="flex justify-center">
+        <Button
+          onClick={handleGoHome}
+          variant="ghost"
+          size="medium"
+          icon={<ArrowPathIcon className="h-5 w-5" />}
+        >
+          返回首页继续探索
+        </Button>
+      </div>
+    </PointsPageShell>
   );
 }
