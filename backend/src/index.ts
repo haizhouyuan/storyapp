@@ -113,8 +113,8 @@ const STATIC_DIR = staticCandidates.find((candidate) =>
   fs.existsSync(candidate)
 );
 
-const serveStatic =
-  !!STATIC_DIR && (process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development');
+const shouldServeStatic = process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development';
+const serveStatic = !!STATIC_DIR && shouldServeStatic;
 
 if (serveStatic && STATIC_DIR) {
   // 服务React构建的静态文件
@@ -127,8 +127,11 @@ if (serveStatic && STATIC_DIR) {
   app.get(/^(?!\/api\/).+/, (_req, res) =>
     res.sendFile(path.join(STATIC_DIR, 'index.html'))
   );
-} else {
-  appLogger.warn({ STATIC_DIR, candidates: staticCandidates }, 'Static assets directory not found; frontend routes will not be served');
+} else if (shouldServeStatic) {
+  appLogger.warn(
+    { STATIC_DIR, candidates: staticCandidates },
+    'Static assets directory not found; frontend routes will not be served'
+  );
 }
 
 // 404处理

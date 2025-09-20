@@ -4,6 +4,27 @@ const { getTypedConfig } = require('../../../config/env-loader');
 // 获取类型化配置
 const typedConfig = getTypedConfig();
 
+const trustProxyEnv = process.env.TRUST_PROXY;
+const trustProxyValue = (() => {
+  if (trustProxyEnv === undefined || trustProxyEnv === '') {
+    return 1;
+  }
+
+  const lowered = trustProxyEnv.toLowerCase();
+  if (lowered === 'true') return true;
+  if (lowered === 'false') return false;
+
+  const numeric = Number(trustProxyEnv);
+  if (!Number.isNaN(numeric)) {
+    return numeric;
+  }
+
+  return trustProxyEnv;
+})();
+
+const hstsIncludeSubDomainsEnv = process.env.HSTS_INCLUDE_SUBDOMAINS;
+const hstsPreloadEnv = process.env.HSTS_PRELOAD;
+
 // Configuration object using centralized config
 export const config = {
   // Server configuration - 使用集中化配置
@@ -37,13 +58,19 @@ export const config = {
 
   // Security configuration
   security: {
-    trustProxy: process.env.TRUST_PROXY === 'true',
+    trustProxy: trustProxyValue,
     corsOrigins: process.env.CORS_ORIGINS?.split(',') || [typedConfig.server.frontendUrl],
     helmetOptions: {
       hsts: {
         maxAge: parseInt(process.env.HSTS_MAX_AGE || '31536000', 10), // 1 year
-        includeSubDomains: process.env.HSTS_INCLUDE_SUBDOMAINS === 'true',
-        preload: process.env.HSTS_PRELOAD === 'true',
+        includeSubDomains:
+          hstsIncludeSubDomainsEnv === undefined
+            ? true
+            : hstsIncludeSubDomainsEnv.toLowerCase() === 'true',
+        preload:
+          hstsPreloadEnv === undefined
+            ? true
+            : hstsPreloadEnv.toLowerCase() === 'true',
       },
     },
   },

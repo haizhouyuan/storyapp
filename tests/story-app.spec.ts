@@ -165,12 +165,18 @@ test.describe('儿童睡前故事App', () => {
     expect(choiceCount).toBeGreaterThanOrEqual(1);
     expect(choiceCount).toBeLessThanOrEqual(3);
     
-    // 点击第一个选择
-    await choiceButtons.first().click();
-    
-    // 等待新的故事片段生成
-    await expect(page.locator('text=/故事正在继续/')).toBeVisible();
-    
+    // 点击第一个选择并等待故事生成接口返回，避免加载提示瞬间消失导致误判
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/generate-story') &&
+          response.request().method() === 'POST' &&
+          response.ok(),
+        { timeout: 15000 }
+      ),
+      choiceButtons.first().click(),
+    ]);
+
     // CI环境中使用模拟数据，响应更快
     console.log('故事生成测试完成 (使用模拟数据)');
   }, 30000); // 减少测试超时时间到30秒（CI环境使用模拟数据）

@@ -13,6 +13,19 @@ const config = {
   retries: 3
 };
 
+function resolveApiUrl(override) {
+  if (override?.apiUrl) {
+    return override.apiUrl;
+  }
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL;
+  }
+  if (process.env.API_URL) {
+    return process.env.API_URL;
+  }
+  return 'http://localhost:5001';
+}
+
 const testStories = [
   {
     title: '测试故事：小兔子的冒险',
@@ -87,7 +100,8 @@ async function healthCheck() {
   }
 }
 
-async function seedTestData() {
+async function seedTestData(options = {}) {
+  config.apiUrl = resolveApiUrl(options);
   console.log('🌱 开始创建CI测试种子数据...');
   console.log(`目标API: ${config.apiUrl}`);
   

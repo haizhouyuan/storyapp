@@ -37,6 +37,7 @@
     "@playwright/test": "^1.55.0",
     "axios": "^1.11.0",
     "concurrently": "^8.2.2",
-    "jest-util": "^30.0.5"
+    "jest-util": "^30.0.5",
+    "playwright": "^1.55.0"
   }
 }
