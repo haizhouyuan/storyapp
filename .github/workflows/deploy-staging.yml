@@ -16,7 +16,11 @@ jobs:
       github.event_name == 'workflow_run' &&
       github.event.workflow_run &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      github.event.workflow_run.event == 'pull_request' &&
+      (
+        secrets.STAGING_HOST != '' ||
+        secrets.PROD_HOST != ''
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
