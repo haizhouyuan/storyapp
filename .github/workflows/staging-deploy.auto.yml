@@ -1,0 +1,27 @@
+name: Deploy to Staging (auto)
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  call-reusable:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+    uses: ./.github/workflows/staging-deploy.reusable.yml
+    with:
+      branch: ${{ github.event.workflow_run.head_branch }}
+      sha:    ${{ github.event.workflow_run.head_sha }}
+      pr_number: ${{ github.event.workflow_run.pull_requests[0].number }}
+    secrets:
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}
+      STAGING_HOST: ${{ secrets.STAGING_HOST }}
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+      STAGING_DEEPSEEK_API_KEY: ${{ secrets.STAGING_DEEPSEEK_API_KEY }}
+      STAGING_MONGO_URI: ${{ secrets.STAGING_MONGO_URI }}
