@@ -6,7 +6,8 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 
 # 设置npm镜像源
-RUN npm config set registry $NPM_REGISTRY
+RUN npm install -g npm@10.9.3 \
+  && npm config set registry $NPM_REGISTRY
 
 # 复制根与子包的 package.json（让 npm 能解析 workspaces）
 COPY package.json package-lock.json ./
@@ -46,6 +47,9 @@ WORKDIR /app
 # 创建非root用户
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S storyapp -u 1001
+
+# 升级npm以获取最新安全修复
+RUN npm install -g npm@10.9.3
 
 # 复制package文件和安装生产依赖
 COPY package.json package-lock.json ./
