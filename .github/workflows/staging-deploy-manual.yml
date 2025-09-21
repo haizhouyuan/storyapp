@@ -13,10 +13,6 @@ env:
   STAGING_CONTAINER: storyapp-staging
   STAGING_NETWORK: storyapp_storyapp
 
-concurrency:
-  group: staging-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
