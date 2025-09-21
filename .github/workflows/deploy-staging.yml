@@ -1,21 +1,24 @@
 name: Deploy to Staging
 
 on:
-  workflow_run:
-    workflows: ["CI/CD Pipeline"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       branch:
         description: 'Branch to deploy to staging'
         required: false
         default: 'master'
-        type: string
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
 
 env:
   STAGING_PORT: 5002
   STAGING_CONTAINER: storyapp-staging
   STAGING_NETWORK: storyapp_storyapp
+
+concurrency:
+  group: staging-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   deploy:
