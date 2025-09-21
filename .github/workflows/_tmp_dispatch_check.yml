@@ -1,0 +1,13 @@
+name: _tmp_dispatch_check
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to echo
+        required: false
+        default: master
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "branch=${{ inputs.branch }} ref=${{ github.ref_name }}"
