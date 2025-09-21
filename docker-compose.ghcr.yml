@@ -4,7 +4,7 @@
 services:
   app:
     # 使用GHCR镜像而非本地构建
-    image: ghcr.io/haizhouyuan/storyapp:${APP_TAG:-sha-latest}
+    image: ghcr.io/haizhouyuan/storyapp:${APP_TAG:-latest}
     container_name: storyapp-ghcr
     
     # 生产环境变量

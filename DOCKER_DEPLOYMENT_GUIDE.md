@@ -161,7 +161,7 @@ services:
 ```yaml
 services:
   app:
-    image: ghcr.io/haizhouyuan/storyapp:${APP_TAG:-sha-latest}
+    image: ghcr.io/haizhouyuan/storyapp:${APP_TAG:-latest}
     container_name: storyapp-ghcr
     environment:
       - NODE_ENV=production
@@ -266,7 +266,7 @@ LOG_LEVEL=info
 LOG_RETENTION_DAYS=30
 
 # GHCR镜像标签
-APP_TAG=sha-latest
+APP_TAG=latest
 ```
 
 ## 🎯 CI/CD 集成
@@ -292,13 +292,13 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker build -t ghcr.io/${{ github.repository }}:sha-${GITHUB_SHA::7} .
-          docker build -t ghcr.io/${{ github.repository }}:sha-latest .
+          docker build -t ghcr.io/${{ github.repository }}:latest .
           docker push ghcr.io/${{ github.repository }}:sha-${GITHUB_SHA::7}
-          docker push ghcr.io/${{ github.repository }}:sha-latest
+          docker push ghcr.io/${{ github.repository }}:latest
       
       - name: GHCR Image Verification
         run: |
-          docker run --rm -d -p 5002:5000 --name test-app ghcr.io/${{ github.repository }}:sha-latest
+          docker run --rm -d -p 5002:5000 --name test-app ghcr.io/${{ github.repository }}:latest
           sleep 10
           curl -f http://localhost:5002/api/health || exit 1
           docker stop test-app
@@ -308,7 +308,7 @@ jobs:
 
 ```bash
 # 标签命名规范
-ghcr.io/haizhouyuan/storyapp:sha-latest      # 最新构建
+ghcr.io/haizhouyuan/storyapp:latest      # 最新构建
 ghcr.io/haizhouyuan/storyapp:sha-a1b2c3d     # 特定提交
 ghcr.io/haizhouyuan/storyapp:v1.0.0          # 版本标签
 ```

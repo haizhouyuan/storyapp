@@ -28,10 +28,6 @@ jobs:
           github.event.workflow_run.event == 'pull_request'
         ) ||
         github.event_name == 'workflow_dispatch'
-      ) &&
-      (
-        secrets.STAGING_HOST != '' ||
-        secrets.PROD_HOST != ''
       )
     runs-on: ubuntu-latest
     permissions:
@@ -65,17 +61,64 @@ jobs:
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "safe_branch=$SAFE_BRANCH" >> $GITHUB_OUTPUT
 
+      - name: Validate staging secrets
+        id: secrets
+        env:
+          HOST: ${{ secrets.STAGING_HOST }}
+          USER: ${{ secrets.STAGING_USER }}
+          KEY: ${{ secrets.STAGING_SSH_KEY }}
+          GHCR_TOKEN_PRESENT: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for var in HOST USER KEY; do
+            if [ -z "${!var}" ]; then
+              missing="$missing $var"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo "status=skip" >> $GITHUB_OUTPUT
+            echo "message=缺少以下staging密钥:$missing" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [ -z "$GHCR_TOKEN_PRESENT" ]; then
+            echo "status=skip" >> $GITHUB_OUTPUT
+            echo "message=缺少镜像拉取凭据 (GHCR_PAT/GITHUB_TOKEN)" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "status=ready" >> $GITHUB_OUTPUT
+          echo "message=" >> $GITHUB_OUTPUT
+
+      - name: Compute image tags
+        if: steps.secrets.outputs.status == 'ready'
+        id: tags
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHA="${{ github.sha }}"
+          else
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          fi
+          SHORT=$(echo "$SHA" | cut -c1-7)
+          echo "sha_short=$SHORT" >> $GITHUB_OUTPUT
+          echo "image_tag=sha-$SHORT" >> $GITHUB_OUTPUT
+          echo "fallback_tag=latest" >> $GITHUB_OUTPUT
+
       - name: Prepare staging env file
+        if: steps.secrets.outputs.status == 'ready'
         id: envfile
         env:
-          DEFAULT_HOST: ${{ secrets.STAGING_HOST || secrets.PROD_HOST }}
+          DEFAULT_HOST: ${{ secrets.STAGING_HOST }}
           EXPLICIT_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
           DEEPSEEK_KEY: ${{ secrets.STAGING_DEEPSEEK_API_KEY || secrets.DEEPSEEK_API_KEY }}
           MONGO_URI: ${{ secrets.STAGING_MONGO_URI || 'mongodb://mongo:27017/storyapp_staging' }}
         run: |
           set -euo pipefail
           if [ -z "$DEFAULT_HOST" ]; then
-            echo "❌ 缺少 STAGING_HOST 或 PROD_HOST"
+            echo "❌ 缺少 STAGING_HOST"
             exit 1
           fi
 
@@ -101,16 +144,17 @@ EOF
           echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
 
       - name: Deploy to staging host
+        if: steps.secrets.outputs.status == 'ready'
         id: deploy
         env:
-          SSH_HOST: ${{ secrets.STAGING_HOST || secrets.PROD_HOST }}
-          SSH_USER: ${{ secrets.STAGING_USER || secrets.PROD_USER }}
-          SSH_KEY: ${{ secrets.STAGING_SSH_KEY || secrets.PROD_SSH_KEY }}
+          SSH_HOST: ${{ secrets.STAGING_HOST }}
+          SSH_USER: ${{ secrets.STAGING_USER }}
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
           GHCR_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
           IMAGE_REPO: ghcr.io/${{ github.repository }}
-          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
-          FALLBACK_TAG: sha-latest
+          IMAGE_TAG: ${{ steps.tags.outputs.image_tag }}
+          FALLBACK_TAG: ${{ steps.tags.outputs.fallback_tag }}
           ENV_FILE: ${{ steps.envfile.outputs.env_path }}
           BASE_URL: ${{ steps.envfile.outputs.base_url }}
         run: |
@@ -211,12 +255,17 @@ EOSSH
       - name: Collect staging logs
         if: always()
         env:
-          SSH_HOST: ${{ secrets.STAGING_HOST || secrets.PROD_HOST }}
-          SSH_USER: ${{ secrets.STAGING_USER || secrets.PROD_USER }}
-          SSH_KEY: ${{ secrets.STAGING_SSH_KEY || secrets.PROD_SSH_KEY }}
+          SECRET_STATUS: ${{ steps.secrets.outputs.status || 'skip' }}
+          SSH_HOST: ${{ secrets.STAGING_HOST }}
+          SSH_USER: ${{ secrets.STAGING_USER }}
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
           STAGING_CONTAINER: ${{ env.STAGING_CONTAINER }}
           STAGING_PORT: ${{ env.STAGING_PORT }}
         run: |
+          if [ "$SECRET_STATUS" != "ready" ]; then
+            echo "跳过日志收集：staging密钥未就绪"
+            exit 0
+          fi
           set -euo pipefail
           mkdir -p ~/.ssh staging-logs
           echo "$SSH_KEY" > ~/.ssh/staging_key
@@ -237,7 +286,7 @@ EOSSH
             "rm -f /tmp/staging-app.log /tmp/staging-nginx.log /tmp/staging-ps.txt /tmp/staging-inspect.json"
 
       - name: Upload staging logs
-        if: always()
+        if: always() && steps.secrets.outputs.status == 'ready'
         uses: actions/upload-artifact@v4
         with:
           name: staging-logs
@@ -251,10 +300,13 @@ EOSSH
           script: |
             const prNumber = Number(process.env.PR_NUMBER);
             const status = process.env.STATUS;
+            const secretStatus = process.env.SECRET_STATUS || 'skip';
             const branch = process.env.BRANCH;
             const url = process.env.URL;
             let body;
-            if (status === 'success' && url) {
+            if (secretStatus !== 'ready') {
+              body = `ℹ️ **Staging 部署被跳过**\n\n原因: ${process.env.SECRET_MESSAGE || '缺少staging密钥或凭据'}\n- 分支: \`${branch}\`\n- 工作流运行: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            } else if (status === 'success' && url) {
               body = `✅ **Staging 部署成功**\n\n- 分支: \`${branch}\`\n- 预览地址: ${url}\n- 工作流运行: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             } else {
               body = `❌ **Staging 部署失败**\n\n请查看运行日志: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
@@ -268,6 +320,8 @@ EOSSH
         env:
           PR_NUMBER: ${{ steps.meta.outputs.pr }}
           STATUS: ${{ steps.deploy.outputs.status || 'failure' }}
+          SECRET_STATUS: ${{ steps.secrets.outputs.status || 'skip' }}
+          SECRET_MESSAGE: ${{ steps.secrets.outputs.message || '' }}
           BRANCH: ${{ steps.meta.outputs.branch }}
           URL: ${{ steps.deploy.outputs.url || '' }}
 
@@ -276,7 +330,13 @@ EOSSH
         uses: actions/github-script@v7
         with:
           script: |
-            const state = process.env.STATUS === 'success' ? 'success' : 'failure';
+            const secretStatus = process.env.SECRET_STATUS || 'skip';
+            let state;
+            if (secretStatus !== 'ready') {
+              state = 'inactive';
+            } else {
+              state = process.env.STATUS === 'success' ? 'success' : 'failure';
+            }
             const deployment = await github.rest.repos.createDeployment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -291,9 +351,10 @@ EOSSH
               deployment_id: deployment.data.id,
               state,
               target_url: process.env.URL || undefined,
-              description: `Staging deployment ${state}`,
+              description: secretStatus !== 'ready' ? 'Staging secrets missing，deployment skipped' : `Staging deployment ${state}`,
               environment: 'staging'
             });
         env:
           STATUS: ${{ steps.deploy.outputs.status || 'failure' }}
+          SECRET_STATUS: ${{ steps.secrets.outputs.status || 'skip' }}
           URL: ${{ steps.deploy.outputs.url || '' }}

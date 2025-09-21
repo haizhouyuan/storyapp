@@ -1,5 +1,5 @@
 # 改进的Dockerfile - 适配NPM Workspaces
-ARG NODE_IMAGE=node:20-alpine
+ARG NODE_IMAGE=node:20-alpine3.20
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 FROM ${NODE_IMAGE} AS builder

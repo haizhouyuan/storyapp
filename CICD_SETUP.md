@@ -49,7 +49,7 @@
 - `GHCR_PAT`: GitHub Personal Access Token (权限: `read:packages`)
 
 ### Docker配置
-- **生产镜像**: `ghcr.io/haizhouyuan/storyapp:sha-latest`
+- **生产镜像**: `ghcr.io/haizhouyuan/storyapp:latest`
 - **多阶段构建**: 前端(React) → 后端(Node.js) → 生产运行时
 - **健康检查**: 自动监控应用状态
 - **非root用户**: 安全最佳实践

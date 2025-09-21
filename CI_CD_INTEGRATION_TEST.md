@@ -18,11 +18,11 @@
   - Image pushed to ghcr.io/haizhouyuan/storyapp
 
 - **Container Registry Push**: ✅ SUCCESS
-  - Tags: `master`, `sha-latest`, `sha-{commit}`
+  - Tags: `master`, `latest`, `sha-{commit}`
   - All tags pushed successfully to GHCR
 
 - **Security Scanning**: ✅ SUCCESS  
-  - Trivy scan now using correct image tag (`sha-latest`)
+  - Trivy scan now targeting the `latest` image tag by default
   - Scan completes without blocking CI pipeline
   - Security reports generated successfully
 
@@ -68,7 +68,7 @@ The entire CI/CD pipeline is now fully functional:
 
 3. **Initial deployment**:
    - Use "Deploy to Production (ECS)" workflow
-   - Input image tag (e.g., `sha-latest`)
+   - Input image tag (例如 `latest` 或指定的 `sha-{commit}`)
    - Monitor deployment via GitHub Actions
 
 ## Architecture Achievement
