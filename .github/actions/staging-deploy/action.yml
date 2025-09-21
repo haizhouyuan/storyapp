@@ -1,0 +1,105 @@
+name: staging-deploy
+runs:
+  using: composite
+  steps:
+    - name: Resolve image parameters
+      id: meta
+      shell: bash
+      env:
+        IN_BRANCH: ${{ inputs.branch }}
+        IN_SHA:    ${{ inputs.sha }}
+        IN_IMAGE:  ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        TAG="${IN_SHA:-$IN_BRANCH}"
+        IMAGE="${IN_IMAGE:-ghcr.io/${{ github.repository }}/storyapp}"
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+        echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+    - name: Docker login (optional)
+      shell: bash
+      env:
+        GHCR_PAT: ${{ env.GHCR_PAT }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${GHCR_PAT:-}" ]]; then
+          echo "$GHCR_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        else
+          echo "No GHCR_PAT provided; skip docker login"
+        fi
+
+    - name: Build image
+      shell: bash
+      env:
+        IMAGE: ${{ steps.meta.outputs.image }}
+        TAG:   ${{ steps.meta.outputs.tag }}
+      run: |
+        set -euo pipefail
+        DOCKER_BUILDKIT=1 docker build -t "${IMAGE}:${TAG}" .
+
+    - name: Push image (optional)
+      shell: bash
+      env:
+        IMAGE: ${{ steps.meta.outputs.image }}
+        TAG:   ${{ steps.meta.outputs.tag }}
+        GHCR_PAT: ${{ env.GHCR_PAT }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${GHCR_PAT:-}" ]]; then
+          docker push "${IMAGE}:${TAG}"
+        else
+          echo "Skip push (no GHCR_PAT)"
+        fi
+
+    - name: Deploy to Staging via SSH (optional)
+      shell: bash
+      env:
+        STAGING_HOST:    ${{ env.STAGING_HOST }}
+        STAGING_USER:    ${{ env.STAGING_USER }}
+        STAGING_SSH_KEY: ${{ env.STAGING_SSH_KEY }}
+        GHCR_PAT:        ${{ env.GHCR_PAT }}
+        IMAGE:           ${{ steps.meta.outputs.image }}
+        TAG:             ${{ steps.meta.outputs.tag }}
+        ACTOR:           ${{ github.actor }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${STAGING_SSH_KEY:-}" || -z "${STAGING_HOST:-}" ]]; then
+          echo "Skip SSH deploy"
+          exit 0
+        fi
+        mkdir -p ~/.ssh && chmod 700 ~/.ssh
+        echo "$STAGING_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+        TARGET="${STAGING_USER:+$STAGING_USER@}$STAGING_HOST"
+        ssh -o StrictHostKeyChecking=no "$TARGET" 'command -v docker >/dev/null' || exit 1
+        if [[ -n "${GHCR_PAT:-}" ]]; then
+          ssh -o StrictHostKeyChecking=no "$TARGET" \
+            "echo '${GHCR_PAT}' | docker login ghcr.io -u '${ACTOR}' --password-stdin"
+        fi
+        ssh -o StrictHostKeyChecking=no "$TARGET" bash -s <<RMT
+          set -euo pipefail
+          IMAGE="${IMAGE}:${TAG}"
+          docker pull "$IMAGE" || true
+          docker stop storyapp || true
+          docker rm   storyapp || true
+          docker run -d --name storyapp -p 8080:8080 "$IMAGE"
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | head -n 2
+RMT
+
+    - name: Notice
+      shell: bash
+      env:
+        IMAGE: ${{ steps.meta.outputs.image }}
+        TAG:   ${{ steps.meta.outputs.tag }}
+      run: |
+        echo "::notice title=Deploy:: image=${IMAGE}:${TAG}"
+
+inputs:
+  branch:
+    description: Branch to deploy
+    required: true
+  sha:
+    description: Optional commit SHA
+    required: false
+  image:
+    description: Full image name
+    required: false

@@ -1,9 +1,15 @@
-name: Deploy to Staging (auto)
+name: Deploy to Staging (manual)
 
 on:
-  workflow_run:
-    workflows: ["CI/CD Pipeline"]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: false
+        default: master
+      sha:
+        description: Optional commit SHA
+        required: false
 
 permissions:
   contents: read
@@ -11,14 +17,20 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: staging-${{ inputs.sha != '' && inputs.sha || inputs.branch }}
+      cancel-in-progress: false
     steps:
-      - name: Deploy to staging automatically
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha != '' && inputs.sha || inputs.branch }}
+
+      - name: Deploy to staging
         uses: ./.github/actions/staging-deploy
         with:
-          branch: ${{ github.event.workflow_run.head_branch }}
-          sha:    ${{ github.event.workflow_run.head_sha }}
+          branch: ${{ inputs.branch }}
+          sha:    ${{ inputs.sha }}
         env:
           GHCR_PAT:            ${{ secrets.GHCR_PAT }}
           STAGING_HOST:        ${{ secrets.STAGING_HOST }}
