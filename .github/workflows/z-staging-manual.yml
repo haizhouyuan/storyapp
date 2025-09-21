@@ -1,4 +1,4 @@
-name: Z Deploy to Staging (manual-min)
+name: Z Deploy to Staging (manual)
 
 on:
   workflow_dispatch:
@@ -11,6 +11,10 @@ on:
         description: Commit SHA (optional)
         required: false
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   echo:
     runs-on: ubuntu-latest
@@ -21,6 +25,16 @@ jobs:
 
   call-reusable:
     needs: echo
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "simulating reusable call"
+    uses: ./.github/workflows/staging-deploy.reusable.yml
+    with:
+      branch: ${{ inputs.branch || 'master' }}
+      sha:    ${{ inputs.sha }}
+      pr_number: ''
+    secrets:
+      GHCR_PAT:        ${{ secrets.GHCR_PAT }}
+      STAGING_HOST:    ${{ secrets.STAGING_HOST }}
+      STAGING_USER:    ${{ secrets.STAGING_USER }}
+      STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+      STAGING_DEEPSEEK_API_KEY: ${{ secrets.STAGING_DEEPSEEK_API_KEY }}
+      STAGING_MONGO_URI: ${{ secrets.STAGING_MONGO_URI }}
