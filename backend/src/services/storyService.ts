@@ -104,12 +104,39 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
   const startTime = Date.now();
   
   try {
-    const { topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
+    const { topic: rawTopic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding } = params;
+    let topic = (rawTopic || '').trim();
     
     // 验证输入参数
-    if (!topic || topic.trim().length === 0) {
+    if (!topic) {
       const customError = new Error('story_topic_required');
       (customError as any).code = 'VALIDATION_ERROR';
+      throw customError;
+    }
+    
+    // 加强输入验证：主题长度限制，超出时自动截断
+    if (topic.length > 100) {
+      logger.warn(EventType.STORY_GENERATION_START, '故事主题过长，已自动截断', {
+        originalLength: topic.length,
+        truncatedLength: 100
+      }, sessionId);
+
+      topic = topic.slice(0, 100);
+    }
+    
+    // 儿童内容安全检查：过滤不适当关键词
+    const inappropriateKeywords = [
+      '暴力', '打架', '血', '死亡', '杀', '恐怖', '害怕', '鬼', '吓人',
+      '战争', '武器', '刀', '枪', '炸', '毒', '酒', '烟', '赌博'
+    ];
+    const lowerTopic = topic.toLowerCase();
+    const foundInappropriate = inappropriateKeywords.find(keyword => 
+      lowerTopic.includes(keyword) || topic.includes(keyword)
+    );
+    
+    if (foundInappropriate) {
+      const customError = new Error(`story_topic_inappropriate: ${foundInappropriate}`);
+      (customError as any).code = 'CONTENT_SAFETY_ERROR';
       throw customError;
     }
     
@@ -312,13 +339,10 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       } catch (retryError) {
         logger.error(EventType.JSON_PARSE_ERROR, 'JSON重试也失败，使用fallback策略', retryError as Error, sessionId);
         
-        // 如果重试也失败，使用更智能的fallback策略
-        const fallbackStory = aiResponse.length > 800 ? aiResponse.substring(0, 800) + '...' : aiResponse;
-        parsedResponse = {
-          storySegment: fallbackStory,
-          choices: ['继续冒险探索', '寻找新的线索', '回到安全地带'],
-          isEnding: false
-        };
+        // 对于儿童应用，JSON解析失败时不使用原始AI响应
+        // 而是抛出错误，确保内容安全性
+        logger.error(EventType.JSON_PARSE_ERROR, 'JSON解析彻底失败，为确保儿童内容安全，拒绝使用原始响应', retryError as Error, sessionId);
+        throw new Error('AI响应格式无效，无法安全解析，请重新尝试');
       }
     }
 

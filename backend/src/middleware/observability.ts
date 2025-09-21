@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -12,6 +12,8 @@ import { logHttpRequest, logError, createLogger } from '../config/logger';
 import { securityConfig, rateLimitConfig } from '../config';
 
 const logger = createLogger('middleware');
+
+const isTestEnvironment = process.env.NODE_ENV === 'test';
 
 // Security middleware using Helmet
 const baseHelmetOptions = {
@@ -45,7 +47,9 @@ const helmetOptions: Record<string, unknown> = {
   ...userHelmetOptions,
 };
 
-if (hstsOverride === false) {
+const disableUpgradeInsecure = process.env.DISABLE_UPGRADE_INSECURE === 'true' || isTestEnvironment;
+
+if (hstsOverride === false || (isTestEnvironment && hstsOverride !== true)) {
   helmetOptions.strictTransportSecurity = false;
 } else {
   helmetOptions.strictTransportSecurity = {
@@ -54,7 +58,7 @@ if (hstsOverride === false) {
   };
 }
 
-if (process.env.DISABLE_UPGRADE_INSECURE === 'true') {
+if (disableUpgradeInsecure) {
   const directives = (helmetOptions.contentSecurityPolicy as { directives?: Record<string, unknown> })?.directives;
   if (directives) {
     directives['upgrade-insecure-requests'] = null;
@@ -78,7 +82,15 @@ export const compressionMiddleware = compression({
 });
 
 // Rate limiting middleware
+const isRateLimitingDisabled = isTestEnvironment || process.env.DISABLE_RATE_LIMIT === '1';
+
+const passthroughRateLimiter: RequestHandler = (_req, _res, next) => next();
+
 export const createRateLimiter = (windowMs: number, max: number, message: string, keyPrefix: string) => {
+  if (isRateLimitingDisabled) {
+    return passthroughRateLimiter;
+  }
+
   return rateLimit({
     windowMs,
     max,

@@ -1,5 +1,8 @@
 // 测试环境设置文件
 import { config } from 'dotenv';
+import { MongoMemoryServer } from 'mongodb-memory-server';
+
+const { resetLoadState } = require('../../config/env-loader');
 
 // 模拟axios以避免ES模块问题
 jest.mock('axios', () => ({
@@ -40,15 +43,30 @@ delete process.env.DEEPSEEK_API_KEY;
 // 加载测试环境变量
 config({ path: '.env.test' });
 
-// 设置测试超时时间
-jest.setTimeout(10000);
+// 设置测试超时时间（内存Mongo首次下载可能较慢）
+jest.setTimeout(120000);
 
 // 全局测试设置
 beforeAll(async () => {
   // 设置测试环境
   process.env.NODE_ENV = 'test';
+
+  const mongoServer = await MongoMemoryServer.create();
+  const uri = mongoServer.getUri();
+
+  process.env.MONGODB_URI = uri;
+  process.env.MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'storyapp_test';
+
+  resetLoadState();
+  
+  (global as typeof globalThis & { __MONGO_MEMORY__?: MongoMemoryServer }).__MONGO_MEMORY__ = mongoServer;
 });
 
 afterAll(async () => {
   // 清理测试环境
+  const globalWithMongo = global as typeof globalThis & { __MONGO_MEMORY__?: MongoMemoryServer };
+  if (globalWithMongo.__MONGO_MEMORY__) {
+    await globalWithMongo.__MONGO_MEMORY__.stop();
+    delete globalWithMongo.__MONGO_MEMORY__;
+  }
 });

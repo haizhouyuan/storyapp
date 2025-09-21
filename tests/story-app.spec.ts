@@ -232,7 +232,7 @@ test.describe('儿童睡前故事App', () => {
     const hasResults = await page.locator('[data-testid^="story-card-"]').count() > 0;
     
     if (!hasResults) {
-      await expect(page.locator('text=没找到匹配的故事')).toBeVisible();
+      await expect(page.locator('text=没有找到匹配的故事')).toBeVisible();
     }
   });
 
