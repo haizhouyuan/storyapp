@@ -18,3 +18,9 @@ jobs:
       - run: |
           echo "branch=${{ inputs.branch }}"
           echo "sha=${{ inputs.sha }}"
+
+  call-reusable:
+    needs: echo
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "simulating reusable call"
