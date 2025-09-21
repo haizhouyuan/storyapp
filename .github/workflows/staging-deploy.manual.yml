@@ -18,9 +18,9 @@ permissions:
 jobs:
   deploy:
     uses: ./.github/workflows/staging-deploy.reusable.yml
-    with:
-      branch: ${{ inputs.branch || 'master' }}
-      sha:    ${{ inputs.sha }}
+   with:
+      branch: ${{ github.event.inputs.branch != '' && github.event.inputs.branch || 'master' }}
+      sha:    ${{ github.event.inputs.sha }}
       pr_number: ''
     secrets:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
