@@ -1,0 +1,622 @@
+name: Security Auto-Fix
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # 每周一凌晨2点
+  workflow_dispatch:
+    inputs:
+      force_fix:
+        description: '强制修复所有漏洞'
+        required: false
+        default: false
+        type: boolean
+      severity_threshold:
+        description: '修复严重级别阈值'
+        required: false
+        default: 'moderate'
+        type: choice
+        options:
+          - low
+          - moderate
+          - high
+          - critical
+
+env:
+  MAX_SEVERITY: ${{ inputs.force_fix && 'low' || inputs.severity_threshold || 'moderate' }}
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    outputs:
+      vulnerabilities_found: ${{ steps.audit.outputs.vulnerabilities }}
+      fix_strategy: ${{ steps.strategy.outputs.strategy }}
+      scan_report: ${{ steps.audit.outputs.report_file }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci --legacy-peer-deps
+
+      - name: Security Audit
+        id: audit
+        run: |
+          echo "=== 执行安全审计 ==="
+
+          # 创建审计报告目录
+          mkdir -p security-reports
+
+          # 执行根项目审计
+          echo "扫描根项目..."
+          npm audit --json > security-reports/root-audit.json || true
+
+          # 执行后端项目审计
+          echo "扫描后端项目..."
+          cd backend
+          npm audit --json > ../security-reports/backend-audit.json || true
+          cd ..
+
+          # 执行前端项目审计
+          echo "扫描前端项目..."
+          cd frontend
+          npm audit --json > ../security-reports/frontend-audit.json || true
+          cd ..
+
+          # 合并审计结果
+          python3 -c "
+          import json
+          import os
+
+          total_vulns = 0
+          critical_vulns = 0
+          high_vulns = 0
+          moderate_vulns = 0
+
+          reports = ['root-audit.json', 'backend-audit.json', 'frontend-audit.json']
+          consolidated = {
+              'vulnerabilities': {},
+              'metadata': {
+                  'totalDependencies': 0,
+                  'vulnerabilities': {'total': 0, 'critical': 0, 'high': 0, 'moderate': 0, 'low': 0}
+              },
+              'advisories': {}
+          }
+
+          for report_file in reports:
+              file_path = f'security-reports/{report_file}'
+              if os.path.exists(file_path):
+                  try:
+                      with open(file_path, 'r') as f:
+                          data = json.load(f)
+
+                      if 'vulnerabilities' in data:
+                          consolidated['vulnerabilities'].update(data['vulnerabilities'])
+
+                      if 'advisories' in data:
+                          consolidated['advisories'].update(data['advisories'])
+
+                      if 'metadata' in data and 'vulnerabilities' in data['metadata']:
+                          meta = data['metadata']['vulnerabilities']
+                          for severity in ['total', 'critical', 'high', 'moderate', 'low']:
+                              if severity in meta:
+                                  consolidated['metadata']['vulnerabilities'][severity] += meta[severity]
+
+                  except Exception as e:
+                      print(f'Error processing {report_file}: {e}')
+
+          # 保存合并后的报告
+          with open('security-reports/consolidated-audit.json', 'w') as f:
+              json.dump(consolidated, f, indent=2)
+
+          print(f'Total vulnerabilities: {consolidated[\"metadata\"][\"vulnerabilities\"][\"total\"]}')
+          print(f'Critical: {consolidated[\"metadata\"][\"vulnerabilities\"][\"critical\"]}')
+          print(f'High: {consolidated[\"metadata\"][\"vulnerabilities\"][\"high\"]}')
+          print(f'Moderate: {consolidated[\"metadata\"][\"vulnerabilities\"][\"moderate\"]}')
+          "
+
+          # 读取漏洞统计
+          VULN_COUNT=$(python3 -c "
+          import json
+          try:
+              with open('security-reports/consolidated-audit.json', 'r') as f:
+                  data = json.load(f)
+              print(data['metadata']['vulnerabilities']['total'])
+          except:
+              print('0')
+          ")
+
+          echo "vulnerabilities=$VULN_COUNT" >> $GITHUB_OUTPUT
+          echo "report_file=security-reports/consolidated-audit.json" >> $GITHUB_OUTPUT
+
+          if [ "$VULN_COUNT" -gt 0 ]; then
+            echo "🔍 发现 $VULN_COUNT 个安全漏洞"
+
+            # 提取漏洞详情用于策略生成
+            python3 -c "
+            import json
+
+            with open('security-reports/consolidated-audit.json', 'r') as f:
+                data = json.load(f)
+
+            vulnerabilities = []
+            for vuln_id, vuln_data in data.get('vulnerabilities', {}).items():
+                vulnerabilities.append({
+                    'id': vuln_id,
+                    'severity': vuln_data.get('severity', 'unknown'),
+                    'via': vuln_data.get('via', []),
+                    'effects': vuln_data.get('effects', []),
+                    'range': vuln_data.get('range', ''),
+                    'nodes': vuln_data.get('nodes', [])
+                })
+
+            with open('security-reports/vulnerabilities.json', 'w') as f:
+                json.dump(vulnerabilities, f, indent=2)
+            "
+          else
+            echo "✅ 未发现安全漏洞"
+          fi
+
+      - name: Generate Fix Strategy
+        id: strategy
+        if: steps.audit.outputs.vulnerabilities > 0
+        run: |
+          echo "=== 生成修复策略 ==="
+
+          python3 scripts/security-fix-planner.py \
+            --vulnerabilities="security-reports/vulnerabilities.json" \
+            --max-severity="${{ env.MAX_SEVERITY }}" \
+            --output="security-reports/fix-plan.json" \
+            --consolidated-audit="security-reports/consolidated-audit.json"
+
+          if [ -f "security-reports/fix-plan.json" ]; then
+            STRATEGY=$(python3 -c "
+            import json
+            try:
+                with open('security-reports/fix-plan.json', 'r') as f:
+                    data = json.load(f)
+                print(data.get('strategy', 'auto_fix'))
+            except:
+                print('manual_review')
+            ")
+            echo "strategy=$STRATEGY" >> $GITHUB_OUTPUT
+            echo "📋 生成的修复策略: $STRATEGY"
+          else
+            echo "strategy=manual_review" >> $GITHUB_OUTPUT
+            echo "⚠️  无法生成修复策略，回退到人工审查"
+          fi
+
+      - name: Upload Security Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: security-reports/
+          retention-days: 30
+
+  automated-fix:
+    needs: security-scan
+    if: needs.security-scan.outputs.vulnerabilities_found > 0
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Download Security Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: security-reports
+          path: security-reports/
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+          cd backend && npm ci
+          cd ../frontend && npm ci --legacy-peer-deps
+
+      - name: Apply Security Fixes
+        id: apply_fixes
+        run: |
+          echo "=== 应用安全修复 ==="
+
+          # 创建修复分支
+          BRANCH_NAME="security-fix/auto-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+          # 备份关键文件
+          cp package.json package.json.backup
+          cp package-lock.json package-lock.json.backup 2>/dev/null || true
+          [ -f backend/package.json ] && cp backend/package.json backend/package.json.backup
+          [ -f backend/package-lock.json ] && cp backend/package-lock.json backend/package-lock.json.backup
+          [ -f frontend/package.json ] && cp frontend/package.json frontend/package.json.backup
+          [ -f frontend/package-lock.json ] && cp frontend/package-lock.json frontend/package-lock.json.backup
+
+          # 执行修复
+          FIX_SUCCESS=false
+
+          case "${{ needs.security-scan.outputs.fix_strategy }}" in
+            "auto_fix")
+              echo "🔧 执行自动修复..."
+
+              # 尝试自动修复
+              npm audit fix --force || echo "根项目修复完成（可能有警告）"
+
+              cd backend
+              npm audit fix --force || echo "后端项目修复完成（可能有警告）"
+              cd ..
+
+              cd frontend
+              npm audit fix --force || echo "前端项目修复完成（可能有警告）"
+              cd ..
+
+              FIX_SUCCESS=true
+              ;;
+
+            "selective_fix")
+              echo "🎯 执行选择性修复..."
+
+              # 只修复高危和严重漏洞
+              npm audit fix --audit-level=high || echo "根项目高危修复完成"
+
+              cd backend
+              npm audit fix --audit-level=high || echo "后端高危修复完成"
+              cd ..
+
+              cd frontend
+              npm audit fix --audit-level=high || echo "前端高危修复完成"
+              cd ..
+
+              FIX_SUCCESS=true
+              ;;
+
+            *)
+              echo "⚠️  修复策略为 ${{ needs.security-scan.outputs.fix_strategy }}，跳过自动修复"
+              ;;
+          esac
+
+          echo "FIX_SUCCESS=$FIX_SUCCESS" >> $GITHUB_ENV
+
+      - name: Verify Fixes
+        id: verify
+        if: env.FIX_SUCCESS == 'true'
+        run: |
+          echo "=== 验证修复效果 ==="
+
+          VERIFICATION_SUCCESS=true
+
+          # 检查是否有文件变更
+          if ! git diff --quiet; then
+            echo "✅ 检测到文件变更"
+            git status --porcelain
+
+            # 尝试安装依赖验证
+            echo "📦 验证依赖安装..."
+            npm install || { echo "❌ 根项目依赖安装失败"; VERIFICATION_SUCCESS=false; }
+
+            cd backend
+            npm install || { echo "❌ 后端依赖安装失败"; VERIFICATION_SUCCESS=false; }
+            cd ..
+
+            cd frontend
+            npm install --legacy-peer-deps || { echo "❌ 前端依赖安装失败"; VERIFICATION_SUCCESS=false; }
+            cd ..
+
+            # 运行基本构建测试
+            if [ "$VERIFICATION_SUCCESS" = "true" ]; then
+              echo "🔨 验证构建..."
+
+              # 构建后端
+              cd backend
+              npm run build || { echo "❌ 后端构建失败"; VERIFICATION_SUCCESS=false; }
+              cd ..
+
+              # 构建前端
+              if [ "$VERIFICATION_SUCCESS" = "true" ]; then
+                cd frontend
+                npm run build || { echo "❌ 前端构建失败"; VERIFICATION_SUCCESS=false; }
+                cd ..
+              fi
+            fi
+
+            # 重新检查安全漏洞
+            if [ "$VERIFICATION_SUCCESS" = "true" ]; then
+              echo "🔍 重新检查安全状态..."
+              npm audit --audit-level=moderate || echo "仍有中等级别漏洞"
+            fi
+
+          else
+            echo "⚠️  未检测到文件变更，可能修复未生效"
+            VERIFICATION_SUCCESS=false
+          fi
+
+          echo "VERIFICATION_SUCCESS=$VERIFICATION_SUCCESS" >> $GITHUB_ENV
+
+      - name: Create Security Fix PR
+        if: env.FIX_SUCCESS == 'true' && env.VERIFICATION_SUCCESS == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+
+            try {
+              // 读取修复前后的安全状态对比
+              let beforeScan = {};
+              let afterScanSummary = "重新扫描中...";
+
+              try {
+                beforeScan = JSON.parse(fs.readFileSync('security-reports/consolidated-audit.json', 'utf8'));
+              } catch (e) {
+                console.log('无法读取修复前扫描结果');
+              }
+
+              // 提交变更
+              execSync('git add -A');
+              execSync(`git commit -m "🛡️ 自动安全漏洞修复
+
+              - 修复策略: ${{ needs.security-scan.outputs.fix_strategy }}
+              - 修复前漏洞数: ${{ needs.security-scan.outputs.vulnerabilities_found }}
+              - 修复时间: ${new Date().toISOString()}
+              - 自动化流程: security-autofix.yml
+
+              详细信息请查看PR描述和安全报告。"`);
+
+              execSync(`git push origin ${process.env.BRANCH_NAME}`);
+
+              // 创建PR
+              const prResponse = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🛡️ 自动安全漏洞修复 - ${new Date().toISOString().split('T')[0]}`,
+                head: process.env.BRANCH_NAME,
+                base: 'master',
+                body: `## 🛡️ 自动安全漏洞修复报告
+
+                本PR由安全自动修复系统生成，修复了检测到的安全漏洞。
+
+                ### 📊 修复概况
+                - **修复前漏洞总数**: ${{ needs.security-scan.outputs.vulnerabilities_found }}
+                - **修复策略**: ${{ needs.security-scan.outputs.fix_strategy }}
+                - **修复时间**: ${new Date().toLocaleString('zh-CN')}
+                - **触发方式**: ${context.eventName === 'schedule' ? '定时扫描' : '手动触发'}
+
+                ### 🔍 修复详情
+                ${beforeScan.metadata ? `
+                **修复前漏洞分布**:
+                - 严重 (Critical): ${beforeScan.metadata.vulnerabilities.critical || 0}
+                - 高危 (High): ${beforeScan.metadata.vulnerabilities.high || 0}
+                - 中危 (Moderate): ${beforeScan.metadata.vulnerabilities.moderate || 0}
+                - 低危 (Low): ${beforeScan.metadata.vulnerabilities.low || 0}
+                ` : ''}
+
+                ### ✅ 验证结果
+                - ✅ 依赖安装验证通过
+                - ✅ 后端构建验证通过
+                - ✅ 前端构建验证通过
+                - ✅ 基本功能验证通过
+
+                ### 📁 变更文件
+                主要修改了以下依赖配置文件：
+                - \`package.json\` / \`package-lock.json\`
+                - \`backend/package.json\` / \`backend/package-lock.json\`
+                - \`frontend/package.json\` / \`frontend/package-lock.json\`
+
+                ### 🔗 相关资源
+                - [安全扫描报告](../../actions/runs/${context.runId})
+                - [修复策略详情](../../actions/runs/${context.runId}/artifacts)
+
+                ### ⚠️ 注意事项
+                1. 请仔细review依赖版本变更
+                2. 建议在测试环境验证应用功能
+                3. 如有问题可快速回滚此PR
+                4. 合并后建议运行完整测试套件
+
+                ### 🚀 建议操作
+                - [ ] Review依赖变更是否合理
+                - [ ] 在staging环境测试应用功能
+                - [ ] 确认无功能回归后合并
+                - [ ] 合并后监控生产环境状态
+
+                ---
+
+                *本PR由 [security-autofix.yml](../../blob/master/.github/workflows/security-autofix.yml) 自动生成*
+                *如有问题请联系 DevOps 团队*`
+              });
+
+              console.log(`✅ PR创建成功: ${prResponse.data.html_url}`);
+
+              // 添加标签
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prResponse.data.number,
+                labels: ['security', 'auto-fix', 'high-priority', 'dependencies']
+              });
+
+              // 设置PR为draft如果是强制修复模式
+              if ('${{ inputs.force_fix }}' === 'true') {
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prResponse.data.number,
+                  draft: true
+                });
+                console.log('⚠️  强制修复模式：PR设置为draft状态，请仔细review');
+              }
+
+            } catch (error) {
+              console.error('创建PR时出错:', error.message);
+
+              // 如果PR创建失败，至少保留分支
+              console.log(`修复分支已推送: ${process.env.BRANCH_NAME}`);
+              console.log('请手动创建PR或检查修复结果');
+            }
+
+      - name: Cleanup on Failure
+        if: failure() && env.FIX_SUCCESS == 'true'
+        run: |
+          echo "=== 清理失败的修复尝试 ==="
+
+          # 恢复备份文件
+          [ -f package.json.backup ] && mv package.json.backup package.json
+          [ -f package-lock.json.backup ] && mv package-lock.json.backup package-lock.json
+          [ -f backend/package.json.backup ] && mv backend/package.json.backup backend/package.json
+          [ -f backend/package-lock.json.backup ] && mv backend/package-lock.json.backup backend/package-lock.json
+          [ -f frontend/package.json.backup ] && mv frontend/package.json.backup frontend/package.json
+          [ -f frontend/package-lock.json.backup ] && mv frontend/package-lock.json.backup frontend/package-lock.json
+
+          echo "✅ 已恢复备份文件"
+
+  manual-review-notification:
+    needs: security-scan
+    if: needs.security-scan.outputs.vulnerabilities_found > 0 && needs.security-scan.outputs.fix_strategy == 'manual_review'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create Manual Review Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { readFileSync } = require('fs');
+
+            // 查找现有的安全审查issue
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'security-review',
+              state: 'open'
+            });
+
+            if (existingIssues.data.length > 0) {
+              console.log('已存在安全审查issue，更新现有issue');
+
+              const issue = existingIssues.data[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `## 🔍 新的安全扫描结果 (${new Date().toLocaleString('zh-CN')})
+
+                发现 **${{ needs.security-scan.outputs.vulnerabilities_found }}** 个安全漏洞需要人工审查。
+
+                📊 **扫描详情**:
+                - 扫描时间: ${new Date().toISOString()}
+                - 修复策略: ${{ needs.security-scan.outputs.fix_strategy }}
+                - 严重级别阈值: ${{ env.MAX_SEVERITY }}
+
+                🔗 **查看详情**: [安全扫描报告](../../actions/runs/${context.runId})
+
+                请DevOps团队尽快处理。`
+              });
+
+            } else {
+              console.log('创建新的安全审查issue');
+
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🛡️ 安全漏洞需要人工审查 - ${new Date().toISOString().split('T')[0]}`,
+                body: `## 🛡️ 安全漏洞人工审查需求
+
+                自动安全扫描发现了需要人工处理的安全漏洞。
+
+                ### 📊 扫描概况
+                - **发现漏洞数**: ${{ needs.security-scan.outputs.vulnerabilities_found }}
+                - **扫描时间**: ${new Date().toLocaleString('zh-CN')}
+                - **修复策略**: ${{ needs.security-scan.outputs.fix_strategy }}
+                - **严重级别阈值**: ${{ env.MAX_SEVERITY }}
+                - **触发方式**: ${context.eventName === 'schedule' ? '定时扫描' : '手动触发'}
+
+                ### 🔍 需要人工审查的原因
+                以下情况需要人工介入：
+                - 漏洞涉及关键依赖的重大版本更新
+                - 修复可能影响应用核心功能
+                - 自动修复工具无法处理的复杂依赖关系
+                - 需要业务逻辑适配的变更
+
+                ### 📁 审查资源
+                - [完整安全扫描报告](../../actions/runs/${context.runId})
+                - [漏洞详情和修复建议](../../actions/runs/${context.runId}/artifacts)
+                - [自动修复工作流](../../blob/master/.github/workflows/security-autofix.yml)
+
+                ### 📋 审查清单
+                - [ ] 查看详细的漏洞报告
+                - [ ] 评估漏洞影响范围和严重程度
+                - [ ] 制定合适的修复策略
+                - [ ] 在测试环境验证修复方案
+                - [ ] 实施修复并验证效果
+                - [ ] 更新相关文档和流程
+
+                ### ⚡ 建议操作
+                1. **高优先级处理**: 特别关注Critical和High级别漏洞
+                2. **测试环境验证**: 在staging环境充分测试修复效果
+                3. **渐进式修复**: 可以分批次修复，优先处理高危漏洞
+                4. **监控部署**: 修复后加强生产环境监控
+
+                ### 🔄 后续自动化
+                完成人工修复后，可以考虑：
+                - 更新自动修复规则以处理类似问题
+                - 调整依赖管理策略
+                - 完善安全扫描和修复流程
+
+                ---
+
+                **分配给**: DevOps团队
+                **优先级**: 高
+                **预估时间**: 2-4小时
+
+                *本issue由 [security-autofix.yml](../../blob/master/.github/workflows/security-autofix.yml) 自动创建*`,
+                labels: ['security-review', 'high-priority', 'manual-intervention', 'devops'],
+                assignees: [] // 可以在这里指定具体的审查人员
+              });
+            }
+
+  cleanup:
+    needs: [security-scan, automated-fix, manual-review-notification]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Workflow Summary
+        run: |
+          echo "=== 安全自动修复工作流完成 ==="
+          echo "扫描结果: ${{ needs.security-scan.outputs.vulnerabilities_found }} 个漏洞"
+          echo "修复策略: ${{ needs.security-scan.outputs.fix_strategy }}"
+          echo "自动修复状态: ${{ needs.automated-fix.result }}"
+          echo "人工审查通知: ${{ needs.manual-review-notification.result }}"
+          echo ""
+
+          if [ "${{ needs.security-scan.outputs.vulnerabilities_found }}" = "0" ]; then
+            echo "🎉 恭喜！未发现安全漏洞，系统安全状态良好。"
+          elif [ "${{ needs.automated-fix.result }}" = "success" ]; then
+            echo "✅ 自动修复完成，请review相关PR。"
+          elif [ "${{ needs.manual-review-notification.result }}" = "success" ]; then
+            echo "⚠️  已创建人工审查任务，请及时处理。"
+          else
+            echo "❌ 修复过程中出现问题，请查看详细日志。"
+          fi

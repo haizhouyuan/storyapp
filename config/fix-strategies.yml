@@ -1,0 +1,217 @@
+# AutoFix修复策略配置文件
+# 定义不同级别的修复策略和错误类型映射
+
+fix_strategies:
+  level_1_auto:
+    name: "全自动修复"
+    description: "低风险、高置信度的自动修复"
+    criteria:
+      confidence: ">= 0.9"
+      risk_score: "<= 0.3"
+      complexity: "low"
+    actions:
+      - run_fix_immediately
+      - verify_with_tests
+      - auto_commit
+    max_execution_time: 300  # 5分钟
+    backup_required: true
+
+  level_2_assisted:
+    name: "辅助修复"
+    description: "中等风险，需要部分人工确认"
+    criteria:
+      confidence: ">= 0.7"
+      risk_score: "<= 0.6"
+      complexity: "medium"
+    actions:
+      - generate_fix_suggestion
+      - create_draft_pr
+      - request_review
+    max_execution_time: 600  # 10分钟
+    backup_required: true
+
+  level_3_manual:
+    name: "手动处理"
+    description: "高风险或复杂情况，需要人工处理"
+    criteria:
+      confidence: "< 0.7"
+      risk_score: "> 0.6"
+      complexity: "high"
+    actions:
+      - create_detailed_analysis
+      - notify_team
+      - provide_investigation_guide
+    backup_required: true
+
+# 错误类型到修复策略的映射
+error_type_mapping:
+  compilation_error:
+    default_level: "level_1_auto"
+    special_cases:
+      - pattern: "circular dependency"
+        level: "level_2_assisted"
+        reason: "需要重构代码结构"
+      - pattern: "missing peer dependency"
+        level: "level_1_auto"
+        reason: "简单依赖安装"
+      - pattern: "module not found"
+        level: "level_1_auto"
+        reason: "安装缺失模块"
+      - pattern: "typescript config"
+        level: "level_2_assisted"
+        reason: "配置文件修改需要审查"
+
+  type_error:
+    default_level: "level_1_auto"
+    special_cases:
+      - pattern: "complex generic"
+        level: "level_2_assisted"
+        reason: "复杂泛型类型需要仔细处理"
+      - pattern: "interface extension"
+        level: "level_2_assisted"
+        reason: "接口变更可能影响其他代码"
+      - pattern: "property does not exist"
+        level: "level_1_auto"
+        reason: "简单属性类型修复"
+
+  test_failure:
+    default_level: "level_2_assisted"
+    special_cases:
+      - pattern: "timeout"
+        level: "level_1_auto"
+        reason: "简单超时配置调整"
+      - pattern: "assertion failed"
+        level: "level_3_manual"
+        reason: "业务逻辑问题需要人工分析"
+      - pattern: "mock.*not called"
+        level: "level_2_assisted"
+        reason: "测试逻辑调整"
+      - pattern: "snapshot.*mismatch"
+        level: "level_1_auto"
+        reason: "快照更新"
+
+  security_vulnerability:
+    default_level: "level_1_auto"
+    special_cases:
+      - severity: "critical"
+        level: "level_1_auto"
+        reason: "严重漏洞需要立即修复"
+      - severity: "high"
+        level: "level_2_assisted"
+        reason: "高危漏洞需要审查影响"
+      - pattern: "breaking change"
+        level: "level_3_manual"
+        reason: "破坏性变更需要仔细评估"
+      - pattern: "major version"
+        level: "level_2_assisted"
+        reason: "主版本更新需要兼容性检查"
+
+  syntax_error:
+    default_level: "level_1_auto"
+    special_cases:
+      - pattern: "unexpected token"
+        level: "level_1_auto"
+        reason: "语法修复通常安全"
+      - pattern: "missing semicolon"
+        level: "level_1_auto"
+        reason: "简单格式修复"
+
+  lint_error:
+    default_level: "level_1_auto"
+    special_cases:
+      - pattern: "no-unused-vars"
+        level: "level_2_assisted"
+        reason: "删除变量可能影响功能"
+      - pattern: "prefer-const"
+        level: "level_1_auto"
+        reason: "变量声明优化"
+
+  build_error:
+    default_level: "level_2_assisted"
+    special_cases:
+      - pattern: "memory.*limit"
+        level: "level_2_assisted"
+        reason: "内存配置调整"
+      - pattern: "webpack.*config"
+        level: "level_2_assisted"
+        reason: "构建配置变更需要审查"
+      - pattern: "out of space"
+        level: "level_3_manual"
+        reason: "磁盘空间问题需要人工处理"
+
+# 修复优先级配置
+priority_rules:
+  high_priority:
+    - security_vulnerability
+    - critical_compilation_error
+    - production_breaking_change
+
+  medium_priority:
+    - test_failure
+    - type_error
+    - performance_degradation
+
+  low_priority:
+    - lint_error
+    - documentation_update
+    - code_style
+
+# 修复限制和安全配置
+safety_limits:
+  max_concurrent_fixes: 3
+  max_daily_auto_fixes: 20
+  cooldown_period_minutes: 30
+
+  # 禁止自动修复的模式
+  forbidden_patterns:
+    - "rm -rf"
+    - "DROP TABLE"
+    - "DELETE FROM"
+    - "process.exit"
+    - "System.exit"
+
+  # 需要备份的文件模式
+  backup_patterns:
+    - "package*.json"
+    - "tsconfig*.json"
+    - "*.config.js"
+    - "*.config.ts"
+    - ".github/workflows/*.yml"
+
+# 验证配置
+validation:
+  required_checks:
+    - syntax_validation
+    - type_checking
+    - basic_functionality
+
+  optional_checks:
+    - performance_impact
+    - security_scan
+    - compatibility_test
+
+  test_commands:
+    syntax: "npm run lint"
+    types: "npm run type-check"
+    functionality: "npm test"
+    build: "npm run build"
+
+# 通知配置
+notifications:
+  channels:
+    slack:
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      enabled: true
+
+    email:
+      recipients: ["devops@storyapp.com"]
+      enabled: false
+
+    github:
+      create_issue: true
+      assign_to: ["@storyapp/devops"]
+
+  trigger_conditions:
+    - level_3_manual_required
+    - consecutive_failures > 3
+    - success_rate < 0.7

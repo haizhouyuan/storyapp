@@ -1,0 +1,410 @@
+name: Enhanced Monitoring Setup
+
+on:
+  workflow_run:
+    workflows: ["Auto Fix on Comment", "ClaudeCode Autofix on CI failure", "Security Auto-Fix"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      collect_historical:
+        description: '收集历史数据'
+        required: false
+        default: false
+        type: boolean
+      analysis_period_days:
+        description: '分析时间范围（天）'
+        required: false
+        default: '30'
+        type: string
+
+env:
+  ANALYSIS_DAYS: ${{ inputs.analysis_period_days || '7' }}
+
+jobs:
+  collect-metrics:
+    runs-on: ubuntu-latest
+    outputs:
+      metrics_collected: ${{ steps.collect.outputs.metrics_available }}
+      analysis_report: ${{ steps.analyze.outputs.report_file }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests PyGithub python-dateutil matplotlib seaborn pandas numpy
+
+      - name: Collect Fix Metrics
+        id: collect
+        run: |
+          echo "=== 收集修复指标 ==="
+
+          # 创建指标收集目录
+          mkdir -p monitoring-data/raw
+          mkdir -p monitoring-data/processed
+          mkdir -p monitoring-data/reports
+
+          # 收集当前工作流指标
+          cat > monitoring-data/raw/current-workflow.json << 'EOF'
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "workflow_id": "${{ github.run_id }}",
+            "workflow_name": "${{ github.workflow }}",
+            "trigger_type": "${{ github.event_name }}",
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref_name }}",
+            "actor": "${{ github.actor }}",
+            "run_attempt": "${{ github.run_attempt }}",
+            "triggering_workflow": {
+              "name": "${{ github.event.workflow_run.name || 'N/A' }}",
+              "conclusion": "${{ github.event.workflow_run.conclusion || 'N/A' }}",
+              "started_at": "${{ github.event.workflow_run.created_at || 'N/A' }}",
+              "completed_at": "${{ github.event.workflow_run.updated_at || 'N/A' }}"
+            }
+          }
+          EOF
+
+          # 使用Python脚本收集详细指标
+          python3 scripts/metrics-calculator.py \
+            --workflow-id="${{ github.run_id }}" \
+            --repository="${{ github.repository }}" \
+            --analysis-days="${{ env.ANALYSIS_DAYS }}" \
+            --output-dir="monitoring-data/raw" \
+            --github-token="${{ secrets.GITHUB_TOKEN }}"
+
+          # 检查是否收集到数据
+          if [ -f "monitoring-data/raw/workflow-metrics.json" ]; then
+            echo "metrics_available=true" >> $GITHUB_OUTPUT
+            echo "✅ 指标收集完成"
+          else
+            echo "metrics_available=false" >> $GITHUB_OUTPUT
+            echo "⚠️  指标收集不完整"
+          fi
+
+      - name: Analyze Metrics
+        id: analyze
+        if: steps.collect.outputs.metrics_available == 'true'
+        run: |
+          echo "=== 分析修复指标 ==="
+
+          # 运行指标分析
+          python3 -c "
+          import json
+          import os
+          from datetime import datetime, timedelta
+          import statistics
+
+          # 读取收集的指标
+          metrics_files = []
+          for root, dirs, files in os.walk('monitoring-data/raw'):
+              for file in files:
+                  if file.endswith('.json'):
+                      metrics_files.append(os.path.join(root, file))
+
+          all_metrics = []
+          for file_path in metrics_files:
+              try:
+                  with open(file_path, 'r') as f:
+                      data = json.load(f)
+                      if isinstance(data, list):
+                          all_metrics.extend(data)
+                      else:
+                          all_metrics.append(data)
+              except Exception as e:
+                  print(f'Error reading {file_path}: {e}')
+
+          # 计算统计指标
+          analysis = {
+              'analysis_timestamp': datetime.utcnow().isoformat(),
+              'analysis_period_days': ${{ env.ANALYSIS_DAYS }},
+              'total_workflows': len(all_metrics),
+              'workflow_types': {},
+              'success_metrics': {
+                  'total_attempts': 0,
+                  'successful_attempts': 0,
+                  'success_rate': 0.0
+              },
+              'performance_metrics': {
+                  'avg_duration_minutes': 0.0,
+                  'duration_percentiles': {},
+                  'trend_analysis': 'stable'
+              },
+              'error_analysis': {
+                  'common_errors': {},
+                  'error_rate': 0.0,
+                  'resolution_time': {}
+              },
+              'recommendations': []
+          }
+
+          # 分析工作流类型
+          for metric in all_metrics:
+              workflow_name = metric.get('workflow_name', 'unknown')
+              analysis['workflow_types'][workflow_name] = analysis['workflow_types'].get(workflow_name, 0) + 1
+
+          # 计算成功率
+          successes = sum(1 for m in all_metrics if m.get('triggering_workflow', {}).get('conclusion') == 'success')
+          total = len([m for m in all_metrics if m.get('triggering_workflow', {}).get('conclusion') in ['success', 'failure']])
+
+          if total > 0:
+              analysis['success_metrics']['total_attempts'] = total
+              analysis['success_metrics']['successful_attempts'] = successes
+              analysis['success_metrics']['success_rate'] = successes / total
+
+          # 生成建议
+          if analysis['success_metrics']['success_rate'] < 0.8:
+              analysis['recommendations'].append('成功率较低，建议检查自动修复逻辑')
+
+          if analysis['total_workflows'] < 5:
+              analysis['recommendations'].append('样本数据较少，建议收集更多数据以获得准确分析')
+
+          # 保存分析结果
+          with open('monitoring-data/processed/analysis-report.json', 'w') as f:
+              json.dump(analysis, f, indent=2)
+
+          print(f'分析完成: {analysis[\"total_workflows\"]} 个工作流记录')
+          print(f'成功率: {analysis[\"success_metrics\"][\"success_rate\"]:.1%}')
+          "
+
+          if [ -f "monitoring-data/processed/analysis-report.json" ]; then
+            echo "report_file=monitoring-data/processed/analysis-report.json" >> $GITHUB_OUTPUT
+            echo "✅ 指标分析完成"
+          else
+            echo "⚠️  指标分析失败"
+          fi
+
+      - name: Generate Dashboard Data
+        if: steps.analyze.outputs.report_file
+        run: |
+          echo "=== 生成Dashboard数据 ==="
+
+          python3 scripts/setup-monitoring-dashboard.py \
+            --analysis-report="${{ steps.analyze.outputs.report_file }}" \
+            --output-dir="monitoring-data/dashboard" \
+            --format="json"
+
+          echo "✅ Dashboard数据生成完成"
+
+      - name: Upload Monitoring Data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-data-${{ github.run_id }}
+          path: monitoring-data/
+          retention-days: 90
+
+      - name: Generate Summary Report
+        if: steps.analyze.outputs.report_file
+        run: |
+          echo "=== 监控摘要报告 ==="
+
+          python3 -c "
+          import json
+
+          try:
+              with open('${{ steps.analyze.outputs.report_file }}', 'r') as f:
+                  analysis = json.load(f)
+
+              print('📊 AutoFix系统监控摘要')
+              print('=' * 40)
+              print(f'分析时间范围: {analysis.get(\"analysis_period_days\", \"N/A\")} 天')
+              print(f'工作流执行次数: {analysis.get(\"total_workflows\", 0)}')
+
+              success_metrics = analysis.get('success_metrics', {})
+              print(f'修复成功率: {success_metrics.get(\"success_rate\", 0):.1%}')
+              print(f'成功次数: {success_metrics.get(\"successful_attempts\", 0)}/{success_metrics.get(\"total_attempts\", 0)}')
+
+              workflow_types = analysis.get('workflow_types', {})
+              if workflow_types:
+                  print('\\n工作流类型分布:')
+                  for wf_type, count in workflow_types.items():
+                      print(f'  {wf_type}: {count}')
+
+              recommendations = analysis.get('recommendations', [])
+              if recommendations:
+                  print('\\n📋 改进建议:')
+                  for i, rec in enumerate(recommendations, 1):
+                      print(f'  {i}. {rec}')
+
+          except Exception as e:
+              print(f'生成摘要报告时出错: {e}')
+          "
+
+  send-notifications:
+    needs: collect-metrics
+    if: needs.collect-metrics.outputs.metrics_collected == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Monitoring Data
+        uses: actions/download-artifact@v4
+        with:
+          name: monitoring-data-${{ github.run_id }}
+          path: monitoring-data/
+
+      - name: Send Performance Alert
+        if: always()
+        run: |
+          echo "=== 检查性能告警条件 ==="
+
+          # 检查是否需要发送告警
+          SEND_ALERT=false
+          ALERT_MESSAGE=""
+
+          if [ -f "monitoring-data/processed/analysis-report.json" ]; then
+            SUCCESS_RATE=$(python3 -c "
+            import json
+            try:
+                with open('monitoring-data/processed/analysis-report.json', 'r') as f:
+                    data = json.load(f)
+                print(data.get('success_metrics', {}).get('success_rate', 1.0))
+            except:
+                print(1.0)
+            ")
+
+            # 检查成功率阈值
+            if [ "$(echo "$SUCCESS_RATE < 0.7" | bc -l 2>/dev/null || echo "0")" = "1" ]; then
+              SEND_ALERT=true
+              ALERT_MESSAGE="🚨 AutoFix成功率告警: ${SUCCESS_RATE}% < 70%"
+            fi
+
+            # 检查其他告警条件
+            TOTAL_WORKFLOWS=$(python3 -c "
+            import json
+            try:
+                with open('monitoring-data/processed/analysis-report.json', 'r') as f:
+                    data = json.load(f)
+                print(data.get('total_workflows', 0))
+            except:
+                print(0)
+            ")
+
+            if [ "$TOTAL_WORKFLOWS" -gt 20 ]; then
+              echo "⚠️  工作流执行频率较高: $TOTAL_WORKFLOWS 次"
+            fi
+          fi
+
+          if [ "$SEND_ALERT" = "true" ]; then
+            echo "🚨 需要发送告警: $ALERT_MESSAGE"
+
+            # 这里可以集成实际的告警系统，例如：
+            # - Slack webhook
+            # - 邮件通知
+            # - 钉钉机器人
+            # - 企业微信
+
+            # 示例：发送到GitHub Issue（作为告警记录）
+            echo "创建告警Issue..."
+
+          else
+            echo "✅ 系统运行正常，无需告警"
+          fi
+
+      - name: Update Dashboard
+        run: |
+          echo "=== 更新监控Dashboard ==="
+
+          # 这里可以集成实际的Dashboard系统，例如：
+          # - Grafana
+          # - Kibana
+          # - 自建监控页面
+          # - 云服务监控
+
+          if [ -d "monitoring-data/dashboard" ]; then
+            echo "📊 Dashboard数据已准备就绪"
+            echo "数据文件："
+            find monitoring-data/dashboard -type f -name "*.json" | head -5
+
+            # 示例：上传到对象存储或推送到监控系统
+            echo "💾 Dashboard数据可以推送到监控系统"
+          fi
+
+  cleanup-old-data:
+    needs: [collect-metrics, send-notifications]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Cleanup Old Monitoring Data
+        run: |
+          echo "=== 清理旧的监控数据 ==="
+
+          # 清理超过30天的工作流数据
+          # 这里是示例逻辑，实际可以连接数据库或存储系统
+
+          echo "🧹 清理策略:"
+          echo "  - 保留最近30天的详细数据"
+          echo "  - 保留最近90天的摘要数据"
+          echo "  - 保留最近1年的趋势数据"
+
+          # 示例清理命令
+          find . -name "monitoring-data-*" -mtime +30 -type d -exec rm -rf {} \; 2>/dev/null || true
+
+          echo "✅ 数据清理完成"
+
+  generate-monthly-report:
+    if: github.event_name == 'workflow_dispatch' && inputs.collect_historical == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate Monthly Report
+        run: |
+          echo "=== 生成月度报告 ==="
+
+          # 生成月度AutoFix系统报告
+          MONTH=$(date +%Y-%m)
+
+          echo "📈 $MONTH AutoFix系统月度报告"
+          echo "=" * 50
+
+          echo "📊 关键指标:"
+          echo "  - 总修复尝试: 待统计"
+          echo "  - 修复成功率: 待统计"
+          echo "  - 平均修复时间: 待统计"
+          echo "  - 错误类型分布: 待统计"
+
+          echo ""
+          echo "📋 改进建议:"
+          echo "  - 待分析生成"
+
+          echo ""
+          echo "🎯 下月目标:"
+          echo "  - 提升修复成功率至85%+"
+          echo "  - 降低平均修复时间"
+          echo "  - 扩展支持的错误类型"
+
+          # 实际实现中，这里应该从数据库或日志系统
+          # 收集真实的历史数据并生成详细报告
+
+workflow_summary:
+  needs: [collect-metrics, send-notifications, cleanup-old-data]
+  if: always()
+  runs-on: ubuntu-latest
+
+  steps:
+    - name: Workflow Summary
+      run: |
+        echo "=== 监控工作流执行摘要 ==="
+        echo "指标收集: ${{ needs.collect-metrics.result }}"
+        echo "通知发送: ${{ needs.send-notifications.result }}"
+        echo "数据清理: ${{ needs.cleanup-old-data.result }}"
+        echo ""
+
+        if [ "${{ needs.collect-metrics.result }}" = "success" ]; then
+          echo "✅ 监控数据收集完成"
+        else
+          echo "❌ 监控数据收集失败"
+        fi
+
+        echo ""
+        echo "📊 监控系统状态: 正常运行"
+        echo "📅 下次检查: 下个工作流执行时"
