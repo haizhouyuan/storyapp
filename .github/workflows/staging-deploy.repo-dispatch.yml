@@ -10,14 +10,13 @@ permissions:
 
 jobs:
   deploy:
-    uses: ./.github/workflows/staging-deploy.reusable.yml
+    uses: haizhouyuan/storyapp/.github/workflows/staging-deploy.reusable.yml@master
     with:
       branch: ${{ github.event.client_payload.branch || 'master' }}
       sha:    ${{ github.event.client_payload.sha || '' }}
       pr_number: ${{ github.event.client_payload.pr_number || '' }}
     secrets:
       GHCR_PAT:        ${{ secrets.GHCR_PAT }}
-      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       STAGING_HOST:    ${{ secrets.STAGING_HOST }}
       STAGING_USER:    ${{ secrets.STAGING_USER }}
       STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}

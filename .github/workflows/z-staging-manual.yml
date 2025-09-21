@@ -25,7 +25,7 @@ jobs:
 
   call-reusable:
     needs: echo
-    uses: ./.github/workflows/staging-deploy.reusable.yml
+    uses: haizhouyuan/storyapp/.github/workflows/staging-deploy.reusable.yml@master
     with:
       branch: ${{ inputs.branch || 'master' }}
       sha:    ${{ inputs.sha }}
