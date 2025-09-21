@@ -40,7 +40,6 @@ jobs:
       pull-requests: write
     environment:
       name: staging
-      url: ${{ steps.deploy.outputs.url }}
 
     steps:
       - name: Prepare metadata
