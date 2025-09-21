@@ -4,6 +4,13 @@ on:
   workflow_run:
     workflows: ["CI/CD Pipeline"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy to staging'
+        required: false
+        default: 'master'
+        type: string
 
 env:
   STAGING_PORT: 5002
@@ -13,10 +20,15 @@ env:
 jobs:
   deploy:
     if: >
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'pull_request'
+        ) ||
+        github.event_name == 'workflow_dispatch'
+      ) &&
       (
         secrets.STAGING_HOST != '' ||
         secrets.PROD_HOST != ''
@@ -32,17 +44,22 @@ jobs:
       url: ${{ steps.deploy.outputs.url }}
 
     steps:
-      - name: Checkout PR commit
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          repository: ${{ github.event_name == 'workflow_dispatch' && github.repository || github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.event.workflow_run.head_sha }}
 
-      - name: Collect PR metadata
+      - name: Collect metadata
         id: meta
         run: |
-          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
-          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PR_NUMBER=""
+            BRANCH="${{ github.event.inputs.branch }}"
+          else
+            PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+          fi
           SAFE_BRANCH=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-40)
           echo "pr=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
@@ -92,7 +109,7 @@ EOF
           GHCR_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
           IMAGE_REPO: ghcr.io/${{ github.repository }}
-          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
           FALLBACK_TAG: sha-latest
           ENV_FILE: ${{ steps.envfile.outputs.env_path }}
           BASE_URL: ${{ steps.envfile.outputs.base_url }}
@@ -228,7 +245,7 @@ EOSSH
           retention-days: 5
 
       - name: Comment on PR
-        if: always()
+        if: always() && steps.meta.outputs.pr != ''
         uses: actions/github-script@v7
         with:
           script: |
