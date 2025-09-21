@@ -28,12 +28,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.branch || 'master' }}
+          ref: ${{ inputs.branch || 'master' }}
 
       - name: Prepare metadata
         id: meta
         run: |
-          BRANCH="${{ github.event.inputs.branch || 'master' }}"
+          BRANCH="${{ inputs.branch || 'master' }}"
           SAFE_BRANCH=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-40)
           echo "pr=" >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
