@@ -40,11 +40,13 @@ export const config = {
     trustProxy: process.env.TRUST_PROXY === 'true',
     corsOrigins: process.env.CORS_ORIGINS?.split(',') || [typedConfig.server.frontendUrl],
     helmetOptions: {
-      hsts: {
-        maxAge: parseInt(process.env.HSTS_MAX_AGE || '31536000', 10), // 1 year
-        includeSubDomains: process.env.HSTS_INCLUDE_SUBDOMAINS === 'true',
-        preload: process.env.HSTS_PRELOAD === 'true',
-      },
+      hsts: process.env.HSTS_DISABLED === 'true'
+        ? false
+        : {
+            maxAge: parseInt(process.env.HSTS_MAX_AGE || '31536000', 10), // 1 year
+            includeSubDomains: process.env.HSTS_INCLUDE_SUBDOMAINS === 'true',
+            preload: process.env.HSTS_PRELOAD === 'true',
+          },
     },
   },
 

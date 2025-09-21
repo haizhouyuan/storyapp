@@ -191,8 +191,8 @@ function setDefaultValues(config) {
     LOG_RETENTION_DAYS: '30',
     
     // 限流配置
-    RATE_LIMIT_WINDOW_MS: '900000',
-    RATE_LIMIT_MAX_REQUESTS: '100',
+    RATE_LIMIT_WINDOW_MS: process.env.NODE_ENV === 'test' ? '300000' : '900000',
+    RATE_LIMIT_MAX_REQUESTS: process.env.NODE_ENV === 'test' ? '1000' : '100',
     
     // React App 默认值
     REACT_APP_API_URL: 'http://localhost:5000/api',

@@ -2,8 +2,8 @@ const axios = require('axios');
 const { execSync } = require('child_process');
 
 // 测试配置
-const API_BASE = 'http://localhost:5001/api';
-const FRONTEND_URL = 'http://localhost:5001';
+const API_BASE = 'http://127.0.0.1:5001/api';
+const FRONTEND_URL = 'http://127.0.0.1:5001';
 
 // 测试数据
 const TEST_TOPICS = [

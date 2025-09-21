@@ -95,7 +95,7 @@ node test-logging-system.js
 ## Agent-Specific Instructions
 - Keep changes minimal and scoped; follow this guide.
 - Respect existing structure and scripts; avoid broad refactors in a single PR.
-- 默认使用中文回答用户的问题，除非用户明确要求使用其他语言。
+- 所有对外回复默认使用中文，除非用户另有明确要求。
 
 ## Project Overview
 - Children’s interactive bedtime story app with AI-generated, branching narratives.

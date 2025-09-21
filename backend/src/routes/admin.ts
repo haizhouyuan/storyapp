@@ -39,9 +39,9 @@ router.get('/logs', async (req: Request, res: Response) => {
         .filter(Boolean);
       filter.logLevel = levels.length > 1 ? { $in: levels } : levels[0];
     }
-    
+
     if (eventType) {
-      // 支持逗号分隔的多选值，例如 "ai_api_response,json_parse_success"
+      // 支持逗号分隔的多选值，例如 "ai_api_response,json_parse_success"  
       const types = String(eventType)
         .split(',')
         .map((s) => s.trim())
@@ -431,14 +431,18 @@ router.post('/logs/export', async (req: Request, res: Response) => {
     const filter: any = {};
     
     if (sessionId) filter.sessionId = sessionId;
+    
     if (logLevel) {
+      // 支持逗号分隔的多选值，例如 "info,warn,error"
       const levels = String(logLevel)
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
       filter.logLevel = levels.length > 1 ? { $in: levels } : levels[0];
     }
+    
     if (eventType) {
+      // 支持逗号分隔的多选值，例如 "story_generation,ai_api_request"
       const types = String(eventType)
         .split(',')
         .map((s) => s.trim())
