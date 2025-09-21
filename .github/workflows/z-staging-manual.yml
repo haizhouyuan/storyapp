@@ -1,0 +1,20 @@
+name: Z Deploy to Staging (manual-min)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: false
+        default: master
+      sha:
+        description: Commit SHA (optional)
+        required: false
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "branch=${{ inputs.branch }}"
+          echo "sha=${{ inputs.sha }}"
