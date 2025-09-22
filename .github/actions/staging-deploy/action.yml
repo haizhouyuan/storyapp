@@ -64,8 +64,8 @@ runs:
           docker stop storyapp 2>/dev/null || true
           docker rm   storyapp 2>/dev/null || true
           docker run -d --name storyapp -p 8080:8080 ${IMAGE}:${TAG}
-          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" | head -n 2
-RMT
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | head -n 2
+        RMT
         then
           echo "::warning title=Skip staging deploy::无法SSH执行部署命令，请检查凭据"
           exit 78
