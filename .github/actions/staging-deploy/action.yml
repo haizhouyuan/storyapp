@@ -33,6 +33,15 @@ runs:
         STAGING_SSH_KEY: ${{ env.STAGING_SSH_KEY }}
         IMAGE:           ${{ steps.meta.outputs.image }}
         TAG:             ${{ steps.meta.outputs.tag }}
+        STAGING_ENV_PATH:        ${{ env.STAGING_ENV_PATH }}
+        STAGING_MONGO_URI:       ${{ env.STAGING_MONGO_URI }}
+        STAGING_MONGO_DB_NAME:   ${{ env.STAGING_MONGO_DB_NAME }}
+        STAGING_BASE_URL:        ${{ env.STAGING_BASE_URL }}
+        STAGING_DEEPSEEK_API_KEY: ${{ env.STAGING_DEEPSEEK_API_KEY }}
+        STAGING_DEEPSEEK_API_URL: ${{ env.STAGING_DEEPSEEK_API_URL }}
+        STAGING_NODE_ENV:        ${{ env.STAGING_NODE_ENV }}
+        STAGING_DOCKER_NETWORK:  ${{ env.STAGING_DOCKER_NETWORK }}
+        STAGING_HOST_PORT:       ${{ env.STAGING_HOST_PORT }}
       run: |
         set -euo pipefail
         if [[ -z "${STAGING_SSH_KEY:-}" || -z "${STAGING_HOST:-}" ]]; then
@@ -59,17 +68,62 @@ runs:
         REMOTE_IMAGE="${IMAGE}:${TAG}"
         REMOTE_CMD=$(cat <<'EOF')
           set -euo pipefail
+
           TAR=/tmp/storyapp-image.tar.gz
           docker load < "$TAR"
           rm -f "$TAR"
+
           docker stop storyapp 2>/dev/null || true
           docker rm   storyapp 2>/dev/null || true
           docker stop storyapp-staging 2>/dev/null || true
           docker rm   storyapp-staging 2>/dev/null || true
-          docker run -d --name storyapp -p 8080:8080 "$IMAGE_TAG"
-          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | head -n 2
+
+          ENV_PATH="${STAGING_ENV_PATH:-/root/projects/storyapp/.env.staging}"
+          if [[ ! -f "$ENV_PATH" ]]; then
+            ENV_PATH="/tmp/storyapp-staging.env"
+            : > "$ENV_PATH"
+            printf 'NODE_ENV=%s\n' "${STAGING_NODE_ENV:-staging}" >> "$ENV_PATH"
+            printf 'PORT=%s\n' "5000" >> "$ENV_PATH"
+            printf 'FRONTEND_URL=%s\n' "${STAGING_BASE_URL:-http://localhost:8080}" >> "$ENV_PATH"
+            printf 'MONGODB_URI=%s\n' "${STAGING_MONGO_URI:-mongodb://mongo:27017/storyapp_staging}" >> "$ENV_PATH"
+            printf 'MONGODB_DB_NAME=%s\n' "${STAGING_MONGO_DB_NAME:-storyapp_staging}" >> "$ENV_PATH"
+            printf 'DEEPSEEK_API_URL=%s\n' "${STAGING_DEEPSEEK_API_URL:-https://api.deepseek.com}" >> "$ENV_PATH"
+            if [[ -n "${STAGING_DEEPSEEK_API_KEY:-}" ]]; then
+              printf 'DEEPSEEK_API_KEY=%s\n' "$STAGING_DEEPSEEK_API_KEY" >> "$ENV_PATH"
+            fi
+            printf 'ENABLE_DETAILED_LOGGING=%s\n' "false" >> "$ENV_PATH"
+            printf 'LOG_LEVEL=%s\n' "info" >> "$ENV_PATH"
+          fi
+
+          NETWORK="${STAGING_DOCKER_NETWORK:-storyapp_storyapp}"
+          if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
+            docker network create "$NETWORK" >/dev/null 2>&1 || true
+          fi
+
+          HOST_PORT="${STAGING_HOST_PORT:-8080}"
+          docker run -d \
+            --name storyapp-staging \
+            --env-file "$ENV_PATH" \
+            --network "$NETWORK" \
+            -p "${HOST_PORT}:5000" \
+            --restart unless-stopped \
+            "$IMAGE_TAG"
+
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | head -n 5
         EOF
-        if ! printf '%s\n' "$REMOTE_CMD" | ssh -o StrictHostKeyChecking=no "$TARGET" IMAGE_TAG="$REMOTE_IMAGE" bash -s; then
+        if ! printf '%s\n' "$REMOTE_CMD" | ssh -o StrictHostKeyChecking=no \
+            "$TARGET" \
+            IMAGE_TAG="$REMOTE_IMAGE" \
+            STAGING_ENV_PATH="${STAGING_ENV_PATH:-}" \
+            STAGING_NODE_ENV="${STAGING_NODE_ENV:-staging}" \
+            STAGING_BASE_URL="${STAGING_BASE_URL:-}" \
+            STAGING_MONGO_URI="${STAGING_MONGO_URI:-}" \
+            STAGING_MONGO_DB_NAME="${STAGING_MONGO_DB_NAME:-storyapp_staging}" \
+            STAGING_DEEPSEEK_API_KEY="${STAGING_DEEPSEEK_API_KEY:-}" \
+            STAGING_DEEPSEEK_API_URL="${STAGING_DEEPSEEK_API_URL:-https://api.deepseek.com}" \
+            STAGING_DOCKER_NETWORK="${STAGING_DOCKER_NETWORK:-storyapp_storyapp}" \
+            STAGING_HOST_PORT="${STAGING_HOST_PORT:-8080}" \
+            bash -s; then
           echo "::warning title=Skip staging deploy::无法SSH执行部署命令，请检查凭据"
           exit 0
         fi
