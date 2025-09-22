@@ -75,10 +75,67 @@ jobs:
           cd ..
 
           # 合并审计结果
-          python3 scripts/consolidate-audit-reports.py
+          python3 -c "
+          import json
+          import os
+
+          total_vulns = 0
+          critical_vulns = 0
+          high_vulns = 0
+          moderate_vulns = 0
+
+          reports = ['root-audit.json', 'backend-audit.json', 'frontend-audit.json']
+          consolidated = {
+              'vulnerabilities': {},
+              'metadata': {
+                  'totalDependencies': 0,
+                  'vulnerabilities': {'total': 0, 'critical': 0, 'high': 0, 'moderate': 0, 'low': 0}
+              },
+              'advisories': {}
+          }
+
+          for report_file in reports:
+              file_path = f'security-reports/{report_file}'
+              if os.path.exists(file_path):
+                  try:
+                      with open(file_path, 'r') as f:
+                          data = json.load(f)
+
+                      if 'vulnerabilities' in data:
+                          consolidated['vulnerabilities'].update(data['vulnerabilities'])
+
+                      if 'advisories' in data:
+                          consolidated['advisories'].update(data['advisories'])
+
+                      if 'metadata' in data and 'vulnerabilities' in data['metadata']:
+                          meta = data['metadata']['vulnerabilities']
+                          for severity in ['total', 'critical', 'high', 'moderate', 'low']:
+                              if severity in meta:
+                                  consolidated['metadata']['vulnerabilities'][severity] += meta[severity]
+
+                  except Exception as e:
+                      print(f'Error processing {report_file}: {e}')
+
+          # 保存合并后的报告
+          with open('security-reports/consolidated-audit.json', 'w') as f:
+              json.dump(consolidated, f, indent=2)
+
+          print(f'Total vulnerabilities: {consolidated[\"metadata\"][\"vulnerabilities\"][\"total\"]}')
+          print(f'Critical: {consolidated[\"metadata\"][\"vulnerabilities\"][\"critical\"]}')
+          print(f'High: {consolidated[\"metadata\"][\"vulnerabilities\"][\"high\"]}')
+          print(f'Moderate: {consolidated[\"metadata\"][\"vulnerabilities\"][\"moderate\"]}')
+          "
 
           # 读取漏洞统计
-          VULN_COUNT=$(python3 -c 'import json; data=json.load(open("security-reports/consolidated-audit.json")); print(data["metadata"]["vulnerabilities"]["total"])' 2>/dev/null || echo "0")
+          VULN_COUNT=$(python3 -c "
+          import json
+          try:
+              with open('security-reports/consolidated-audit.json', 'r') as f:
+                  data = json.load(f)
+              print(data['metadata']['vulnerabilities']['total'])
+          except:
+              print('0')
+          ")
 
           echo "vulnerabilities=$VULN_COUNT" >> $GITHUB_OUTPUT
           echo "report_file=security-reports/consolidated-audit.json" >> $GITHUB_OUTPUT
@@ -87,7 +144,26 @@ jobs:
             echo "🔍 发现 $VULN_COUNT 个安全漏洞"
 
             # 提取漏洞详情用于策略生成
-            python3 scripts/consolidate-audit-reports.py extract
+            python3 -c "
+            import json
+
+            with open('security-reports/consolidated-audit.json', 'r') as f:
+                data = json.load(f)
+
+            vulnerabilities = []
+            for vuln_id, vuln_data in data.get('vulnerabilities', {}).items():
+                vulnerabilities.append({
+                    'id': vuln_id,
+                    'severity': vuln_data.get('severity', 'unknown'),
+                    'via': vuln_data.get('via', []),
+                    'effects': vuln_data.get('effects', []),
+                    'range': vuln_data.get('range', ''),
+                    'nodes': vuln_data.get('nodes', [])
+                })
+
+            with open('security-reports/vulnerabilities.json', 'w') as f:
+                json.dump(vulnerabilities, f, indent=2)
+            "
           else
             echo "✅ 未发现安全漏洞"
           fi
@@ -105,7 +181,15 @@ jobs:
             --consolidated-audit="security-reports/consolidated-audit.json"
 
           if [ -f "security-reports/fix-plan.json" ]; then
-            STRATEGY=$(python3 -c 'import json; print(json.load(open("security-reports/fix-plan.json")).get("strategy", "auto_fix"))' 2>/dev/null || echo "manual_review")
+            STRATEGY=$(python3 -c "
+            import json
+            try:
+                with open('security-reports/fix-plan.json', 'r') as f:
+                    data = json.load(f)
+                print(data.get('strategy', 'auto_fix'))
+            except:
+                print('manual_review')
+            ")
             echo "strategy=$STRATEGY" >> $GITHUB_OUTPUT
             echo "📋 生成的修复策略: $STRATEGY"
           else
@@ -132,11 +216,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-
-      - name: Configure Git
-        run: |
-          git config --global user.email "security-autofix@github.actions"
-          git config --global user.name "Security AutoFix Bot"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
