@@ -1,5 +1,6 @@
 const path = require('path');
 const webpack = require('webpack');
+const { InjectManifest } = require('workbox-webpack-plugin');
 
 /**
  * Create React App Configuration Override (CRACO)
@@ -156,6 +157,42 @@ module.exports = {
       // 预加载插件（优化关键资源加载）
       ...(process.env.NODE_ENV === 'production' ? [
         new webpack.optimize.ModuleConcatenationPlugin(), // Scope hoisting
+
+        // Workbox PWA插件
+        new InjectManifest({
+          swSrc: path.resolve(__dirname, 'src/sw-simple.js'),
+          swDest: 'service-worker.js',
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
+          exclude: [
+            /\.map$/,
+            /^manifest$/,
+            /\.htaccess$/,
+            /service-worker\.js$/,
+            /\.DS_Store$/,
+            /^\..*$/,
+            /node_modules/
+          ],
+          manifestTransforms: [
+            // 自定义manifest转换
+            (manifestEntries) => {
+              const manifest = manifestEntries.map((entry) => {
+                // 为静态资源添加版本控制
+                if (entry.url.includes('/static/')) {
+                  entry.revision = entry.revision || Date.now().toString();
+                }
+                return entry;
+              });
+
+              return { manifest };
+            }
+          ],
+          // 额外配置
+          additionalManifestEntries: [
+            // 手动添加需要预缓存的文件
+            { url: '/', revision: process.env.REACT_APP_VERSION || '1.0.0' },
+            { url: '/offline', revision: process.env.REACT_APP_VERSION || '1.0.0' }
+          ]
+        })
       ] : []),
     ],
   },
