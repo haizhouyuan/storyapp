@@ -1,0 +1,46 @@
+{
+  "name": "children-story-app",
+  "version": "1.0.0",
+  "description": "儿童睡前互动故事应用",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm run -w backend dev",
+    "dev:frontend": "npm run -w frontend start",
+    "build": "npm run build:shared && npm run build:backend && npm run build:frontend",
+    "build:shared": "npm run -w @storyapp/shared build",
+    "build:backend": "npm run -w backend build",
+    "build:frontend": "npm run -w frontend build",
+    "test": "npx playwright test tests/story-app.spec.ts tests/staging-smoke.spec.ts",
+    "test:mcp": "cd playwright-mcp && npm test",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../playwright-mcp && npm install",
+    "mcp:serve": "npx @playwright/mcp@latest --port 8931 --headless --isolated --timeout-navigation 60000 --timeout-action 8000 --image-responses omit --host 127.0.0.1"
+  },
+  "keywords": [
+    "儿童故事",
+    "互动故事",
+    "睡前故事",
+    "AI故事生成"
+  ],
+  "author": "Story App Developer",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "axios": "^1.12.0",
+    "concurrently": "^8.2.2",
+    "jest-util": "^30.0.5"
+  },
+  "overrides": {
+    "axios": "^1.12.0",
+    "cross-spawn": "7.0.6"
+  }
+}
