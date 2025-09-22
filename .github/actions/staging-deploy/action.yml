@@ -53,7 +53,7 @@ runs:
 
         if ! scp -o StrictHostKeyChecking=no "$TAR_PATH" "$TARGET:/tmp/storyapp-image.tar.gz"; then
           echo "::warning title=Skip staging deploy::无法通过SSH复制镜像，请检查 STAGING_HOST/STAGING_SSH_KEY 配置"
-          exit 78
+          exit 0
         fi
 
         REMOTE_IMAGE="${IMAGE}:${TAG}"
@@ -69,7 +69,7 @@ runs:
         EOF
         if ! printf '%s\n' "$REMOTE_CMD" | ssh -o StrictHostKeyChecking=no "$TARGET" IMAGE_TAG="$REMOTE_IMAGE" bash -s; then
           echo "::warning title=Skip staging deploy::无法SSH执行部署命令，请检查凭据"
-          exit 78
+          exit 0
         fi
     - name: Notice
       shell: bash
