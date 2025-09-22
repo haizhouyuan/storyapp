@@ -62,7 +62,7 @@ runs:
           docker rm   storyapp 2>/dev/null || true
           docker run -d --name storyapp -p 8080:8080 ${IMAGE}:${TAG}
           docker ps --format 'table {{.Names}}	{{.Image}}	{{.Status}}' | head -n 2
-RMT
+        RMT
 
     - name: Notice
       shell: bash
