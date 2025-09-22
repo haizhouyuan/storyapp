@@ -64,6 +64,8 @@ runs:
           rm -f "$TAR"
           docker stop storyapp 2>/dev/null || true
           docker rm   storyapp 2>/dev/null || true
+          docker stop storyapp-staging 2>/dev/null || true
+          docker rm   storyapp-staging 2>/dev/null || true
           docker run -d --name storyapp -p 8080:8080 "$IMAGE_TAG"
           docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | head -n 2
         EOF
