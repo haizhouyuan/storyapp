@@ -57,7 +57,7 @@ runs:
         fi
 
         REMOTE_IMAGE="${IMAGE}:${TAG}"
-        if ! ssh -o StrictHostKeyChecking=no "$TARGET" IMAGE_TAG="$REMOTE_IMAGE" bash -s <<'RMT'
+        REMOTE_CMD=$(cat <<'EOF')
 set -euo pipefail
 TAR=/tmp/storyapp-image.tar.gz
 docker load < "$TAR"
@@ -66,8 +66,8 @@ docker stop storyapp 2>/dev/null || true
 docker rm   storyapp 2>/dev/null || true
 docker run -d --name storyapp -p 8080:8080 "$IMAGE_TAG"
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | head -n 2
-RMT
-        then
+EOF
+        if ! printf '%s\n' "$REMOTE_CMD" | ssh -o StrictHostKeyChecking=no "$TARGET" IMAGE_TAG="$REMOTE_IMAGE" bash -s; then
           echo "::warning title=Skip staging deploy::无法SSH执行部署命令，请检查凭据"
           exit 78
         fi
