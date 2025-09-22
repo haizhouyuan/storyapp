@@ -1,24 +1,105 @@
-name: Deploy to Staging (auto)
+name: Deploy to Staging
 
 on:
   workflow_run:
     workflows: ["CI/CD Pipeline"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: '要部署的分支 (默认 master)'
+        required: false
+        default: 'master'
+      sha:
+        description: '可选：指定具体提交 SHA'
+        required: false
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+  deploy-auto:
+    name: CI 通过后自动部署
+    if: >-
+      ${{ github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          contains(fromJson('["master","main"]'), github.event.workflow_run.head_branch) }}
     runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: staging-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
     steps:
-      - name: Deploy to staging automatically
+      - name: 检查必需的 staging secrets
+        id: check-secrets
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -z "${STAGING_HOST}" ]] && missing+=("STAGING_HOST")
+          [[ -z "${STAGING_SSH_KEY}" ]] && missing+=("STAGING_SSH_KEY")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::warning title=Missing staging secrets::${missing[*]} 未配置，自动部署跳过"
+            exit 78
+          fi
+
+      - name: Checkout 部署提交
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: 部署到 staging
         uses: ./.github/actions/staging-deploy
         with:
           branch: ${{ github.event.workflow_run.head_branch }}
           sha:    ${{ github.event.workflow_run.head_sha }}
+        env:
+          GHCR_PAT:            ${{ secrets.GHCR_PAT }}
+          STAGING_HOST:        ${{ secrets.STAGING_HOST }}
+          STAGING_USER:        ${{ secrets.STAGING_USER }}
+          STAGING_SSH_KEY:     ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_BASE_URL:    ${{ secrets.STAGING_BASE_URL }}
+          STAGING_MONGO_URI:   ${{ secrets.STAGING_MONGO_URI }}
+          STAGING_DEEPSEEK_API_KEY: ${{ secrets.STAGING_DEEPSEEK_API_KEY }}
+
+  deploy-manual:
+    name: 手动触发部署
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: staging-${{ inputs.sha != '' && inputs.sha || inputs.branch }}
+      cancel-in-progress: false
+    steps:
+      - name: 检查必需的 staging secrets
+        id: check-secrets
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -z "${STAGING_HOST}" ]] && missing+=("STAGING_HOST")
+          [[ -z "${STAGING_SSH_KEY}" ]] && missing+=("STAGING_SSH_KEY")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error title=Missing staging secrets::${missing[*]} 未配置，手动部署无法执行"
+            exit 1
+          fi
+
+      - name: Checkout 部署提交
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha != '' && inputs.sha || inputs.branch }}
+
+      - name: 部署到 staging
+        uses: ./.github/actions/staging-deploy
+        with:
+          branch: ${{ inputs.branch }}
+          sha:    ${{ inputs.sha }}
         env:
           GHCR_PAT:            ${{ secrets.GHCR_PAT }}
           STAGING_HOST:        ${{ secrets.STAGING_HOST }}
