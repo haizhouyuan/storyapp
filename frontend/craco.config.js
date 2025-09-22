@@ -158,9 +158,9 @@ module.exports = {
       ...(process.env.NODE_ENV === 'production' ? [
         new webpack.optimize.ModuleConcatenationPlugin(), // Scope hoisting
 
-        // Workbox PWA插件
+        // Workbox PWA插件 - Phase C Complete
         new InjectManifest({
-          swSrc: path.resolve(__dirname, 'src/sw-simple.js'),
+          swSrc: path.resolve(__dirname, 'src/service-worker-phase-c.js'),
           swDest: 'service-worker.js',
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
           exclude: [
