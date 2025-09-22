@@ -51,9 +51,12 @@ runs:
         echo "Saving image to $TAR_PATH"
         docker save "${IMAGE}:${TAG}" | gzip > "$TAR_PATH"
 
-        scp -o StrictHostKeyChecking=no "$TAR_PATH" "$TARGET:/tmp/storyapp-image.tar.gz"
+        if ! scp -o StrictHostKeyChecking=no "$TAR_PATH" "$TARGET:/tmp/storyapp-image.tar.gz"; then
+          echo "::warning title=Skip staging deploy::无法通过SSH复制镜像，请检查 STAGING_HOST/STAGING_SSH_KEY 配置"
+          exit 78
+        fi
 
-        ssh -o StrictHostKeyChecking=no "$TARGET" bash -s <<RMT
+        if ! ssh -o StrictHostKeyChecking=no "$TARGET" bash -s <<RMT
           set -euo pipefail
           TAR=/tmp/storyapp-image.tar.gz
           docker load < "$TAR"
@@ -61,9 +64,12 @@ runs:
           docker stop storyapp 2>/dev/null || true
           docker rm   storyapp 2>/dev/null || true
           docker run -d --name storyapp -p 8080:8080 ${IMAGE}:${TAG}
-          docker ps --format 'table {{.Names}}	{{.Image}}	{{.Status}}' | head -n 2
-        RMT
-
+          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" | head -n 2
+RMT
+        then
+          echo "::warning title=Skip staging deploy::无法SSH执行部署命令，请检查凭据"
+          exit 78
+        fi
     - name: Notice
       shell: bash
       env:
