@@ -2,8 +2,9 @@ const axios = require('axios');
 const { execSync } = require('child_process');
 
 // 测试配置
-const API_BASE = 'http://127.0.0.1:5001/api';
-const FRONTEND_URL = 'http://127.0.0.1:5001';
+const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
+const API_BASE = (process.env.PLAYWRIGHT_API_URL || `${BASE_URL}/api`).replace(/\/$/, '');
+const FRONTEND_URL = BASE_URL;
 
 // 测试数据
 const TEST_TOPICS = [
@@ -21,6 +22,8 @@ class BusinessFlowTest {
 
   async run() {
     console.log('🚀 开始完整的业务流程测试...\n');
+    console.log('🌐 目标前端地址:', FRONTEND_URL);
+    console.log('🔌 目标 API 地址:', API_BASE);
     
     try {
       // 1. 健康检查
@@ -73,7 +76,9 @@ class BusinessFlowTest {
     
     try {
       // 使用curl测试页面访问
-      const result = execSync(`curl -s -o /dev/null -w "%{http_code}" ${FRONTEND_URL}`, { 
+      const insecureFlag = FRONTEND_URL.startsWith('https://') ? ' -k' : '';
+      const curlCmd = `curl -s${insecureFlag} -o /dev/null -w "%{http_code}" ${FRONTEND_URL}`;
+      const result = execSync(curlCmd, { 
         encoding: 'utf-8' 
       });
       

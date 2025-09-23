@@ -1,13 +1,14 @@
 import { test, expect } from '@playwright/test';
 
-const APP_URL = 'http://127.0.0.1:5001';
+const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
 
 test.describe('调试测试 - 检查页面元素', () => {
   test('检查页面加载和元素存在', async ({ page }) => {
     console.log('🔍 开始页面调试...');
+    console.log('🌐 测试基准地址:', BASE_URL);
     
     // 访问页面
-    await page.goto(APP_URL);
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
     
     // 截图查看页面状态
@@ -57,8 +58,9 @@ test.describe('调试测试 - 检查页面元素', () => {
 
   test('测试页面交互', async ({ page }) => {
     console.log('🎯 开始交互测试...');
+    console.log('🌐 测试基准地址:', BASE_URL);
     
-    await page.goto(APP_URL);
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     

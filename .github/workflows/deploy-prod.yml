@@ -157,8 +157,12 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           
-          # Run production tests
-          PLAYWRIGHT_BASE_URL="$BASE_URL" npx playwright test -c playwright.prod.config.ts
+          # Run production tests with timeout to avoid hanging
+          timeout 900 env \
+            PLAYWRIGHT_BASE_URL="$BASE_URL" \
+            PLAYWRIGHT_API_URL="$BASE_URL/api" \
+            PW_TEST_HTML_REPORT_OPEN=never \
+            npx playwright test -c playwright.prod.config.ts
 
       - name: Deployment summary
         if: always()
@@ -174,4 +178,3 @@ jobs:
           echo "- **Timestamp**: ${{ steps.vars.outputs.deploy_timestamp }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tests**: ${{ inputs.run_tests && '✅ Enabled' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **URL**: ${SUMMARY_URL}" >> $GITHUB_STEP_SUMMARY
-

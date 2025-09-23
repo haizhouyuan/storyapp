@@ -13,8 +13,6 @@ services:
       - FRONTEND_URL=http://localhost:3000
       - ENABLE_DETAILED_LOGGING=false
       - LOG_LEVEL=info
-      - MONGODB_URI=mongodb://mongo:27017/storyapp_ghcr
-      - MONGODB_DB_NAME=storyapp_ghcr
     
     # GHCR验证端口映射 - 避免与dev环境冲突
     ports:
@@ -24,8 +22,5 @@ services:
     # GHCR验证数据库配置
     environment:
       MONGO_INITDB_DATABASE: storyapp_ghcr
-      # 生产模式使用认证
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-root}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-pass123}
     # 不暴露端口，增强安全性
     # ports: []

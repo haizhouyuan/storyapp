@@ -4,6 +4,8 @@ import { defineConfig, devices } from '@playwright/test';
  * 生产环境 Playwright 配置
  * 专门用于测试部署后的应用
  */
+const baseURL = (process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5001').replace(/\/$/, '');
+
 export default defineConfig({
   testDir: './tests/production',
   
@@ -26,7 +28,7 @@ export default defineConfig({
   /* Shared settings for all projects */
   use: {
     /* Base URL for production environment */
-    baseURL: 'http://localhost:5001',
+    baseURL,
 
     /* Collect trace when retrying the failed test */
     trace: 'on-first-retry',
