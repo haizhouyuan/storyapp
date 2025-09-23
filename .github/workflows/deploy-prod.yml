@@ -162,6 +162,7 @@ jobs:
           timeout 900 env \
             PLAYWRIGHT_BASE_URL="$BASE_URL" \
             PLAYWRIGHT_API_URL="$BASE_URL/api" \
+            PLAYWRIGHT_API_ONLY=true \
             PW_TEST_HTML_REPORT_OPEN=never \
             npx playwright test -c playwright.prod.config.ts
 

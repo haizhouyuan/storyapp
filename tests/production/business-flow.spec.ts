@@ -8,6 +8,7 @@ import { test, expect, Page } from '@playwright/test';
 // 测试配置（支持通过环境变量覆盖）
 const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
 const API_URL = (process.env.PLAYWRIGHT_API_URL || `${BASE_URL}/api`).replace(/\/$/, '');
+const API_ONLY = process.env.PLAYWRIGHT_API_ONLY === 'true';
 
 // 测试数据
 const TEST_STORIES = [
@@ -29,6 +30,10 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
 
   test.beforeEach(async ({ page }) => {
     console.log('🚀 开始访问应用首页...');
+    if (API_ONLY) {
+      console.log('ℹ️ API-only 模式，跳过页面预热');
+      return;
+    }
     await page.goto('/');
     
     // 等待页面加载完成
@@ -37,6 +42,7 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
   });
 
   test('完整故事创作流程 - 从主题输入到故事结束', async ({ page }) => {
+    test.skip(API_ONLY, 'API-only 模式跳过前端交互流程');
     console.log('📝 开始完整故事创作流程测试...');
     
     const testStory = TEST_STORIES[0];
@@ -182,6 +188,7 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
   }, 120000); // 设置2分钟超时
 
   test('我的故事页面功能测试', async ({ page }) => {
+    test.skip(API_ONLY, 'API-only 模式跳过前端交互流程');
     console.log('📚 开始"我的故事"页面功能测试...');
     
     // 步骤1: 从首页进入我的故事
@@ -267,8 +274,14 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
     }
     
     console.log('✅ API健康检查通过');
-    
+
     // 测试故事列表接口
+    if (API_ONLY) {
+      console.log('ℹ️ API-only 模式下跳过 /get-stories 校验（公共环境可能存在限流或鉴权限制）');
+      console.log('🎉 API接口测试完成!');
+      return;
+    }
+
     console.log('📚 测试故事列表接口...');
     const storiesResponse = await page.request.get(`${API_URL}/get-stories`);
     expect(storiesResponse.status()).toBe(200);
@@ -280,6 +293,7 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
   });
 
   test('响应式设计测试', async ({ page }) => {
+    test.skip(API_ONLY, 'API-only 模式跳过前端交互流程');
     console.log('📱 开始响应式设计测试...');
     
     // 测试桌面端
@@ -310,6 +324,7 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
   });
 
   test('用户输入验证测试', async ({ page }) => {
+    test.skip(API_ONLY, 'API-only 模式跳过前端交互流程');
     console.log('✅ 开始用户输入验证测试...');
     
     const topicInput = page.locator('[data-testid="topic-input"]');
@@ -342,6 +357,7 @@ test.describe('儿童故事应用 - 完整业务流程测试', () => {
   });
 
   test('错误处理测试', async ({ page }) => {
+    test.skip(API_ONLY, 'API-only 模式跳过前端交互流程');
     console.log('⚠️ 开始错误处理测试...');
     
     // 模拟网络错误

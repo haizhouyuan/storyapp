@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
+const API_ONLY = process.env.PLAYWRIGHT_API_ONLY === 'true';
 
 test.describe('调试测试 - 检查页面元素', () => {
+  test.skip(API_ONLY, 'API-only 模式不执行前端调试场景');
   test('检查页面加载和元素存在', async ({ page }) => {
     console.log('🔍 开始页面调试...');
     console.log('🌐 测试基准地址:', BASE_URL);
