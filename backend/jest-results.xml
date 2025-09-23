@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="45" failures="0" errors="0" time="12.675">
+  <testsuite name="tests/routes/stories.test.ts" errors="0" failures="0" skipped="0" timestamp="2025-09-23T00:28:08" time="5.704" tests="15">
+    <testcase classname="Stories API Routes POST /api/generate-story" name="应该生成故事内容" time="0.06">
+    </testcase>
+    <testcase classname="Stories API Routes POST /api/generate-story" name="应该处理缺少topic的请求" time="0.01">
+    </testcase>
+    <testcase classname="Stories API Routes POST /api/generate-story" name="应该处理空topic" time="0.005">
+    </testcase>
+    <testcase classname="Stories API Routes POST /api/generate-story" name="应该处理maxChoices参数" time="0.015">
+    </testcase>
+    <testcase classname="Stories API Routes POST /api/save-story" name="应该成功保存故事" time="0.431">
+    </testcase>
+    <testcase classname="Stories API Routes POST /api/save-story" name="应该处理缺少title的请求" time="0.01">
+    </testcase>
+    <testcase classname="Stories API Routes POST /api/save-story" name="应该处理缺少content的请求" time="0.005">
+    </testcase>
+    <testcase classname="Stories API Routes GET /api/get-stories" name="应该返回故事列表" time="0.018">
+    </testcase>
+    <testcase classname="Stories API Routes GET /api/get-stories" name="应该返回空数组当没有故事时" time="0.014">
+    </testcase>
+    <testcase classname="Stories API Routes GET /api/get-story/:id" name="应该返回指定ID的故事" time="0.013">
+    </testcase>
+    <testcase classname="Stories API Routes GET /api/get-story/:id" name="应该在故事不存在时返回404" time="0.008">
+    </testcase>
+    <testcase classname="Stories API Routes GET /api/get-story/:id" name="应该处理无效的ID格式" time="0.051">
+    </testcase>
+    <testcase classname="Stories API Routes DELETE /api/delete-story/:id" name="应该成功删除存在的故事" time="0.012">
+    </testcase>
+    <testcase classname="Stories API Routes DELETE /api/delete-story/:id" name="应该在故事不存在时返回404" time="0.01">
+    </testcase>
+    <testcase classname="Stories API Routes DELETE /api/delete-story/:id" name="应该处理无效的ID格式" time="0.013">
+    </testcase>
+  </testsuite>
+  <testsuite name="tests/services/storyService.test.ts" errors="0" failures="0" skipped="0" timestamp="2025-09-23T00:28:13" time="1.563" tests="14">
+    <testcase classname="Story Service generateStoryService" name="应该生成故事内容" time="0.012">
+    </testcase>
+    <testcase classname="Story Service generateStoryService" name="应该处理空主题" time="0.056">
+    </testcase>
+    <testcase classname="Story Service generateStoryService" name="应该处理超长主题" time="0.019">
+    </testcase>
+    <testcase classname="Story Service saveStoryService" name="应该成功保存故事" time="0.126">
+    </testcase>
+    <testcase classname="Story Service saveStoryService" name="应该处理缺少标题的情况" time="0.014">
+    </testcase>
+    <testcase classname="Story Service saveStoryService" name="应该处理缺少内容的情况" time="0.015">
+    </testcase>
+    <testcase classname="Story Service getStoriesService" name="应该返回按创建时间降序排列的故事列表" time="0.008">
+    </testcase>
+    <testcase classname="Story Service getStoriesService" name="应该返回空数组当没有故事时" time="0.005">
+    </testcase>
+    <testcase classname="Story Service getStoryByIdService" name="应该根据ID返回单个故事" time="0.004">
+    </testcase>
+    <testcase classname="Story Service getStoryByIdService" name="应该在故事不存在时返回null" time="0.003">
+    </testcase>
+    <testcase classname="Story Service getStoryByIdService" name="应该处理无效的ID格式" time="0.004">
+    </testcase>
+    <testcase classname="Story Service deleteStoryService" name="应该成功删除存在的故事" time="0.005">
+    </testcase>
+    <testcase classname="Story Service deleteStoryService" name="应该在故事不存在时抛出错误" time="0.006">
+    </testcase>
+    <testcase classname="Story Service deleteStoryService" name="应该处理无效的ID格式" time="0.004">
+    </testcase>
+  </testsuite>
+  <testsuite name="tests/routes/admin.logs.test.ts" errors="0" failures="0" skipped="0" timestamp="2025-09-23T00:28:15" time="2.533" tests="4">
+    <testcase classname="Admin Logs API - multi eventType filter" name="supports comma-separated eventType" time="0.026">
+    </testcase>
+    <testcase classname="Admin Logs API - multi eventType filter" name="supports repeated eventType params" time="0.011">
+    </testcase>
+    <testcase classname="Admin Logs API - multi eventType filter" name="JSON export respects multi eventType" time="0.009">
+    </testcase>
+    <testcase classname="Admin Logs API - multi eventType filter" name="exclude stackTrace by default; include when requested" time="0.005">
+    </testcase>
+  </testsuite>
+  <testsuite name="tests/routes/health.test.ts" errors="0" failures="0" skipped="0" timestamp="2025-09-23T00:28:18" time="1.145" tests="8">
+    <testcase classname="Health API Routes GET /healthz" name="应该返回健康状态" time="0.007">
+    </testcase>
+    <testcase classname="Health API Routes GET /healthz" name="应该包含必要的健康检查项" time="0.006">
+    </testcase>
+    <testcase classname="Health API Routes GET /healthz" name="应该在所有检查通过时返回健康状态" time="0.002">
+    </testcase>
+    <testcase classname="Health API Routes GET /healthz" name="应该返回正确的响应格式" time="0.004">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容)" name="应该返回健康状态" time="0.004">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容)" name="应该包含必要的健康检查项" time="0.003">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容)" name="应该在所有检查通过时返回健康状态" time="0.003">
+    </testcase>
+    <testcase classname="Health API Routes GET /api/health (向后兼容)" name="应该返回正确的响应格式" time="0.003">
+    </testcase>
+  </testsuite>
+  <testsuite name="tests/routes/admin.test.ts" errors="0" failures="0" skipped="0" timestamp="2025-09-23T00:28:19" time="1.276" tests="4">
+    <testcase classname="Admin API Routes (Appsmith compatibility)" name="GET /api/admin/logs supports comma-separated eventType and logLevel" time="0.052">
+    </testcase>
+    <testcase classname="Admin API Routes (Appsmith compatibility)" name="GET /api/admin/stats responds with expected structure" time="0.018">
+    </testcase>
+    <testcase classname="Admin API Routes (Appsmith compatibility)" name="GET /api/admin/performance returns timeline array" time="0.006">
+    </testcase>
+    <testcase classname="Admin API Routes (Appsmith compatibility)" name="GET /api/admin/logs supports search by partial sessionId and excludes stackTrace by default" time="0.013">
+    </testcase>
+  </testsuite>
+</testsuites>

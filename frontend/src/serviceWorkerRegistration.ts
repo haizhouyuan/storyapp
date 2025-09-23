@@ -82,10 +82,10 @@ function registerValidSW(swUrl: string, config?: Config) {
         });
       });
 
-      // 定期检查更新
+      // 定期检查更新 - 优化频率以减少对儿童设备的性能影响
       setInterval(() => {
         registration.update();
-      }, 60000); // 每分钟检查一次
+      }, 30 * 60 * 1000); // 每30分钟检查一次，减少电池消耗
     })
     .catch((error) => {
       console.error('SW registration failed: ', error);
@@ -205,17 +205,30 @@ export class PWAInstallPrompt {
   }
 
   private trackInstallEvent(action: string) {
-    // 发送安装事件到后端统计
-    if (typeof window !== 'undefined' && window.gtag) {
-      window.gtag('event', 'pwa_install', {
-        event_category: 'PWA',
-        event_label: action,
-        value: 1
-      });
-    }
+    // 儿童隐私保护：仅在本地记录事件，不收集个人数据
+    // COPPA合规：移除第三方分析跟踪
 
-    // 可以添加到后端日志
+    // 仅本地日志记录，不向外部服务发送数据
     console.log(`PWA安装事件: ${action}`);
+
+    // 可选：存储到本地存储进行应用内统计（不涉及个人信息）
+    try {
+      const stats = JSON.parse(localStorage.getItem('app_stats') || '{}');
+      stats.pwa_events = stats.pwa_events || [];
+      stats.pwa_events.push({
+        action,
+        timestamp: Date.now(),
+        // 注意：不记录任何个人身份信息
+      });
+      // 限制本地统计数据大小
+      if (stats.pwa_events.length > 50) {
+        stats.pwa_events = stats.pwa_events.slice(-50);
+      }
+      localStorage.setItem('app_stats', JSON.stringify(stats));
+    } catch (error) {
+      // 静默处理本地存储错误
+      console.warn('本地统计存储失败:', error);
+    }
   }
 }
 
