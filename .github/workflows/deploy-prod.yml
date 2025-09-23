@@ -122,12 +122,13 @@ jobs:
             BASE_URL="https://$BASE_URL"
           fi
 
-          echo "⏳ Waiting for service to be healthy..."
+          HEALTH_ENDPOINT="${BASE_URL%/}/api/health"
+          echo "⏳ Waiting for service to be healthy ($HEALTH_ENDPOINT)..."
 
           # Wait up to 5 minutes for service to be ready
           timeout 300 bash -c "
             while true; do
-              if curl -f ${BASE_URL}/healthz >/dev/null 2>&1; then
+              if curl -sf --max-time 10 \"$HEALTH_ENDPOINT\" >/dev/null 2>&1; then
                 echo '✅ Service is healthy'
                 break
               fi
