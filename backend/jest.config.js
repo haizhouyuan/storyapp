@@ -30,7 +30,18 @@ module.exports = {
     '!src/**/*.d.ts',
   ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov', 'html'],
+  coverageReporters: ['text', 'lcov', 'html', 'clover'],
+  // 为CI生成JSON格式的测试结果报告
+  reporters: [
+    'default',
+    ['jest-junit', {
+      outputDirectory: '.',
+      outputName: 'jest-results.xml',
+      suiteNameTemplate: '{filepath}',
+      classNameTemplate: '{classname}',
+      titleTemplate: '{title}'
+    }]
+  ],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   testTimeout: 10000,
   // 为避免并发测试之间对同一Mongo集合的相互清理/干扰，序列化执行测试

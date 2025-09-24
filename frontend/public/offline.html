@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>离线模式 - 儿童睡前故事</title>
+    <meta name="theme-color" content="#A8E6CF">
+    <link rel="icon" href="/favicon.ico">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #A8E6CF, #FFD3A5);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #2d3748;
+            line-height: 1.6;
+        }
+
+        .container {
+            text-align: center;
+            max-width: 500px;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .offline-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+            background: #FFA07A;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        h1 {
+            color: #2d3748;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        p {
+            color: #4a5568;
+            margin-bottom: 1rem;
+            font-size: 1rem;
+        }
+
+        .features {
+            text-align: left;
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: rgba(168, 230, 207, 0.2);
+            border-radius: 12px;
+            border-left: 4px solid #A8E6CF;
+        }
+
+        .features h3 {
+            color: #2d3748;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .features li {
+            margin-bottom: 0.5rem;
+            padding-left: 1.5rem;
+            position: relative;
+            color: #4a5568;
+        }
+
+        .features li::before {
+            content: "✨";
+            position: absolute;
+            left: 0;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #A8E6CF, #8FD0CC);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            margin: 0.5rem;
+            box-shadow: 0 4px 15px rgba(168, 230, 207, 0.4);
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(168, 230, 207, 0.6);
+        }
+
+        .status {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            color: #4a5568;
+        }
+
+        .network-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #ff6b6b;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            animation: blink 1.5s infinite;
+        }
+
+        .network-status.online {
+            background: #51cf66;
+            animation: none;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                margin: 1rem;
+                padding: 1.5rem;
+            }
+
+            h1 {
+                font-size: 1.5rem;
+            }
+
+            .offline-icon {
+                width: 60px;
+                height: 60px;
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="offline-icon">
+            📖
+        </div>
+
+        <h1>暂时离线了</h1>
+        <p>看起来网络连接有些问题，但别担心！</p>
+
+        <div class="features">
+            <h3>🌟 离线也能使用的功能：</h3>
+            <ul>
+                <li>浏览已缓存的故事内容</li>
+                <li>查看应用基本功能</li>
+                <li>保存故事草稿（稍后同步）</li>
+                <li>访问离线帮助页面</li>
+            </ul>
+        </div>
+
+        <button class="button" onclick="attemptReconnect()">🔄 重新连接</button>
+        <button class="button" onclick="goHome()">🏠 返回首页</button>
+
+        <div class="status">
+            <span class="network-status" id="networkStatus"></span>
+            <span id="networkText">检查网络状态...</span>
+        </div>
+    </div>
+
+    <script>
+        // 网络状态检测
+        function updateNetworkStatus() {
+            const statusElement = document.getElementById('networkStatus');
+            const textElement = document.getElementById('networkText');
+
+            if (navigator.onLine) {
+                statusElement.className = 'network-status online';
+                textElement.textContent = '网络已连接';
+            } else {
+                statusElement.className = 'network-status';
+                textElement.textContent = '网络未连接';
+            }
+        }
+
+        // 尝试重新连接
+        function attemptReconnect() {
+            if (navigator.onLine) {
+                window.location.reload();
+            } else {
+                alert('请检查网络连接后重试');
+            }
+        }
+
+        // 返回首页
+        function goHome() {
+            try {
+                window.location.href = '/';
+            } catch (error) {
+                // 如果导航失败，显示消息
+                alert('请在网络连接恢复后返回首页');
+            }
+        }
+
+        // 监听网络状态变化
+        window.addEventListener('online', () => {
+            updateNetworkStatus();
+            // 网络恢复时自动重新加载
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        });
+
+        window.addEventListener('offline', updateNetworkStatus);
+
+        // 初始化网络状态
+        updateNetworkStatus();
+
+        // 定期检查网络状态
+        setInterval(updateNetworkStatus, 5000);
+
+        // 注册 Service Worker 消息监听
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data && event.data.type === 'NETWORK_STATUS') {
+                    updateNetworkStatus();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
