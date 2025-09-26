@@ -84,19 +84,19 @@ jobs:
             BASE_URL="http://$DEFAULT_HOST:${STAGING_PORT}"
           fi
 
-          cat > deploy.env <<EOF
-DEEPSEEK_API_KEY=${DEEPSEEK_KEY}
-DEEPSEEK_API_URL=https://api.deepseek.com
-NODE_ENV=staging
-PORT=5000
-FRONTEND_URL=${BASE_URL}
-MONGODB_URI=${MONGO_URI}
-MONGODB_DB_NAME=storyapp_staging
-ENABLE_DETAILED_LOGGING=false
-LOG_LEVEL=info
-STAGING_PR_NUMBER=${{ steps.meta.outputs.pr }}
-STAGING_BRANCH=${{ steps.meta.outputs.branch }}
-EOF
+          {
+            echo "DEEPSEEK_API_KEY=${DEEPSEEK_KEY}"
+            echo "DEEPSEEK_API_URL=https://api.deepseek.com"
+            echo "NODE_ENV=staging"
+            echo "PORT=5000"
+            echo "FRONTEND_URL=${BASE_URL}"
+            echo "MONGODB_URI=${MONGO_URI}"
+            echo "MONGODB_DB_NAME=storyapp_staging"
+            echo "ENABLE_DETAILED_LOGGING=false"
+            echo "LOG_LEVEL=info"
+            echo "STAGING_PR_NUMBER=${{ steps.meta.outputs.pr }}"
+            echo "STAGING_BRANCH=${{ steps.meta.outputs.branch }}"
+          } > deploy.env
           echo "env_path=$(pwd)/deploy.env" >> $GITHUB_OUTPUT
           echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
 
@@ -195,7 +195,7 @@ EOF
             echo "❌ Staging 启动超时"
             exit 1
           fi
-EOSSH
+          EOSSH
           then
             DEPLOY_STATUS="success"
           fi
