@@ -8,6 +8,32 @@ const STORAGE_KEYS = {
   USER_PREFERENCES: 'storyapp_user_preferences'
 } as const;
 
+export interface UserPreferences {
+  soundEnabled: boolean;
+  animationEnabled: boolean;
+  fontSize: 'small' | 'medium' | 'large';
+  theme: 'default' | 'dark' | 'high-contrast';
+  voiceId?: string;
+  speechSpeed: number;
+  speechPitch: number;
+  autoPlay: boolean;
+  mute: boolean;
+  showTranscript: boolean;
+  lastProvider?: string;
+}
+
+export const defaultPreferences: UserPreferences = {
+  soundEnabled: true,
+  animationEnabled: true,
+  fontSize: 'medium',
+  theme: 'default',
+  speechSpeed: 1,
+  speechPitch: 1,
+  autoPlay: false,
+  mute: false,
+  showTranscript: true,
+};
+
 /**
  * 保存当前故事会话到本地存储
  */
@@ -92,14 +118,11 @@ export function getStoryHistory(): any[] {
 /**
  * 保存用户偏好设置
  */
-export function saveUserPreferences(preferences: {
-  soundEnabled?: boolean;
-  animationEnabled?: boolean;
-  fontSize?: 'small' | 'medium' | 'large';
-  theme?: 'default' | 'dark' | 'high-contrast';
-}): void {
+export function saveUserPreferences(preferences: Partial<UserPreferences>): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.USER_PREFERENCES, JSON.stringify(preferences));
+    const current = getUserPreferences();
+    const payload = { ...current, ...preferences };
+    localStorage.setItem(STORAGE_KEYS.USER_PREFERENCES, JSON.stringify(payload));
     console.log('用户偏好已保存');
   } catch (error) {
     console.error('保存用户偏好失败:', error);
@@ -109,23 +132,16 @@ export function saveUserPreferences(preferences: {
 /**
  * 获取用户偏好设置
  */
-export function getUserPreferences(): any {
+export function getUserPreferences(): UserPreferences {
   try {
     const stored = localStorage.getItem(STORAGE_KEYS.USER_PREFERENCES);
-    return stored ? JSON.parse(stored) : {
-      soundEnabled: true,
-      animationEnabled: true,
-      fontSize: 'medium',
-      theme: 'default'
-    };
+    if (!stored) {
+      return { ...defaultPreferences };
+    }
+    return { ...defaultPreferences, ...JSON.parse(stored) };
   } catch (error) {
     console.error('获取用户偏好失败:', error);
-    return {
-      soundEnabled: true,
-      animationEnabled: true,
-      fontSize: 'medium',
-      theme: 'default'
-    };
+    return { ...defaultPreferences };
   }
 }
 

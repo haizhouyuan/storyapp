@@ -17,7 +17,8 @@ import {
   requestIdMiddleware,
   healthCheckMiddleware,
   readyCheckMiddleware,
-  metricsMiddleware
+  metricsMiddleware,
+  ttsRateLimit
 } from './middleware/observability';
 import logger, { createLogger } from './config/logger';
 
@@ -25,6 +26,7 @@ import logger, { createLogger } from './config/logger';
 import storyRoutes from './routes/stories';
 import healthRoutes from './routes/health';
 import adminRoutes from './routes/admin';
+import ttsRoutes from './routes/tts';
 // import workflowProjectsRoutes from './routes/workflow/projects';
 // import workflowMiraclesRoutes from './routes/workflow/miracles';
 import docsRoutes from './routes/docs';
@@ -99,6 +101,7 @@ app.use('/api/health', healthRoutes);
 
 // Main API routes
 app.use('/api/admin', adminRoutes);
+app.use('/api/tts', ttsRateLimit, ttsRoutes);
 app.use('/api', storyRoutes);
 
 // 静态文件服务（前端）

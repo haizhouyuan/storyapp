@@ -9,7 +9,10 @@ import type {
   DeleteStoryResponse,
   GenerateFullStoryRequest,
   GenerateFullStoryResponse,
-  ApiError
+  ApiError,
+  TtsSynthesisRequest,
+  TtsSynthesisResponse,
+  TtsVoicesResponse
 } from '../../../shared/types';
 
 // API基础配置
@@ -164,6 +167,32 @@ export async function healthCheck(): Promise<any> {
     return response.data;
   } catch (error) {
     console.error('健康检查失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 请求语音合成
+ */
+export async function requestStorySpeech(params: TtsSynthesisRequest): Promise<TtsSynthesisResponse> {
+  try {
+    const response = await apiClient.post('/tts', params);
+    return response.data;
+  } catch (error) {
+    console.error('语音合成请求失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 获取可用语音列表
+ */
+export async function fetchTtsVoices(): Promise<TtsVoicesResponse> {
+  try {
+    const response = await apiClient.get('/tts/voices');
+    return response.data;
+  } catch (error) {
+    console.error('获取语音列表失败:', error);
     throw error;
   }
 }

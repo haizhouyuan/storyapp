@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { PointsToaster } from './components/points';
+import { AudioPreferencesProvider } from './context/AudioPreferencesContext';
 
 // 导入页面组件
 import HomePage from './pages/HomePage';
@@ -25,12 +26,13 @@ function App() {
   }, [storyTreeSession]);
 
   return (
-    <Router>
-      <div className="App min-h-screen text-points-text">
-        <PointsToaster />
+    <AudioPreferencesProvider>
+      <Router>
+        <div className="App min-h-screen text-points-text">
+          <PointsToaster />
 
-        {/* 路由配置 */}
-        <Routes>
+          {/* 路由配置 */}
+          <Routes>
           {/* 首页：故事主题输入页 */}
           <Route 
             path="/" 
@@ -75,9 +77,10 @@ function App() {
             path="/my-stories" 
             element={<MyStoriesPage />} 
           />
-        </Routes>
-      </div>
-    </Router>
+          </Routes>
+        </div>
+      </Router>
+    </AudioPreferencesProvider>
   );
 }
 

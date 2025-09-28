@@ -62,7 +62,8 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
           path: [],
           isComplete: false,
           startTime: Date.now(),
-          maxChoices
+          maxChoices,
+          sessionId: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         };
 
         onStartStory(session);

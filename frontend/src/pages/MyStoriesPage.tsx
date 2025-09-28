@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -8,6 +8,9 @@ import {
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
   ClipboardDocumentListIcon,
+  SpeakerWaveIcon,
+  Cog6ToothIcon,
+  PauseIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
 
@@ -17,6 +20,10 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { PointsBadge, PointsModal, PointsPageShell, PointsSection, PointsStatCard } from '../components/points';
 import { getStories, getStoryById, deleteStory } from '../utils/api';
 import type { Story } from '../../../shared/types';
+import { useAudioPreferences } from '../context/AudioPreferencesContext';
+import useStoryTts from '../hooks/useStoryTts';
+import useStoryAudio from '../hooks/useStoryAudio';
+import AudioSettingsModal from '../components/AudioSettingsModal';
 
 export default function MyStoriesPage() {
   const [stories, setStories] = useState<Story[]>([]);
@@ -27,8 +34,29 @@ export default function MyStoriesPage() {
   const [selectedStory, setSelectedStory] = useState<Story | null>(null);
   const [fullStoryContent, setFullStoryContent] = useState<string>('');
   const [isLoadingStoryDetail, setIsLoadingStoryDetail] = useState(false);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const navigate = useNavigate();
+  const { preferences } = useAudioPreferences();
+  const historySessionId = useMemo(() => selectedStory?.id || 'history-playback', [selectedStory?.id]);
+  const tts = useStoryTts({
+    sessionId: historySessionId,
+    defaultVoiceId: preferences.voiceId,
+    defaultSpeed: preferences.speechSpeed,
+    defaultPitch: preferences.speechPitch,
+  });
+  const audioPlayer = useStoryAudio({ autoCleanup: true });
+  const {
+    status: audioStatus,
+    isOffline: audioOffline,
+    error: audioPlayerError,
+    setSource: setAudioSource,
+    setPlaybackRate,
+    setVolume,
+    pause: pauseAudio,
+  } = audioPlayer;
 
   const parseStoryContent = (content: string): string => {
     try {
@@ -44,6 +72,16 @@ export default function MyStoriesPage() {
       return content;
     }
   };
+
+  const currentTranscript = useMemo(() => {
+    if (!selectedStory) return '';
+    if (fullStoryContent) return fullStoryContent;
+    return parseStoryContent(selectedStory.content);
+  }, [fullStoryContent, selectedStory]);
+
+  const isAudioLoading = isSynthesizing || tts.status === 'loading' || audioStatus === 'loading';
+  const isAudioPlaying = audioStatus === 'playing';
+  const audioButtonDisabled = !selectedStory || audioOffline || isAudioLoading || !currentTranscript;
 
   useEffect(() => {
     loadStories();
@@ -134,7 +172,66 @@ export default function MyStoriesPage() {
     setSelectedStory(null);
     setFullStoryContent('');
     setIsLoadingStoryDetail(false);
+    setAudioError(null);
+    pauseAudio();
   };
+
+  const handlePlayAudio = () => {
+    if (audioButtonDisabled) return;
+    if (isAudioPlaying) {
+      pauseAudio();
+      return;
+    }
+    triggerSynthesis();
+  };
+
+  useEffect(() => {
+    setVolume(preferences.mute ? 0 : 1);
+    setPlaybackRate(preferences.speechSpeed);
+  }, [preferences.mute, preferences.speechSpeed, setPlaybackRate, setVolume]);
+
+  const triggerSynthesis = useCallback(async () => {
+    if (!selectedStory) return;
+    if (!currentTranscript) {
+      toast.error('暂无可播放的故事内容');
+      return;
+    }
+    if (audioOffline) {
+      toast.error('当前网络不可用，无法生成朗读');
+      return;
+    }
+
+    const trimmedText = currentTranscript.length > 7800 ? `${currentTranscript.slice(0, 7800)}\n（内容较长，已截断为预览朗读）` : currentTranscript;
+
+    setIsSynthesizing(true);
+    setAudioError(null);
+    try {
+      const response = await tts.synthesize({
+        text: trimmedText,
+        voiceId: preferences.voiceId,
+        speed: preferences.speechSpeed,
+        pitch: preferences.speechPitch,
+        sessionId: historySessionId,
+      });
+
+      if (!response.audioUrl) {
+        throw new Error('语音合成服务未返回音频地址');
+      }
+
+      await setAudioSource(response.audioUrl, !preferences.mute);
+      setPlaybackRate(preferences.speechSpeed);
+      setVolume(preferences.mute ? 0 : 1);
+      if (preferences.mute) {
+        pauseAudio();
+      }
+    } catch (err: any) {
+      const message = err?.message || '朗读生成失败';
+      setAudioError(message);
+      toast.error(message);
+    } finally {
+      setIsSynthesizing(false);
+    }
+  }, [audioOffline, currentTranscript, historySessionId, pauseAudio, preferences.mute, preferences.speechPitch, preferences.speechSpeed, preferences.voiceId, selectedStory, setAudioSource, setPlaybackRate, setVolume, tts]);
 
   const handleGoHome = () => {
     navigate('/');
@@ -159,16 +256,27 @@ export default function MyStoriesPage() {
             <BookOpenIcon className="h-5 w-5 text-points-primary" />
             <span>睡前故事 · 管理中心</span>
           </div>
-          <Button
-            onClick={handleGoHome}
-            variant="ghost"
-            size="small"
-            icon={<HomeIcon className="h-5 w-5" />}
-            testId="home-button"
-            className="shadow-none"
-          >
-            返回首页
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setIsSettingsOpen(true)}
+              variant="ghost"
+              size="small"
+              icon={<Cog6ToothIcon className="h-5 w-5" />}
+              className="shadow-none"
+            >
+              语音设置
+            </Button>
+            <Button
+              onClick={handleGoHome}
+              variant="ghost"
+              size="small"
+              icon={<HomeIcon className="h-5 w-5" />}
+              testId="home-button"
+              className="shadow-none"
+            >
+              返回首页
+            </Button>
+          </div>
         </>
       }
       header={
@@ -323,6 +431,20 @@ export default function MyStoriesPage() {
             <div className="space-y-1 pr-10">
               <h2 className="text-2xl font-semibold text-points-text-strong">{selectedStory.title}</h2>
               <p className="text-sm text-points-text-muted">{parseStoryContent(selectedStory.content).slice(0, 60)}...</p>
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <Button
+                  onClick={handlePlayAudio}
+                  variant="secondary"
+                  size="small"
+                  icon={isAudioPlaying ? <PauseIcon className="h-4 w-4" /> : <SpeakerWaveIcon className="h-4 w-4" />}
+                  disabled={audioButtonDisabled}
+                >
+                  {isAudioPlaying ? '暂停朗读' : isAudioLoading ? '朗读生成中...' : '播放朗读'}
+                </Button>
+                {audioOffline && <span className="text-xs text-red-500">离线状态，暂不可用</span>}
+                {audioError && <span className="text-xs text-red-500">{audioError}</span>}
+                {audioPlayerError && !audioError && <span className="text-xs text-red-500">{audioPlayerError}</span>}
+              </div>
             </div>
             <div className="max-h-[60vh] overflow-y-auto rounded-points-lg border border-points-border/40 bg-white/90 p-5 text-base leading-relaxed text-points-text whitespace-pre-wrap">
               {isLoadingStoryDetail ? (
@@ -336,6 +458,8 @@ export default function MyStoriesPage() {
           </div>
         )}
       </PointsModal>
+
+      <AudioSettingsModal open={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </PointsPageShell>
   );
 }

@@ -161,6 +161,13 @@ export const validationRateLimit = createRateLimiter(
   'validation'
 );
 
+export const ttsRateLimit = createRateLimiter(
+  rateLimitConfig.tts.windowMs,
+  rateLimitConfig.tts.max,
+  '语音合成请求过多，请稍后再试',
+  'tts'
+);
+
 // HTTP metrics and logging middleware
 export const httpMetricsMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const startTime = Date.now();

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { HomeIcon, SpeakerWaveIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { HomeIcon, SpeakerWaveIcon, SparklesIcon, Cog6ToothIcon, PauseIcon } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
 
 import Button from '../components/Button';
@@ -10,6 +10,10 @@ import { generateStory } from '../utils/api';
 import { getRandomEncouragement } from '../utils/helpers';
 import { PointsBadge, PointsPageShell, PointsProgress, PointsSection } from '../components/points';
 import type { StorySession } from '../../../shared/types';
+import { useAudioPreferences } from '../context/AudioPreferencesContext';
+import useStoryAudio from '../hooks/useStoryAudio';
+import useStoryTts from '../hooks/useStoryTts';
+import AudioSettingsModal from '../components/AudioSettingsModal';
 
 interface StoryPageProps {
   storySession: StorySession | null;
@@ -21,13 +25,96 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
   const [currentChoices, setCurrentChoices] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const navigate = useNavigate();
+  const { preferences } = useAudioPreferences();
+  const sessionId = useMemo(
+    () => storySession?.sessionId || `${storySession?.topic || 'story'}-${storySession?.startTime || Date.now()}`,
+    [storySession?.sessionId, storySession?.startTime, storySession?.topic]
+  );
+
+  const tts = useStoryTts({
+    sessionId,
+    defaultVoiceId: preferences.voiceId,
+    defaultSpeed: preferences.speechSpeed,
+    defaultPitch: preferences.speechPitch,
+  });
+
+  const audioPlayer = useStoryAudio({
+    onEnded: () => {
+      if (preferences.autoPlay) {
+        toast('本段朗读完成啦', { icon: '🎵', duration: 1500 });
+      }
+    },
+  });
+  const lastSynthKeyRef = useRef<string | null>(null);
+  const {
+    status: audioStatus,
+    error: audioPlayerError,
+    isOffline: audioOffline,
+    setSource: setAudioSource,
+    setPlaybackRate,
+    setVolume,
+    pause: pauseAudio,
+  } = audioPlayer;
 
   const interactionCount = useMemo(
     () => (storySession ? storySession.path.filter((item) => Boolean(item.choice)).length : 0),
     [storySession],
   );
+
+  const isAudioLoading = isSynthesizing || tts.status === 'loading' || audioStatus === 'loading';
+  const isAudioPlaying = audioStatus === 'playing';
+  const audioButtonDisabled = isAudioLoading || audioOffline || !currentSegment || !hasStarted;
+
+  const buildTtsRequest = useCallback(() => {
+    if (!currentSegment) return null;
+    return {
+      text: currentSegment,
+      voiceId: preferences.voiceId,
+      speed: preferences.speechSpeed,
+      pitch: preferences.speechPitch,
+      sessionId,
+    };
+  }, [currentSegment, preferences.speechPitch, preferences.speechSpeed, preferences.voiceId, sessionId]);
+
+  const triggerSynthesis = useCallback(async (autoPlayPreferred: boolean) => {
+    const payload = buildTtsRequest();
+    if (!payload) {
+      toast.error('暂无可朗读的内容');
+      return;
+    }
+
+    const shouldAutoPlay = autoPlayPreferred && !preferences.mute;
+
+    setIsSynthesizing(true);
+    setAudioError(null);
+
+    try {
+      const response = await tts.synthesize(payload);
+      if (!response.audioUrl) {
+        throw new Error('语音合成服务未返回音频地址');
+      }
+
+      await setAudioSource(response.audioUrl, shouldAutoPlay);
+      setPlaybackRate(preferences.speechSpeed);
+      setVolume(preferences.mute ? 0 : 1);
+      if (preferences.mute) {
+        pauseAudio();
+      }
+
+      lastSynthKeyRef.current = tts.lastRequestKey || JSON.stringify(payload);
+    } catch (err: any) {
+      const message = err?.message || '语音播放失败，请稍后再试';
+      setAudioError(message);
+      toast.error(message);
+    } finally {
+      setIsSynthesizing(false);
+    }
+  }, [buildTtsRequest, pauseAudio, preferences.mute, preferences.speechSpeed, setAudioSource, setPlaybackRate, setVolume, tts]);
 
 
   const generateFirstSegment = useCallback(async () => {
@@ -91,6 +178,28 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
       setHasStarted(true);
     }
   }, [storySession, generateFirstSegment, navigate]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+    const payload = buildTtsRequest();
+    if (!payload) return;
+    const key = JSON.stringify(payload);
+    if (!preferences.autoPlay || preferences.mute) {
+      return;
+    }
+    if (lastSynthKeyRef.current === key) {
+      return;
+    }
+    lastSynthKeyRef.current = key;
+    triggerSynthesis(true).catch((error) => {
+      console.error('自动朗读失败', error);
+    });
+  }, [buildTtsRequest, hasStarted, preferences.autoPlay, preferences.mute, triggerSynthesis]);
+
+  useEffect(() => {
+    setVolume(preferences.mute ? 0 : 1);
+    setPlaybackRate(preferences.speechSpeed);
+  }, [preferences.mute, preferences.speechSpeed, setPlaybackRate, setVolume]);
 
   const handleChoice = async (choice: string) => {
     if (!storySession || isLoading) return;
@@ -166,9 +275,14 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
     navigate('/');
   };
 
-  const handlePlayAudio = () => {
-    toast('语音播放功能即将上线！', { icon: '🔊' });
-  };
+  const handlePlayAudio = useCallback(async () => {
+    if (isSynthesizing) return;
+    if (audioOffline) {
+      toast.error('当前网络不可用，暂时无法播放语音');
+      return;
+    }
+    await triggerSynthesis(true);
+  }, [audioOffline, isSynthesizing, triggerSynthesis]);
 
   if (!storySession) {
     return null;
@@ -184,16 +298,27 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
             <SparklesIcon className="h-5 w-5 text-points-primary" />
             <span>互动故事 · 实时生成</span>
           </div>
-          <Button
-            onClick={handleGoHome}
-            variant="ghost"
-            size="small"
-            icon={<HomeIcon className="h-5 w-5" />}
-            className="shadow-none"
-            testId="home-button"
-          >
-            返回首页
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setIsSettingsOpen(true)}
+              variant="ghost"
+              size="small"
+              icon={<Cog6ToothIcon className="h-5 w-5" />}
+              className="shadow-none"
+            >
+              语音设置
+            </Button>
+            <Button
+              onClick={handleGoHome}
+              variant="ghost"
+              size="small"
+              icon={<HomeIcon className="h-5 w-5" />}
+              className="shadow-none"
+              testId="home-button"
+            >
+              返回首页
+            </Button>
+          </div>
         </>
       }
       header={
@@ -244,17 +369,40 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
                 </div>
                 <button
                   type="button"
-                  onClick={handlePlayAudio}
-                  className="points-focus flex h-11 w-11 items-center justify-center rounded-full bg-points-secondary text-white shadow-points-soft transition hover:scale-105"
-                  title="播放语音"
+                  onClick={isAudioPlaying ? pauseAudio : handlePlayAudio}
+                  className={`points-focus flex h-11 w-11 items-center justify-center rounded-full transition hover:scale-105 ${audioButtonDisabled ? 'cursor-not-allowed bg-gray-300 text-gray-500' : 'bg-points-secondary text-white shadow-points-soft'}`}
+                  title={audioOffline ? '当前离线，无法播放' : isAudioPlaying ? '暂停朗读' : '播放朗读'}
+                  aria-pressed={isAudioPlaying}
+                  aria-busy={isAudioLoading}
+                  disabled={audioButtonDisabled}
                 >
-                  <SpeakerWaveIcon className="h-5 w-5" />
+                  {isAudioLoading ? (
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/60 border-t-transparent" aria-hidden="true" />
+                  ) : isAudioPlaying ? (
+                    <PauseIcon className="h-5 w-5" />
+                  ) : (
+                    <SpeakerWaveIcon className="h-5 w-5" />
+                  )}
+                  <span className="sr-only">{isAudioPlaying ? '暂停朗读' : '播放朗读'}</span>
                 </button>
               </div>
 
-              <div className="rounded-points-lg border border-points-border/50 bg-white/95 p-6 text-base leading-relaxed text-points-text shadow-inner whitespace-pre-wrap">
-                {currentSegment}
-              </div>
+              {preferences.showTranscript ? (
+                <div className="rounded-points-lg border border-points-border/50 bg-white/95 p-6 text-base leading-relaxed text-points-text shadow-inner whitespace-pre-wrap">
+                  {currentSegment}
+                </div>
+              ) : (
+                <div className="rounded-points-lg border border-dashed border-points-border/50 bg-white/70 p-6 text-sm text-points-text-muted">
+                  字幕已隐藏，可在「语音播放设置」中重新开启。
+                </div>
+              )}
+              {(audioError || audioPlayerError || audioOffline) && (
+                <div className="text-xs text-red-500">
+                  {audioOffline
+                    ? '当前网络不可用，语音播放已暂停。'
+                    : audioError || audioPlayerError}
+                </div>
+              )}
             </motion.div>
           </AnimatePresence>
         </PointsSection>
@@ -301,6 +449,8 @@ export default function StoryPage({ storySession, onUpdateSession }: StoryPagePr
       <div className="rounded-points-lg border border-dashed border-points-border/50 bg-white/80 px-5 py-4 text-sm text-points-text-muted">
         温馨提示：可随时返回首页重新输入主题；平台会保存本次互动的进度，确保孩子的每次选择都被记录下来。
       </div>
+
+      <AudioSettingsModal open={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </PointsPageShell>
   );
 }

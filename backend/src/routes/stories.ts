@@ -291,13 +291,4 @@ router.post('/generate-full-story', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/tts - 语音合成接口（占位）
-router.get('/tts', (req: Request, res: Response) => {
-  res.status(501).json({
-    error: '语音合成功能尚未实现',
-    message: '此接口为未来功能预留，可集成百度TTS、讯飞语音等中文TTS服务',
-    code: 'NOT_IMPLEMENTED'
-  });
-});
-
 export default router;

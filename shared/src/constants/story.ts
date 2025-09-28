@@ -36,7 +36,8 @@ export const API_ENDPOINTS = {
   GET_STORY: '/api/get-story',
   HEALTH: '/api/health',
   HEALTHZ: '/healthz',
-  TTS: '/api/tts'
+  TTS: '/api/tts',
+  TTS_VOICES: '/api/tts/voices'
 } as const;
 
 export const HTTP_STATUS = {

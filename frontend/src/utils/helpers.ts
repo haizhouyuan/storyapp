@@ -1,4 +1,5 @@
 import type { StorySession } from '../../../shared/types';
+import { getUserPreferences } from './storage';
 
 /**
  * 格式化日期为友好的显示格式
@@ -152,10 +153,9 @@ export function validateStoryTopic(topic: string): {
 export function playFeedbackSound(type: 'click' | 'success' | 'error' = 'click'): void {
   try {
     // 检查用户偏好设置
-    const preferences = localStorage.getItem('storyapp_user_preferences');
-    if (preferences) {
-      const { soundEnabled } = JSON.parse(preferences);
-      if (!soundEnabled) return;
+    const preferences = getUserPreferences();
+    if (!preferences.soundEnabled || preferences.mute) {
+      return;
     }
     
     // Web Audio API 简单实现

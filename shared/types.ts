@@ -84,6 +84,7 @@ export interface StorySession {
   startTime: number;
   // 故事在开始时确定的互动上限（5-10 次）
   maxChoices: number;
+  sessionId?: string;
 }
 
 // 故事树节点类型 - 支持预生成完整故事树
@@ -134,4 +135,46 @@ export interface ApiError {
   message: string;
   code?: string;
   status: number;
+}
+
+// 语音合成相关类型
+export interface TtsSynthesisRequest {
+  text: string;
+  voiceId?: string;
+  speed?: number;
+  pitch?: number;
+  format?: 'mp3' | 'pcm';
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TtsSynthesisResponse {
+  success: boolean;
+  audioUrl?: string;
+  provider?: string;
+  requestId?: string;
+  expiresIn?: number;
+  format?: 'mp3' | 'pcm';
+  cached?: boolean;
+  warnings?: string[];
+  error?: string;
+  code?: string;
+}
+
+export interface TtsVoiceOption {
+  id: string;
+  name: string;
+  language: string;
+  gender?: 'male' | 'female' | 'child';
+  description?: string;
+}
+
+export interface TtsVoicesResponse {
+  provider: string;
+  voices: TtsVoiceOption[];
+  speedRange: [number, number];
+  pitchRange: [number, number];
+  formats: Array<'mp3' | 'pcm'>;
+  defaultVoice: string;
+  metadata?: Record<string, unknown>;
 }

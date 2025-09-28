@@ -189,11 +189,18 @@ function setDefaultValues(config) {
     ENABLE_DB_LOGGING: 'true',
     ENABLE_DETAILED_LOGGING: 'true',
     LOG_RETENTION_DAYS: '30',
-    
+
     // 限流配置
     RATE_LIMIT_WINDOW_MS: process.env.NODE_ENV === 'test' ? '300000' : '900000',
     RATE_LIMIT_MAX_REQUESTS: process.env.NODE_ENV === 'test' ? '1000' : '100',
-    
+
+    // TTS 配置默认值
+    TTS_PROVIDER: 'mock',
+    TTS_CACHE_TTL: '300',
+    TTS_RATE_LIMIT_WINDOW: '60000',
+    TTS_RATE_LIMIT_MAX: '10',
+    TTS_AUDIO_BASE_URL: 'http://localhost:5001/static/tts',
+
     // React App 默认值
     REACT_APP_API_URL: 'http://localhost:5000/api',
     REACT_APP_VERSION: '1.0.0',

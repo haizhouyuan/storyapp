@@ -86,3 +86,44 @@ export interface ApiResponse<T = any> {
   message?: string;
   error?: string;
 }
+
+export interface TtsSynthesisRequest {
+  text: string;
+  voiceId?: string;
+  speed?: number;
+  pitch?: number;
+  format?: 'mp3' | 'pcm';
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TtsSynthesisResponse {
+  success: boolean;
+  audioUrl?: string;
+  provider?: string;
+  requestId?: string;
+  expiresIn?: number;
+  format?: 'mp3' | 'pcm';
+  cached?: boolean;
+  warnings?: string[];
+  error?: string;
+  code?: string;
+}
+
+export interface TtsVoiceOption {
+  id: string;
+  name: string;
+  language: string;
+  gender?: 'male' | 'female' | 'child';
+  description?: string;
+}
+
+export interface TtsVoicesResponse {
+  provider: string;
+  voices: TtsVoiceOption[];
+  speedRange: [number, number];
+  pitchRange: [number, number];
+  formats: Array<'mp3' | 'pcm'>;
+  defaultVoice: string;
+  metadata?: Record<string, unknown>;
+}

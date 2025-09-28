@@ -78,6 +78,13 @@ Manual Deploy → SSH to ECS → Pull Image → Rolling Update
 3. **修复问题并推送** → CI重新运行
 4. **Merge后** → 自动构建Docker镜像
 
+### 本地CI校验清单
+- `npm run verify`：一次性执行前端 lint、全量 type-check 以及后端/前端单元测试。
+- `npm run test:e2e`：运行 Playwright 全量 E2E，用于复现 CI 结果（CI 环境仅跑桌面端，`workers=3` 并行加速）。
+- `npm run lint:frontend:fix`：如需自动修复常见 ESLint 问题再提交。
+
+> ✅ CI 会在 `unit-tests` 作业中执行 `npm run lint`、`npm run type-check`、`npm run test:unit`，并在 `e2e-tests` 作业中执行 `npm run test:e2e`。确保在提交前通过上述脚本，可以显著减少流水线反复。
+
 ### 部署工作流
 1. **访问Actions页面** → 选择"Deploy to Production"
 2. **点击Run workflow** → 输入要部署的镜像tag (默认最新)

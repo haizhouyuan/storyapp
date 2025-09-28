@@ -33,6 +33,10 @@ export const config = {
       windowMs: parseInt(process.env.RATE_LIMIT_VALIDATION_WINDOW_MS || '300000', 10), // 5 minutes
       max: parseInt(process.env.RATE_LIMIT_VALIDATION_MAX || '20', 10),
     },
+    tts: {
+      windowMs: parseInt(process.env.TTS_RATE_LIMIT_WINDOW || '60000', 10),
+      max: parseInt(process.env.TTS_RATE_LIMIT_MAX || '10', 10),
+    },
   },
 
   // Security configuration
@@ -108,6 +112,10 @@ export const validateConfig = () => {
 
   if (config.rateLimit.general.max <= 0) {
     errors.push('Rate limit max must be greater than 0');
+  }
+
+  if (config.rateLimit.tts.max <= 0) {
+    errors.push('TTS rate limit max must be greater than 0');
   }
 
   // Add more validations as needed

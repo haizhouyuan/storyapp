@@ -40,7 +40,14 @@ export enum EventType {
   // 系统相关
   SESSION_START = 'session_start',
   SESSION_END = 'session_end',
-  PERFORMANCE_METRICS = 'performance_metrics'
+  PERFORMANCE_METRICS = 'performance_metrics',
+
+  // 语音合成相关
+  TTS_REQUEST_RECEIVED = 'tts_request_received',
+  TTS_CACHE_HIT = 'tts_cache_hit',
+  TTS_PROVIDER_RESPONSE = 'tts_provider_response',
+  TTS_RESPONSE_SENT = 'tts_response_sent',
+  TTS_ERROR = 'tts_error'
 }
 
 import type { 

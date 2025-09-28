@@ -91,6 +91,26 @@ export const errorCounter = new client.Counter({
   labelNames: ['type', 'endpoint', 'error_code'],
 });
 
+// Text-to-Speech metrics
+export const ttsRequestCounter = new client.Counter({
+  name: 'storyapp_tts_requests_total',
+  help: 'Total number of TTS synthesis requests',
+  labelNames: ['provider', 'cached'],
+});
+
+export const ttsLatencyHistogram = new client.Histogram({
+  name: 'storyapp_tts_latency_seconds',
+  help: 'Latency for TTS synthesis requests',
+  labelNames: ['provider'],
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20],
+});
+
+export const ttsErrorCounter = new client.Counter({
+  name: 'storyapp_tts_errors_total',
+  help: 'Total number of TTS synthesis errors',
+  labelNames: ['provider', 'reason'],
+});
+
 // Register all custom metrics
 register.registerMetric(httpRequestDuration);
 register.registerMetric(httpRequestTotal);
@@ -104,6 +124,9 @@ register.registerMetric(activeProjects);
 register.registerMetric(memoryUsage);
 register.registerMetric(rateLimitHits);
 register.registerMetric(errorCounter);
+register.registerMetric(ttsRequestCounter);
+register.registerMetric(ttsLatencyHistogram);
+register.registerMetric(ttsErrorCounter);
 
 // Helper function to update memory usage metrics
 export const updateMemoryMetrics = () => {
@@ -166,3 +189,17 @@ export const recordValidationOperation = (ruleId: string, projectStage: string, 
 export const recordError = (type: string, endpoint: string, errorCode: string) => {
   errorCounter.inc({ type, endpoint, error_code: errorCode });
 };
+
+export const ttsMetrics = {
+  incrementRequests(providerId: string, cached: boolean) {
+    ttsRequestCounter.inc({ provider: providerId, cached: cached ? 'true' : 'false' });
+  },
+  observeLatency(providerId: string, durationMs: number) {
+    ttsLatencyHistogram.observe({ provider: providerId }, durationMs / 1000);
+  },
+  incrementErrors(providerId: string, reason: string) {
+    ttsErrorCounter.inc({ provider: providerId, reason });
+  },
+};
+
+export type TtsMetricsType = typeof ttsMetrics;
