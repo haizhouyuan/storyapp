@@ -40,6 +40,14 @@ curl -L "https://github.com/docker/compose/releases/latest/download/docker-compo
 chmod +x /usr/local/bin/docker-compose
 ```
 
+### 补充：生成 MongoDB TLS 证书
+
+```bash
+./scripts/mongo/setup-local-secrets.sh
+```
+
+> 首次部署或证书轮换时执行，生成的文件位于 `config/mongo/tls` 与 `config/mongo/keyfile`。
+
 ### 第二步：拉取最新代码
 
 ```bash
@@ -64,9 +72,10 @@ cat > .env << 'EOF'
 DEEPSEEK_API_KEY=your_real_deepseek_api_key
 DEEPSEEK_API_URL=https://api.deepseek.com
 
-# MongoDB配置
-MONGODB_URI=mongodb://mongo:27017/storyapp
+# MongoDB 副本集配置（根据实际凭据更新）
+MONGODB_URI=mongodb://storyapp_app:StoryAppApp!234@storyapp-mongo-primary:27017,storyapp-mongo-secondary:27017/storyapp?replicaSet=storyapp-rs&authSource=admin&retryWrites=true&w=majority&tls=true
 MONGODB_DB_NAME=storyapp
+MONGODB_TLS_CA_FILE=./config/mongo/tls/ca.pem
 
 # 应用配置
 NODE_ENV=production
@@ -108,11 +117,11 @@ docker image prune -f
 # 3. 构建新镜像
 docker-compose build --no-cache app
 
-# 4. 启动MongoDB
-docker-compose up -d mongo
+# 4. 启动 MongoDB 副本集
+docker-compose up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
 
-# 5. 等待MongoDB就绪
-sleep 30
+# 5. 等待 MongoDB 就绪
+sleep 45
 
 # 6. 启动应用
 docker-compose up -d app

@@ -55,9 +55,26 @@ check_environment() {
 DEEPSEEK_API_KEY=your_deepseek_api_key
 DEEPSEEK_API_URL=https://api.deepseek.com
 
-# MongoDB配置
-MONGODB_URI=mongodb://mongo:27017/storyapp
+# MongoDB 副本集配置（请替换为真实凭据）
+MONGO_ROOT_USER=storyapp_root
+MONGO_ROOT_PASS=StoryAppRoot!234
+MONGO_APP_USER=storyapp_app
+MONGO_APP_PASS=StoryAppApp!234
+MONGO_BACKUP_USER=storyapp_backup
+MONGO_BACKUP_PASS=StoryAppBackup!234
+MONGO_REPLICA_SET=storyapp-rs
+MONGO_MAINTENANCE_DB=admin
+MONGODB_URI=mongodb://storyapp_app:StoryAppApp!234@storyapp-mongo-primary:27017,storyapp-mongo-secondary:27017/storyapp?replicaSet=storyapp-rs&authSource=admin&retryWrites=true&w=majority&tls=true
 MONGODB_DB_NAME=storyapp
+MONGODB_TLS_CA_FILE=./config/mongo/tls/ca.pem
+MONGODB_MAX_POOL_SIZE=50
+MONGODB_MIN_POOL_SIZE=5
+MONGODB_MAX_IDLE_TIME_MS=30000
+MONGODB_CONNECT_TIMEOUT_MS=20000
+MONGODB_SOCKET_TIMEOUT_MS=60000
+MONGODB_SERVER_SELECTION_TIMEOUT_MS=30000
+MONGODB_RETRY_WRITES=true
+MONGODB_READ_PREFERENCE=primaryPreferred
 
 # 应用配置
 NODE_ENV=production
@@ -68,10 +85,23 @@ ENABLE_DB_LOGGING=true
 LOG_LEVEL=info
 LOG_RETENTION_DAYS=30
 EOF
-        print_warning "请编辑.env文件配置真实的DEEPSEEK_API_KEY"
+        print_warning "请编辑 .env 文件配置真实的密钥与凭据"
     fi
     
     print_success "环境检查完成"
+}
+
+load_env() {
+    if [ -f .env ]; then
+        set -a
+        source .env
+        set +a
+    fi
+
+    # 默认值（防止缺失）
+    MONGO_ROOT_USER=${MONGO_ROOT_USER:-storyapp_root}
+    MONGO_ROOT_PASS=${MONGO_ROOT_PASS:-StoryAppRoot!234}
+    export MONGO_ROOT_USER MONGO_ROOT_PASS
 }
 
 # 清理旧容器和镜像
@@ -101,31 +131,35 @@ build_images() {
 start_services() {
     print_status "启动Docker服务..."
     
-    # 首先启动MongoDB
-    print_status "启动MongoDB..."
-    docker-compose up -d mongo
+    # 首先启动 MongoDB 副本集
+    print_status "启动MongoDB 副本集..."
+    docker-compose up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
     
-    # 等待MongoDB就绪
-    print_status "等待MongoDB就绪..."
-    timeout=60
+    # 等待主节点就绪
+    print_status "等待MongoDB主节点就绪..."
+    timeout=90
     while [ $timeout -gt 0 ]; do
-        if docker-compose exec -T mongo mongosh --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
-            print_success "MongoDB就绪"
+        if docker-compose exec -T mongo-primary \
+          mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+          -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+          --quiet --eval "db.hello().isWritablePrimary" | grep -q "true"; then
+            print_success "MongoDB 主节点就绪"
             break
         fi
-        sleep 2
-        timeout=$((timeout - 2))
+        sleep 3
+        timeout=$((timeout - 3))
     done
     
     if [ $timeout -le 0 ]; then
-        print_error "MongoDB启动超时"
+        print_error "MongoDB 启动超时"
+        docker-compose logs mongo-primary
         exit 1
     fi
     
     # 启动应用服务
     print_status "启动应用服务..."
     docker-compose up -d app
-    
+
     print_success "服务启动完成"
 }
 
@@ -154,7 +188,16 @@ verify_deployment() {
     # 显示服务状态
     print_status "服务状态："
     docker-compose ps
-    
+
+    # 副本集状态
+    print_status "检查副本集状态..."
+    if ! docker-compose exec -T mongo-primary \
+      mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+      -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+      --quiet --eval "rs.status().members.map(m => ({ name: m.name, state: m.stateStr, health: m.health }))"; then
+        print_warning "无法获取副本集状态，请手动排查"
+    fi
+
     # 测试健康检查
     print_status "执行健康检查..."
     health_response=$(curl -s http://localhost:5001/api/health)
@@ -302,7 +345,7 @@ show_deployment_info() {
     print_status "🛠️  常用命令："
     echo "  • 查看服务状态: docker-compose ps"
     echo "  • 查看应用日志: docker-compose logs -f app"
-    echo "  • 查看数据库日志: docker-compose logs -f mongo"
+    echo "  • 查看数据库日志: docker-compose logs -f mongo-primary"
     echo "  • 重启应用: docker-compose restart app"
     echo "  • 停止所有服务: docker-compose down"
     
@@ -318,6 +361,7 @@ main() {
     cd "$(dirname "$0")/.."  # 切换到项目根目录
     
     check_environment
+    load_env
     cleanup_old_deployment
     build_images
     start_services

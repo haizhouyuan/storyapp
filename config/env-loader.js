@@ -127,6 +127,15 @@ function parseEnvContent(content) {
   return envVars;
 }
 
+function toNumber(value, fallback) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  const parsed = parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
 /**
  * 验证必需的环境变量
  */
@@ -180,7 +189,16 @@ function setDefaultValues(config) {
     // 数据库配置
     MONGODB_URI: 'mongodb://localhost:27017',
     MONGODB_DB_NAME: 'storyapp',
-    
+    MONGO_REPLICA_SET: 'storyapp-rs',
+    MONGODB_MAX_POOL_SIZE: '50',
+    MONGODB_MIN_POOL_SIZE: '5',
+    MONGODB_MAX_IDLE_TIME_MS: '30000',
+    MONGODB_CONNECT_TIMEOUT_MS: '20000',
+    MONGODB_SOCKET_TIMEOUT_MS: '60000',
+    MONGODB_SERVER_SELECTION_TIMEOUT_MS: '30000',
+    MONGODB_RETRY_WRITES: 'true',
+    MONGODB_READ_PREFERENCE: 'primaryPreferred',
+
     // API配置
     DEEPSEEK_API_URL: 'https://api.deepseek.com',
     
@@ -249,7 +267,20 @@ function getTypedConfig() {
     
     database: {
       uri: process.env.MONGODB_URI || 'mongodb://localhost:27017',
-      name: process.env.MONGODB_DB_NAME || 'storyapp'
+      name: process.env.MONGODB_DB_NAME || 'storyapp',
+      replicaSet: process.env.MONGO_REPLICA_SET,
+      authSource: process.env.MONGODB_AUTH_SOURCE || 'admin',
+      options: {
+        maxPoolSize: toNumber(process.env.MONGODB_MAX_POOL_SIZE, 50),
+        minPoolSize: toNumber(process.env.MONGODB_MIN_POOL_SIZE, 5),
+        maxIdleTimeMS: toNumber(process.env.MONGODB_MAX_IDLE_TIME_MS, 30000),
+        connectTimeoutMS: toNumber(process.env.MONGODB_CONNECT_TIMEOUT_MS, 20000),
+        socketTimeoutMS: toNumber(process.env.MONGODB_SOCKET_TIMEOUT_MS, 60000),
+        serverSelectionTimeoutMS: toNumber(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS, 30000),
+        readPreference: process.env.MONGODB_READ_PREFERENCE || 'primaryPreferred',
+        tls: process.env.MONGODB_TLS === 'true' || !!process.env.MONGODB_TLS_CA_FILE,
+        tlsCAFile: process.env.MONGODB_TLS_CA_FILE,
+      }
     },
     
     api: {

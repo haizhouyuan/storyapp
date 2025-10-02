@@ -70,6 +70,14 @@ storyapp-worktrees/
 .playwright-mcp/
 .specstory/
 
+# Mongo安全资产（由脚本生成）
+config/mongo/keyfile/
+!config/mongo/keyfile/.gitkeep
+config/mongo/tls/
+!config/mongo/tls/.gitkeep
+config/mongo/backups/
+!config/mongo/backups/.gitkeep
+
 
 # Ignore MS Office lock files
 ~

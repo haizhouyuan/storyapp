@@ -113,24 +113,27 @@ npm run install:all
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_API_URL=https://api.deepseek.com
 
-# MongoDB配置（使用Docker Compose默认值即可）
-# MONGODB_URI=mongodb://mongo:27017/storyapp
-# MONGODB_DB_NAME=storyapp
+# MongoDB 副本集配置（示例，按需替换真实凭据）
+MONGODB_URI=mongodb://storyapp_app:StoryAppApp!234@storyapp-mongo-primary:27017,storyapp-mongo-secondary:27017/storyapp?replicaSet=storyapp-rs&authSource=admin&retryWrites=true&w=majority&tls=true
+MONGODB_DB_NAME=storyapp
+MONGODB_TLS_CA_FILE=./config/mongo/tls/ca.pem
 ```
 
 ### 3. 数据库设置
-使用Docker Compose启动MongoDB：
 ```bash
-# 启动MongoDB数据库服务
-docker compose up -d mongo
+./scripts/mongo/setup-local-secrets.sh                                # 首次生成 TLS / keyFile
+docker compose up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
 
-# 验证MongoDB是否启动成功
-docker compose ps
+# 验证副本集角色
+docker compose exec mongo-primary \
+  mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+  --eval "rs.status().members.map(m => m.stateStr + ' - ' + m.name)"
 ```
 
 数据库集合结构会自动初始化：
-- 集合名称：`stories`
-- 索引：`created_at`降序、`title`文本索引
+- 集合：`stories`、`story_logs`
+- 索引：创建时间、标题全文索引以及日志集合的复合索引/TTL
 
 ### 4. 启动应用
 ```bash

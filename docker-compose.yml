@@ -8,9 +8,15 @@ networks:
   storyapp-net:
     driver: bridge
 
-# 公共数据卷配置  
+# 公共数据卷配置
 volumes:
-  mongo_data:
+  mongo_primary_data:
+    driver: local
+  mongo_secondary_data:
+    driver: local
+  mongo_arbiter_data:
+    driver: local
+  mongo_backup_data:
     driver: local
   app_logs:
     driver: local
@@ -19,24 +25,138 @@ volumes:
 
 # 服务基座配置（仅包含公共部分）
 services:
-  # MongoDB 数据库服务
-  mongo:
+  # MongoDB 副本集主节点
+  mongo-primary:
     image: mongo:6.0
-    container_name: storyapp-mongo
+    container_name: storyapp-mongo-primary
     restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-root}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-pass123}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-storyapp_root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-StoryAppRoot!234}
       MONGO_INITDB_DATABASE: ${MONGO_DB:-storyapp}
+      MONGO_APP_USER: ${MONGO_APP_USER:-storyapp_app}
+      MONGO_APP_PASS: ${MONGO_APP_PASS:-StoryAppApp!234}
+      MONGO_BACKUP_USER: ${MONGO_BACKUP_USER:-storyapp_backup}
+      MONGO_BACKUP_PASS: ${MONGO_BACKUP_PASS:-StoryAppBackup!234}
+      MONGO_REPLICA_SET: ${MONGO_REPLICA_SET:-storyapp-rs}
+      MONGO_PRIMARY_HOST: storyapp-mongo-primary:27017
+      MONGO_SECONDARY_HOST: storyapp-mongo-secondary:27017
+      MONGO_ARBITER_HOST: storyapp-mongo-arbiter:27017
+      MONGO_MAINTENANCE_DB: ${MONGO_MAINTENANCE_DB:-admin}
+    command: >
+      mongod --replSet ${MONGO_REPLICA_SET:-storyapp-rs}
+             --bind_ip_all
+             --auth
+             --keyFile /etc/mongo-keyfile/mongo-keyfile
+             --tlsMode preferTLS
+             --tlsCertificateKeyFile /etc/mongo-tls/server.pem
+             --tlsCAFile /etc/mongo-tls/ca.pem
+             --setParameter enableLocalhostAuthBypass=0
     volumes:
-      - mongo_data:/data/db
+      - mongo_primary_data:/data/db
+      - ./config/mongo/init:/docker-entrypoint-initdb.d:ro
+      - ./config/mongo/keyfile:/etc/mongo-keyfile:ro
+      - ./config/mongo/tls:/etc/mongo-tls:ro
     networks:
       - storyapp-net
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"]
-      interval: 15s
-      timeout: 5s
+      test:
+        - CMD-SHELL
+        - >
+          mongosh --host mongo-primary --tls --tlsCAFile /etc/mongo-tls/ca.pem --tlsCertificateKeyFile /etc/mongo-tls/client.pem -u ${MONGO_ROOT_USER:-storyapp_root} -p ${MONGO_ROOT_PASS:-StoryAppRoot!234} --authenticationDatabase admin --quiet --eval "db.runCommand({ ping: 1 }).ok" | grep 1
+      interval: 20s
+      timeout: 10s
       retries: 12
+
+  # MongoDB 副本集从节点
+  mongo-secondary:
+    image: mongo:6.0
+    container_name: storyapp-mongo-secondary
+    restart: unless-stopped
+    environment:
+      MONGO_REPLICA_SET: ${MONGO_REPLICA_SET:-storyapp-rs}
+    command: >
+      mongod --replSet ${MONGO_REPLICA_SET:-storyapp-rs}
+             --bind_ip_all
+             --auth
+             --keyFile /etc/mongo-keyfile/mongo-keyfile
+             --tlsMode preferTLS
+             --tlsCertificateKeyFile /etc/mongo-tls/server.pem
+             --tlsCAFile /etc/mongo-tls/ca.pem
+             --setParameter enableLocalhostAuthBypass=0
+    volumes:
+      - mongo_secondary_data:/data/db
+      - ./config/mongo/keyfile:/etc/mongo-keyfile:ro
+      - ./config/mongo/tls:/etc/mongo-tls:ro
+    networks:
+      - storyapp-net
+    depends_on:
+      - mongo-primary
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          mongosh --host mongo-secondary --tls --tlsCAFile /etc/mongo-tls/ca.pem --tlsCertificateKeyFile /etc/mongo-tls/client.pem -u ${MONGO_ROOT_USER:-storyapp_root} -p ${MONGO_ROOT_PASS:-StoryAppRoot!234} --authenticationDatabase admin --quiet --eval "db.hello().secondary" | grep true
+      interval: 30s
+      timeout: 10s
+      retries: 12
+
+  # MongoDB 副本集仲裁节点
+  mongo-arbiter:
+    image: mongo:6.0
+    container_name: storyapp-mongo-arbiter
+    restart: unless-stopped
+    environment:
+      MONGO_REPLICA_SET: ${MONGO_REPLICA_SET:-storyapp-rs}
+    command: >
+      mongod --replSet ${MONGO_REPLICA_SET:-storyapp-rs}
+             --bind_ip_all
+             --auth
+             --keyFile /etc/mongo-keyfile/mongo-keyfile
+             --tlsMode preferTLS
+             --tlsCertificateKeyFile /etc/mongo-tls/server.pem
+             --tlsCAFile /etc/mongo-tls/ca.pem
+             --setParameter enableLocalhostAuthBypass=0
+    volumes:
+      - mongo_arbiter_data:/data/db
+      - ./config/mongo/keyfile:/etc/mongo-keyfile:ro
+      - ./config/mongo/tls:/etc/mongo-tls:ro
+    networks:
+      - storyapp-net
+    depends_on:
+      - mongo-primary
+
+  # MongoDB 备份服务（默认每日执行一次）
+  mongo-backup:
+    image: mongo:6.0
+    container_name: storyapp-mongo-backup
+    restart: unless-stopped
+    command:
+      - bash
+      - -lc
+      - >
+        while true; do \
+          /scripts/backup.sh; \
+          sleep ${MONGO_BACKUP_INTERVAL_SECONDS:-86400}; \
+        done
+    environment:
+      MONGO_BACKUP_USER: ${MONGO_BACKUP_USER:-storyapp_backup}
+      MONGO_BACKUP_PASS: ${MONGO_BACKUP_PASS:-StoryAppBackup!234}
+      MONGO_DATABASE: ${MONGO_DB:-storyapp}
+      MONGO_URI_BASE: mongo-primary:27017
+      MONGO_AUTH_DB: ${MONGO_MAINTENANCE_DB:-admin}
+      RETENTION_DAYS: ${MONGO_BACKUP_RETENTION_DAYS:-7}
+      BACKUP_PATH: /backups
+      TLS_CA_FILE: /etc/mongo-tls/ca.pem
+      TLS_PEM_FILE: /etc/mongo-tls/client.pem
+    volumes:
+      - mongo_backup_data:/backups
+      - ./scripts/mongo/backup.sh:/scripts/backup.sh:ro
+      - ./config/mongo/tls:/etc/mongo-tls:ro
+    networks:
+      - storyapp-net
+    depends_on:
+      - mongo-primary
 
   # 应用服务基座（镜像和命令在 override 中指定）
   app:
@@ -46,13 +166,15 @@ services:
       - .env
     environment:
       - PORT=5000
-      - MONGODB_URI=mongodb://${MONGO_USER:-root}:${MONGO_PASS:-pass123}@mongo:27017/${MONGO_DB:-storyapp}?authSource=admin
+      - MONGODB_URI=mongodb://${MONGO_APP_USER:-storyapp_app}:${MONGO_APP_PASS:-StoryAppApp!234}@storyapp-mongo-primary:27017,storyapp-mongo-secondary:27017/${MONGO_DB:-storyapp}?replicaSet=${MONGO_REPLICA_SET:-storyapp-rs}&authSource=${MONGO_MAINTENANCE_DB:-admin}&readPreference=primaryPreferred&retryWrites=true&w=majority&tls=true
+      - MONGODB_TLS_CA_FILE=/app/certs/mongo-ca.pem
     depends_on:
-      mongo:
+      mongo-primary:
         condition: service_healthy
     volumes:
       - app_logs:/app/logs
       - app_uploads:/app/uploads
+      - ./config/mongo/tls/ca.pem:/app/certs/mongo-ca.pem:ro
     networks:
       - storyapp-net
     restart: unless-stopped

@@ -1,7 +1,16 @@
-import { MongoClient, Db } from 'mongodb';
+import fs from 'fs';
+import path from 'path';
+import {
+  MongoClient,
+  Db,
+  MongoClientOptions,
+} from 'mongodb';
+import { createLogger } from './logger';
 
 // 使用集中化配置加载器
 const { getTypedConfig } = require('../../../config/env-loader');
+
+const logger = createLogger('mongodb');
 
 const resolveDatabaseConfig = () => {
   const typedConfig = getTypedConfig();
@@ -11,50 +20,190 @@ const resolveDatabaseConfig = () => {
   };
 };
 
+const asNumber = (value: string | undefined, fallback: number) => {
+  const parsed = value ? parseInt(value, 10) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const asCompressionLevel = (value: string | undefined, fallback: number): 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 => {
+  const numericValue = asNumber(value, fallback);
+  const clamped = Math.min(Math.max(numericValue, 0), 9);
+  return clamped as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+};
+
+const resolveFilePath = (maybeRelative: string) => {
+  if (!maybeRelative) {
+    return undefined;
+  }
+
+  // 已是绝对路径
+  if (path.isAbsolute(maybeRelative) && fs.existsSync(maybeRelative)) {
+    return maybeRelative;
+  }
+
+  const candidate = path.resolve(process.cwd(), maybeRelative);
+  if (fs.existsSync(candidate)) {
+    return candidate;
+  }
+
+  logger.warn({ path: maybeRelative }, '指定的 MongoDB TLS 文件不存在，使用原始路径继续');
+  return maybeRelative;
+};
+
+const redactUri = (uri: string) => uri.replace(/:\/\/([^:]+):([^@]+)@/g, '://***:***@');
+
+const buildMongoOptions = (): MongoClientOptions => {
+  const options: MongoClientOptions = {
+    maxPoolSize: asNumber(process.env.MONGODB_MAX_POOL_SIZE, 50),
+    minPoolSize: asNumber(process.env.MONGODB_MIN_POOL_SIZE, 5),
+    maxIdleTimeMS: asNumber(process.env.MONGODB_MAX_IDLE_TIME_MS, 30000),
+    connectTimeoutMS: asNumber(process.env.MONGODB_CONNECT_TIMEOUT_MS, 20000),
+    socketTimeoutMS: asNumber(process.env.MONGODB_SOCKET_TIMEOUT_MS, 60000),
+    serverSelectionTimeoutMS: asNumber(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS, 30000),
+    waitQueueTimeoutMS: asNumber(process.env.MONGODB_WAIT_QUEUE_TIMEOUT_MS, 0) || undefined,
+    retryWrites: process.env.MONGODB_RETRY_WRITES !== 'false',
+  };
+
+  const compressors = (process.env.MONGODB_COMPRESSORS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (compressors.length > 0) {
+    options.compressors = compressors as any;
+  }
+
+  const readPreference = process.env.MONGODB_READ_PREFERENCE;
+  if (readPreference) {
+    options.readPreference = readPreference as any;
+  }
+
+  if (process.env.MONGODB_DIRECT_CONNECTION === 'true') {
+    options.directConnection = true;
+  }
+
+  const tlsCAFile = resolveFilePath(process.env.MONGODB_TLS_CA_FILE || process.env.MONGODB_CA_FILE || '');
+  if (tlsCAFile) {
+    options.tls = true;
+    options.tlsCAFile = tlsCAFile;
+  } else if (process.env.MONGODB_TLS === 'true') {
+    options.tls = true;
+  }
+
+  const tlsCert = resolveFilePath(process.env.MONGODB_TLS_CERT_FILE || '');
+  if (tlsCert) {
+    options.tlsCertificateKeyFile = tlsCert;
+  }
+
+  if (process.env.MONGODB_TLS_ALLOW_INVALID_CERTS === 'true') {
+    options.tlsAllowInvalidCertificates = true;
+  }
+
+  const zlibCompression = Array.isArray(options.compressors) && options.compressors.includes('zlib');
+  if (!process.env.MONGODB_ZLIB_COMPRESSION_LEVEL && zlibCompression) {
+    process.env.MONGODB_ZLIB_COMPRESSION_LEVEL = '6';
+  }
+
+  if (process.env.MONGODB_ZLIB_COMPRESSION_LEVEL) {
+    options.zlibCompressionLevel = asCompressionLevel(process.env.MONGODB_ZLIB_COMPRESSION_LEVEL, 6);
+  }
+
+  return options;
+};
+
 // 数据库集合名称常量
 export const COLLECTIONS = {
   STORIES: 'stories'
 } as const;
 
-// MongoDB客户端实例
-let client: MongoClient;
-let db: Db;
+let client: MongoClient | null = null;
+let db: Db | null = null;
+let connectingPromise: Promise<Db> | null = null;
+
+const attachClientListeners = (mongoClient: MongoClient) => {
+  mongoClient.on('topologyDescriptionChanged', (event: any) => {
+    const previous = event.previousDescription?.type;
+    const current = event.newDescription?.type;
+    if (previous !== current) {
+      logger.info({ previous, current }, 'MongoDB 拓扑状态更新');
+    }
+  });
+
+  mongoClient.on('serverDescriptionChanged', (event: any) => {
+    const { address, newDescription } = event;
+    logger.debug({ address, newDescription: newDescription?.type }, 'MongoDB 节点状态变化');
+  });
+
+  mongoClient.on('serverClosed', (event: any) => {
+    logger.warn({ address: event.address }, 'MongoDB 节点连接关闭');
+  });
+
+  mongoClient.on('connectionPoolCleared', (event: any) => {
+    logger.warn({ address: event.address }, 'MongoDB 连接池已清空');
+  });
+
+  mongoClient.on('topologyClosed', () => {
+    logger.warn('MongoDB 拓扑关闭，清理缓存实例');
+    client = null;
+    db = null;
+    connectingPromise = null;
+  });
+};
+
+const connectInternal = async (): Promise<Db> => {
+  const { uri, name } = resolveDatabaseConfig();
+  const options = buildMongoOptions();
+
+  logger.info({ uri: redactUri(uri), dbName: name, options: {
+    maxPoolSize: options.maxPoolSize,
+    minPoolSize: options.minPoolSize,
+    maxIdleTimeMS: options.maxIdleTimeMS,
+    connectTimeoutMS: options.connectTimeoutMS,
+    socketTimeoutMS: options.socketTimeoutMS,
+    serverSelectionTimeoutMS: options.serverSelectionTimeoutMS,
+    readPreference: options.readPreference,
+    tls: options.tls,
+    tlsCAFile: options.tlsCAFile,
+  } }, '准备连接到 MongoDB');
+
+  const mongoClient = new MongoClient(uri, options);
+  attachClientListeners(mongoClient);
+
+  await mongoClient.connect();
+  const database = mongoClient.db(name);
+  await database.command({ ping: 1 });
+
+  client = mongoClient;
+  db = database;
+  logger.info({ dbName: name }, 'MongoDB 连接成功');
+
+  return database;
+};
 
 /**
- * 连接到MongoDB数据库
+ * 连接到 MongoDB 数据库
  */
 export async function connectToDatabase(): Promise<Db> {
   if (db) {
-    return db;
+    try {
+      await db.command({ ping: 1 });
+      return db;
+    } catch (error) {
+      logger.warn({ err: (error as Error).message }, 'MongoDB ping 失败，准备重新连接');
+      db = null;
+      client = null;
+    }
   }
 
-  try {
-    console.log('正在连接到MongoDB...');
-    
-    const { uri, name } = resolveDatabaseConfig();
-
-    client = new MongoClient(uri, {
-      // 连接选项
-      maxPoolSize: 10,
-      minPoolSize: 2,
-      connectTimeoutMS: 30000,
-      socketTimeoutMS: 45000
-    });
-
-    await client.connect();
-    db = client.db(name);
-
-    console.log('✅ MongoDB连接成功');
-    console.log(`📍 数据库: ${name}`);
-    console.log(`🔗 URI: ${uri}`);
-    
-    return db;
-  } catch (error) {
-    console.error('❌ MongoDB连接失败:', error);
-    throw new Error('MongoDB连接失败');
+  if (connectingPromise) {
+    return connectingPromise;
   }
+
+  connectingPromise = connectInternal().finally(() => {
+    connectingPromise = null;
+  });
+
+  return connectingPromise;
 }
-
 
 /**
  * 获取数据库实例
@@ -72,8 +221,11 @@ export function getDatabase(): Db {
 export async function closeDatabase(): Promise<void> {
   if (client) {
     await client.close();
-    console.log('MongoDB连接已关闭');
+    logger.info('MongoDB 连接已关闭');
   }
+  client = null;
+  db = null;
+  connectingPromise = null;
 }
 
 /**
@@ -81,15 +233,11 @@ export async function closeDatabase(): Promise<void> {
  */
 export async function checkDatabaseHealth(): Promise<boolean> {
   try {
-    if (!db) {
-      return false;
-    }
-    
-    // 执行简单的ping命令检查连接
-    await db.command({ ping: 1 });
+    const database = db ?? await connectToDatabase();
+    await database.command({ ping: 1 });
     return true;
   } catch (error) {
-    console.error('数据库健康检查失败:', error);
+    logger.error({ err: error }, '数据库健康检查失败');
     return false;
   }
 }

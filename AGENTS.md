@@ -216,7 +216,7 @@ Notes:
 
 - Build and run (manual commands; prefer this over batch scripts like `deploy.sh`):
   - `docker compose -f docker-compose.yml build --no-cache app`
-  - `docker compose -f docker-compose.yml up -d mongo`
+  - `docker compose -f docker-compose.yml up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup`
   - `docker compose -f docker-compose.yml up -d app`
   - Health: `curl http://localhost:5001/api/health`
   - Logs: `docker compose -f docker-compose.yml logs -f app`

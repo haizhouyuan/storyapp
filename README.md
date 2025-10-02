@@ -44,21 +44,29 @@ cp .env.example .env
 # - DEEPSEEK_API_URL=https://api.deepseek.com
 ```
 
-### 3. 数据库设置
-
-使用Docker Compose启动MongoDB：
+### 3. 数据库与安全资产准备
 
 ```bash
-# 启动MongoDB数据库服务
-docker compose up -d mongo
+# 首次运行：生成 TLS 证书与副本集 keyFile（输出至 config/mongo/*）
+./scripts/mongo/setup-local-secrets.sh
 
-# 验证MongoDB是否启动成功
-docker compose ps
+# 启动 MongoDB 副本集及备份服务
+docker compose up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
+
+# 验证副本集角色（PRIMARY / SECONDARY / ARBITER）
+docker compose exec mongo-primary \
+  mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" \
+  --authenticationDatabase admin \
+  --eval "rs.status().members.map(m => m.stateStr + ' - ' + m.name)"
+
+# 查看最新一次备份（可选）
+docker compose exec mongo-backup ls -lt /backups | head
 ```
 
-数据库表结构会自动初始化，包含索引：
-- 集合名称：`stories`
-- 索引：`created_at` 降序、`title` 文本索引
+MongoDB 会在启动时自动创建集合与索引：
+- 集合：`stories`、`story_logs`
+- 索引：故事集合的创建时间、标题全文索引；日志集合的复合索引与 30 天 TTL
 
 ### 4. 启动开发服务器
 
@@ -140,14 +148,22 @@ storyapp/
 ```bash
 # 构建并启动生产环境
 docker compose -f docker-compose.yml build --no-cache app
-docker compose -f docker-compose.yml up -d mongo
+docker compose -f docker-compose.yml up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
 docker compose -f docker-compose.yml up -d app
 
 # 健康检查
 curl -fsS http://localhost:5001/api/health
+
+# 副本集状态（建议使用独立运维账号）
+docker compose exec mongo-primary mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+  --eval "rs.status().members.map(m => ({ name: m.name, state: m.stateStr, health: m.health }))"
+
+# 备份文件预览
+docker compose exec mongo-backup ls -lt /backups | head
 ```
 
-详细部署步骤请参考 `CLAUDE.md`
+详细部署步骤请参考 `CLAUDE.md`，运维与备份手册见 `docs/MONGO_OPERATIONS.md`
 
 ## 贡献指南
 

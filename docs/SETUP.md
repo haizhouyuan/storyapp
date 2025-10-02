@@ -27,44 +27,51 @@ cp .env.example .env
 
 ### 3. MongoDB 数据库配置
 
-#### 3.1 启动 MongoDB 服务
+#### 3.1 生成 TLS 证书与 keyFile
 ```bash
-# 启动MongoDB容器
-docker compose up -d mongo
-
-# 验证服务状态
-docker compose ps
+./scripts/mongo/setup-local-secrets.sh
 ```
+- 默认输出到 `config/mongo/tls` 与 `config/mongo/keyfile`，首次执行或证书轮换时运行。
+- 证书及 keyFile 已加入 `.gitignore`，请妥善管理权限（推荐 400/600）。
 
-#### 3.2 数据库初始化
-数据库和集合结构会在后端启动时自动初始化：
-- 数据库名称：`storyapp`
-- 集合名称：`stories`
-- 索引：`created_at`降序、`title`文本索引
-
-#### 3.3 数据库管理
-可以使用MongoDB Compass或命令行工具连接：
+#### 3.2 启动副本集容器
 ```bash
-# MongoDB连接字符串
-mongodb://localhost:27017/storyapp
+docker compose up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
 ```
+- `mongo-primary`：主节点，负责写入。
+- `mongo-secondary`：从节点，可用于读兼容与故障切换。
+- `mongo-arbiter`：仲裁节点维持选举。
+- `mongo-backup`：定时执行 `mongodump`，输出至 `config/mongo/backups`。
 
-#### 3.4 配置环境变量
-编辑根目录 `.env` 文件：
-
+#### 3.3 验证服务状态
 ```bash
-# DeepSeek API配置
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-DEEPSEEK_API_URL=https://api.deepseek.com
+docker compose exec mongo-primary \
+  mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+  --eval "rs.status().members.map(m => ({ name: m.name, state: m.stateStr, health: m.health }))"
 
-# MongoDB配置（默认值，一般不需修改）
-# MONGODB_URI=mongodb://mongo:27017/storyapp
-# MONGODB_DB_NAME=storyapp
+docker compose exec mongo-backup ls -lt /backups | head  # 备份列表
+```
+出现 `PRIMARY` / `SECONDARY` / `ARBITER` 即表示副本集就绪。
 
-# 服务器配置
-PORT=5001
-NODE_ENV=development
-FRONTEND_URL=http://localhost:3000
+#### 3.4 客户端连接
+- 副本集连接串示例：`mongodb://storyapp_app:StoryAppApp!234@storyapp-mongo-primary:27017,storyapp-mongo-secondary:27017/storyapp?replicaSet=storyapp-rs&authSource=admin&tls=true`
+- TLS CA 路径：`./config/mongo/tls/ca.pem`
+- 可选客户端证书：`./config/mongo/tls/client.pem`
+
+#### 3.5 环境变量模板
+```bash
+MONGODB_URI=mongodb://storyapp_app:StoryAppApp!234@storyapp-mongo-primary:27017,storyapp-mongo-secondary:27017/storyapp?replicaSet=storyapp-rs&authSource=admin&retryWrites=true&w=majority&tls=true
+MONGODB_DB_NAME=storyapp
+MONGODB_TLS_CA_FILE=./config/mongo/tls/ca.pem
+MONGODB_MAX_POOL_SIZE=50
+MONGODB_MIN_POOL_SIZE=5
+MONGODB_MAX_IDLE_TIME_MS=30000
+MONGODB_CONNECT_TIMEOUT_MS=20000
+MONGODB_SOCKET_TIMEOUT_MS=60000
+MONGODB_SERVER_SELECTION_TIMEOUT_MS=30000
+MONGODB_RETRY_WRITES=true
+MONGODB_READ_PREFERENCE=primaryPreferred
 ```
 
 ### 4. 启动应用
@@ -132,7 +139,7 @@ npm test
 
 #### 1. 后端启动失败
 **错误**: `MongoDB连接失败`
-**解决**: 确保 MongoDB 服务正在运行：`docker compose up -d mongo`
+**解决**: 确保 MongoDB 副本集正在运行：`docker compose up -d mongo-primary mongo-secondary mongo-arbiter`
 
 #### 2. DeepSeek API 调用失败
 **错误**: `DeepSeek API调用失败`
@@ -145,7 +152,7 @@ npm test
 **错误**: `数据库服务暂时不可用`
 **解决**:
 - 检查 MongoDB 容器是否运行：`docker compose ps`
-- 重新启动数据库：`docker compose restart mongo`
+- 重新启动数据库：`docker compose restart mongo-primary` (必要时对 secondary/arbiter 同步执行)
 - 检查端口是否被占用
 
 #### 4. 前端白屏

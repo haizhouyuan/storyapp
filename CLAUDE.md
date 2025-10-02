@@ -277,7 +277,7 @@ EOF
 docker compose -f docker-compose.yml build --no-cache app
 
 # 2) 启动数据库
-docker compose -f docker-compose.yml up -d mongo
+docker compose -f docker-compose.yml up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup
 docker compose -f docker-compose.yml ps
 # 可观察日志确保 healthy
 docker compose -f docker-compose.yml logs -f mongo
