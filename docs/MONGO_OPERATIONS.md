@@ -17,7 +17,10 @@
 # 生成自签 TLS 证书与 keyFile（首次执行）
 ./scripts/mongo/setup-local-secrets.sh
 
-# 如需重新生成，脚本会提示是否覆盖
+# 如需重新生成，脚本会提示是否覆盖（包含 CA / server / client 证书与 keyFile）
+# 若检测到文件权限导致无法覆盖，请先运行：
+# docker run --rm -u 0 -v $(pwd)/config/mongo:/assets mongo:6.0 chown -R $(id -u):$(id -g) /assets/tls /assets/keyfile
+# 然后重新执行脚本
 ```
 
 脚本输出：
@@ -41,6 +44,13 @@ docker compose exec mongo-primary \
   mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
   -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
   --eval "rs.status().members.map(m => ({ name: m.name, state: m.stateStr, health: m.health, lastHeartbeat: m.lastHeartbeat }))"
+
+# 首次启动时执行初始化脚本（可多次运行，幂等）
+docker compose exec mongo-primary \
+  mongosh --host mongo-primary --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+  --tlsCertificateKeyFile /etc/mongo-tls/client.pem \
+  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+  /docker-entrypoint-initdb.d/01-init-replica.js
 
 # 验证应用层连接（需 app 已启动）
 curl -fsS http://localhost:5001/api/health

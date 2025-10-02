@@ -33,6 +33,9 @@ cp .env.example .env
 ```
 - 默认输出到 `config/mongo/tls` 与 `config/mongo/keyfile`，首次执行或证书轮换时运行。
 - 证书及 keyFile 已加入 `.gitignore`，请妥善管理权限（推荐 400/600）。
+- 如需重新生成，脚本会询问是否覆盖现有 CA / server / client 证书与 keyFile；若提示权限不足，可先执行
+  `docker run --rm -u 0 -v $(pwd)/config/mongo:/assets mongo:6.0 chown -R $(id -u):$(id -g) /assets/tls /assets/keyfile`
+  再重新运行脚本。
 
 #### 3.2 启动副本集容器
 ```bash
@@ -49,6 +52,12 @@ docker compose exec mongo-primary \
   mongosh --tls --tlsCAFile /etc/mongo-tls/ca.pem \
   -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
   --eval "rs.status().members.map(m => ({ name: m.name, state: m.stateStr, health: m.health }))"
+
+docker compose exec mongo-primary \
+  mongosh --host mongo-primary --tls --tlsCAFile /etc/mongo-tls/ca.pem \
+  --tlsCertificateKeyFile /etc/mongo-tls/client.pem \
+  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
+  /docker-entrypoint-initdb.d/01-init-replica.js
 
 docker compose exec mongo-backup ls -lt /backups | head  # 备份列表
 ```

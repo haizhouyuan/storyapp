@@ -30,12 +30,43 @@ CLIENT_CERT="$TLS_OUTPUT_DIR/client.crt"
 CLIENT_PEM="$TLS_OUTPUT_DIR/client.pem"
 KEYFILE_PATH="$KEYFILE_OUTPUT_DIR/$KEYFILE_NAME"
 
-if [[ -f "$SERVER_PEM" ]]; then
-  read -r -p "检测到已有证书文件，是否覆盖? [y/N] " confirm
-  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+remove_with_hint() {
+  local target="$1"
+  if [[ -e "$target" ]]; then
+    if ! rm -f "$target" 2>/dev/null; then
+      cat <<EOF
+❌ 无法删除 $target
+请在宿主机执行以下命令重新调整权限后重试：
+  docker run --rm -u 0 -v "$ROOT_DIR/config/mongo":/assets mongo:6.0 \\
+    chown -R $(id -u):$(id -g) /assets/tls /assets/keyfile
+EOF
+      exit 1
+    fi
+  fi
+}
+
+SHOULD_OVERWRITE="false"
+if [[ -f "$CA_CERT" || -f "$SERVER_PEM" || -f "$CLIENT_PEM" || -f "$KEYFILE_PATH" ]]; then
+  read -r -p "检测到已有 TLS/keyFile 资产，是否覆盖? [y/N] " confirm
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    SHOULD_OVERWRITE="true"
+  else
     echo "已取消操作"
     exit 0
   fi
+fi
+
+if [[ "$SHOULD_OVERWRITE" == "true" ]]; then
+  remove_with_hint "$CA_KEY"
+  remove_with_hint "$CA_CERT"
+  remove_with_hint "$TLS_OUTPUT_DIR/ca.srl"
+  remove_with_hint "$SERVER_KEY"
+  remove_with_hint "$SERVER_CERT"
+  remove_with_hint "$SERVER_PEM"
+  remove_with_hint "$CLIENT_KEY"
+  remove_with_hint "$CLIENT_CERT"
+  remove_with_hint "$CLIENT_PEM"
+  remove_with_hint "$KEYFILE_PATH"
 fi
 
 echo "➡️ 生成 CA 私钥与证书"
@@ -75,8 +106,8 @@ rm -f "$TLS_OUTPUT_DIR/server.csr"
 chmod 600 "$SERVER_KEY" "$SERVER_CERT" "$SERVER_PEM"
 chmod 644 "$CA_CERT"
 
-if [[ ! -f "$CLIENT_PEM" ]]; then
-  echo "➡️ 生成客户端证书 (可选)"
+if [[ "$SHOULD_OVERWRITE" == "true" || ! -f "$CLIENT_PEM" ]]; then
+  echo "➡️ 生成客户端证书"
   openssl genrsa -out "$CLIENT_KEY" 4096 >/dev/null 2>&1
   openssl req -new -key "$CLIENT_KEY" -out "$TLS_OUTPUT_DIR/client.csr" -subj "/CN=storyapp-client" >/dev/null 2>&1
   openssl x509 -req -in "$TLS_OUTPUT_DIR/client.csr" -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial \
@@ -84,10 +115,14 @@ if [[ ! -f "$CLIENT_PEM" ]]; then
   cat "$CLIENT_KEY" "$CLIENT_CERT" > "$CLIENT_PEM"
   rm -f "$TLS_OUTPUT_DIR/client.csr"
   chmod 600 "$CLIENT_KEY" "$CLIENT_CERT" "$CLIENT_PEM"
+else
+  echo "ℹ️  已检测到现有客户端证书，跳过生成"
 fi
 
 echo "➡️ 生成副本集 keyFile"
-openssl rand -base64 756 > "$KEYFILE_PATH"
+if [[ "$SHOULD_OVERWRITE" == "true" || ! -f "$KEYFILE_PATH" ]]; then
+  openssl rand -base64 756 > "$KEYFILE_PATH"
+fi
 chmod 400 "$KEYFILE_PATH"
 
 cat <<SUMMARY
