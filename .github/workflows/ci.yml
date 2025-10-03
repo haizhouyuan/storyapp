@@ -60,6 +60,7 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
         env:
+          CI: true  # 告诉 setup.ts 使用外部 MongoDB
           NODE_ENV: test
           MONGODB_URI: mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@localhost:27017/storyapp_test?authSource=admin
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY || 'mock-mode-key' }}
