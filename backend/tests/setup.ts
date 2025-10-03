@@ -54,6 +54,15 @@ beforeAll(async () => {
   process.env.NODE_ENV = 'test';
   process.env.IFLYTEK_TTS_TEST_FAKE = process.env.IFLYTEK_TTS_TEST_FAKE || '1';
 
+  // 如果已经有 MONGODB_URI 环境变量（CI环境），则使用它
+  if (process.env.MONGODB_URI) {
+    console.log('Using existing MongoDB from environment:', process.env.MONGODB_URI);
+    process.env.MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'storyapp_test';
+    resetLoadState();
+    return;
+  }
+
+  // 否则启动内存数据库（本地开发）
   const binaryOptions: Record<string, unknown> = {};
   if (process.env.MONGOMS_SYSTEM_BINARY) {
     binaryOptions.systemBinary = process.env.MONGOMS_SYSTEM_BINARY;
@@ -74,7 +83,7 @@ beforeAll(async () => {
   process.env.MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'storyapp_test';
 
   resetLoadState();
-  
+
   (global as typeof globalThis & { __MONGO_MEMORY__?: MongoMemoryServer }).__MONGO_MEMORY__ = mongoServer;
 });
 
