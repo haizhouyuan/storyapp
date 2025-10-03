@@ -59,12 +59,14 @@ jobs:
 
       - name: Run unit tests
         run: npm run test:unit
+        timeout-minutes: 15  # 设置步骤超时，防止无限挂起
         env:
           CI: true  # 告诉 setup.ts 使用外部 MongoDB
           NODE_ENV: test
           MONGODB_URI: mongodb://root:${{ secrets.MONGO_TEST_PASSWORD || 'pass123' }}@localhost:27017/storyapp_test?authSource=admin
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY || 'mock-mode-key' }}
           DEEPSEEK_API_URL: https://api.deepseek.com
+          JEST_JUNIT_OUTPUT_DIR: ./test-results
           # 如果没有配置 DEEPSEEK_API_KEY secret，测试将使用mock模式
 
       - name: Upload test results

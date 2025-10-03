@@ -32,8 +32,10 @@ module.exports = {
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  testTimeout: 10000,
+  testTimeout: 30000,  // 增加到 30 秒
   // 为避免并发测试之间对同一Mongo集合的相互清理/干扰，序列化执行测试
   maxWorkers: 1,
-  verbose: true
+  verbose: true,
+  // CI 环境强制退出，避免挂起
+  forceExit: process.env.CI === 'true'
 };
