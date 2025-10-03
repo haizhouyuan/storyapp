@@ -1,3 +1,7 @@
+import fs from 'fs';
+import path from 'path';
+import axios from 'axios';
+import { createHash } from 'crypto';
 import { InMemoryTtsCache, getCacheKey, recordCacheMetrics } from './cache';
 import type {
   TtsManagerOptions,
@@ -13,12 +17,33 @@ export class TtsManager {
   private readonly cacheTtlMs: number;
   private readonly cacheDriver: TtsManagerOptions['cacheDriver'];
   private readonly metrics?: TtsManagerOptions['metrics'];
+  private readonly audioOutputDir: string;
+  private readonly audioBaseUrl: string;
+  private readonly audioDownloadTimeoutMs: number;
 
   constructor(provider: TtsProvider, options: Partial<TtsManagerOptions> = {}) {
     this.provider = provider;
     this.cacheTtlMs = options.cacheTtlMs ?? 5 * 60 * 1000;
     this.cacheDriver = options.cacheDriver ?? new InMemoryTtsCache();
     this.metrics = options.metrics;
+    const configuredOutputDir = options.audioOutputDir || process.env.TTS_AUDIO_OUTPUT_DIR;
+    this.audioOutputDir = path.resolve(process.cwd(), configuredOutputDir || 'storage/tts');
+    this.audioBaseUrl = this.normalizeBaseUrl(options.audioBaseUrl || process.env.TTS_AUDIO_BASE_URL || 'http://localhost:5001/static/tts');
+    this.audioDownloadTimeoutMs = options.audioDownloadTimeoutMs ?? parseInt(process.env.TTS_AUDIO_DOWNLOAD_TIMEOUT_MS || '20000', 10);
+
+    try {
+      fs.mkdirSync(this.audioOutputDir, { recursive: true });
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      logError(EventType.TTS_ERROR, '创建 TTS 音频输出目录失败', err, {
+        directory: this.audioOutputDir,
+      }, undefined);
+      throw new Error(`无法创建 TTS 音频输出目录: ${err?.message || err}`);
+    }
+  }
+
+  private normalizeBaseUrl(baseUrl: string): string {
+    return baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   }
 
   getProviderId(): string {
@@ -88,25 +113,28 @@ export class TtsManager {
         );
       }
       const duration = Date.now() - start;
+      const persistedResult = await this.persistSynthesisResult(cacheKey, safeParams, result, sessionId);
 
       recordCacheMetrics(this.metrics, this.provider.id, false, duration);
 
       logInfo(EventType.TTS_PROVIDER_RESPONSE, 'TTS Provider 返回结果', {
         provider: this.provider.id,
-        requestId: result.requestId,
+        requestId: persistedResult.requestId,
         duration,
         cached: false,
-        expiresAt: result.expiresAt,
+        expiresAt: persistedResult.expiresAt,
+        audioUrl: persistedResult.audioUrl,
+        checksum: persistedResult.checksum,
       }, {
         startTime: start,
         endTime: start + duration,
         duration
       }, sessionId);
 
-      await this.cacheDriver.set({ key: cacheKey, result }, this.cacheTtlMs);
+      await this.cacheDriver.set({ key: cacheKey, result: persistedResult }, this.cacheTtlMs);
 
       return {
-        ...result,
+        ...persistedResult,
         cached: false,
       };
     } catch (error: any) {
@@ -118,6 +146,107 @@ export class TtsManager {
       }, sessionId);
       throw error;
     }
+  }
+
+  private async persistSynthesisResult(
+    cacheKey: string,
+    params: TtsSynthesisParams,
+    result: TtsSynthesisResult,
+    sessionId?: string
+  ): Promise<TtsSynthesisResult> {
+    const format = params.format || result.format || 'mp3';
+    const extension = format === 'pcm' ? 'pcm' : 'mp3';
+    const fileName = `${cacheKey}.${extension}`;
+    const filePath = path.join(this.audioOutputDir, fileName);
+
+    let audioBuffer: Buffer;
+    let wroteFile = false;
+
+    if (await this.fileExists(filePath)) {
+      audioBuffer = await fs.promises.readFile(filePath);
+    } else {
+      audioBuffer = await this.resolveAudioBuffer(result.audioUrl);
+      await fs.promises.writeFile(filePath, audioBuffer);
+      wroteFile = true;
+      logInfo(EventType.TTS_PROVIDER_RESPONSE, 'TTS 音频已写入磁盘', {
+        provider: this.provider.id,
+        requestId: result.requestId,
+        filePath,
+        fileSize: audioBuffer.length,
+      }, undefined, sessionId);
+    }
+
+    const checksum = createHash('sha256').update(audioBuffer).digest('hex');
+    const cacheExpiry = Date.now() + this.cacheTtlMs;
+    const expiresAt = Math.min(result.expiresAt || cacheExpiry, cacheExpiry);
+
+    if (!wroteFile) {
+      logInfo(EventType.TTS_PROVIDER_RESPONSE, '复用已有 TTS 音频文件', {
+        provider: this.provider.id,
+        requestId: result.requestId,
+        filePath,
+      }, undefined, sessionId);
+    }
+
+    return {
+      ...result,
+      audioUrl: this.buildAudioUrl(fileName),
+      expiresAt,
+      checksum,
+    };
+  }
+
+  private async fileExists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.promises.access(targetPath, fs.constants.F_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async resolveAudioBuffer(audioUrl: string): Promise<Buffer> {
+    if (this.shouldBlockTestHttpDownload(audioUrl)) {
+      throw new Error(
+        'TEST_HTTP_BLOCK: 测试环境禁止下载 http(s) 音频，请 mock axios 或设置 TTS_TEST_ALLOW_HTTP_DOWNLOAD=1 明确允许'
+      );
+    }
+
+    if (audioUrl.startsWith('data:')) {
+      return this.decodeDataUrl(audioUrl);
+    }
+
+    if (/^https?:\/\//i.test(audioUrl)) {
+      try {
+        const response = await axios.get<ArrayBuffer>(audioUrl, {
+          responseType: 'arraybuffer',
+          timeout: this.audioDownloadTimeoutMs,
+        });
+        return Buffer.from(response.data);
+      } catch (error: any) {
+        const message = error?.message || '未知错误';
+        throw new Error(`下载音频内容失败: ${message}`);
+      }
+    }
+
+    if (audioUrl.startsWith('file://')) {
+      const filePath = audioUrl.replace('file://', '');
+      return fs.promises.readFile(filePath);
+    }
+
+    throw new Error('不支持的音频来源，无法下载音频内容');
+  }
+
+  private decodeDataUrl(dataUrl: string): Buffer {
+    const match = dataUrl.match(/^data:audio\/[^;]+;base64,(.+)$/);
+    if (!match || !match[1]) {
+      throw new Error('无效的音频数据 URL');
+    }
+    return Buffer.from(match[1], 'base64');
+  }
+
+  private buildAudioUrl(fileName: string): string {
+    return `${this.audioBaseUrl}/${fileName}`;
   }
 
   private shouldBlockTestHttpDownload(audioUrl: string): boolean {

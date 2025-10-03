@@ -78,6 +78,10 @@ config/mongo/tls/
 config/mongo/backups/
 !config/mongo/backups/.gitkeep
 
+# Generated TTS audio artifacts
+backend/storage/tts/*
+!backend/storage/tts/.gitkeep
+
 
 # Ignore MS Office lock files
 ~
