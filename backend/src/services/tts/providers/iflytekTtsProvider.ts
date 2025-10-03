@@ -33,6 +33,23 @@ export class IflytekTtsProvider implements TtsProvider {
   };
 
   async synthesize(params: TtsSynthesisParams, context?: TtsProviderContext): Promise<TtsSynthesisResult> {
+    // 测试环境短路：跳过真实轮询，直接返回可控的假音频数据。
+    if (process.env.NODE_ENV === 'test' && process.env.IFLYTEK_TTS_TEST_FAKE === '1') {
+      const fallbackAudio = Buffer.from('iflytek-test-audio').toString('base64');
+      const fakeUrl =
+        process.env.TTS_TEST_FAKE_AUDIO_URL || `data:audio/mp3;base64,${fallbackAudio}`;
+
+      return {
+        provider: this.id,
+        requestId: `${this.id}-${randomUUID()}`,
+        audioUrl: fakeUrl,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        format: params.format || 'mp3',
+        cached: false,
+        warnings: ['IFLYTEK_TTS_TEST_FAKE 模式返回的测试音频'],
+      };
+    }
+
     const baseResult = await this.mock.synthesize(params, context);
     return {
       ...baseResult,

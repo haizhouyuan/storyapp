@@ -80,6 +80,13 @@ export class TtsManager {
         sessionId,
         logLevel: context?.logLevel ?? LogLevel.INFO,
       });
+
+      // 测试环境安全阀：防止 Jest 期间触发真实 HTTP 下载。
+      if (this.shouldBlockTestHttpDownload(result.audioUrl)) {
+        throw new Error(
+          'TEST_HTTP_BLOCK: 测试环境禁止下载 http(s) 音频；请 mock axios，或设置 TTS_TEST_ALLOW_HTTP_DOWNLOAD=1 明确允许。'
+        );
+      }
       const duration = Date.now() - start;
 
       recordCacheMetrics(this.metrics, this.provider.id, false, duration);
@@ -111,6 +118,16 @@ export class TtsManager {
       }, sessionId);
       throw error;
     }
+  }
+
+  private shouldBlockTestHttpDownload(audioUrl: string): boolean {
+    if (process.env.NODE_ENV !== 'test') {
+      return false;
+    }
+    if (process.env.TTS_TEST_ALLOW_HTTP_DOWNLOAD === '1') {
+      return false;
+    }
+    return /^https?:\/\//i.test(audioUrl);
   }
 }
 
