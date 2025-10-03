@@ -1,3 +1,4 @@
+import path from 'path';
 import { InMemoryTtsCache } from './cache';
 import { TtsManager } from './ttsManager';
 import type { TtsManagerOptions, TtsProvider } from './types';
@@ -30,6 +31,21 @@ export const createTtsManager = (): TtsManager => {
     cacheTtlMs: DEFAULT_TTL_MS,
     metrics: ttsMetrics,
   };
+
+  if (process.env.TTS_AUDIO_OUTPUT_DIR) {
+    options.audioOutputDir = path.resolve(process.cwd(), process.env.TTS_AUDIO_OUTPUT_DIR);
+  }
+
+  if (process.env.TTS_AUDIO_BASE_URL) {
+    options.audioBaseUrl = process.env.TTS_AUDIO_BASE_URL;
+  }
+
+  if (process.env.TTS_AUDIO_DOWNLOAD_TIMEOUT_MS) {
+    const parsed = parseInt(process.env.TTS_AUDIO_DOWNLOAD_TIMEOUT_MS, 10);
+    if (!Number.isNaN(parsed)) {
+      options.audioDownloadTimeoutMs = parsed;
+    }
+  }
 
   manager = new TtsManager(provider, options);
   return manager;

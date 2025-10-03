@@ -91,4 +91,7 @@ export interface TtsManagerOptions {
   cacheTtlMs: number;
   cacheDriver: TtsCacheDriver;
   metrics?: TtsMetrics;
+  audioOutputDir: string;
+  audioBaseUrl: string;
+  audioDownloadTimeoutMs?: number;
 }

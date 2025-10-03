@@ -104,6 +104,22 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/tts', ttsRateLimit, ttsRoutes);
 app.use('/api', storyRoutes);
 
+// TTS 音频静态文件
+const TTS_STATIC_DIR = path.resolve(process.cwd(), process.env.TTS_AUDIO_OUTPUT_DIR || 'storage/tts');
+
+try {
+  fs.mkdirSync(TTS_STATIC_DIR, { recursive: true });
+  app.use('/static/tts', express.static(TTS_STATIC_DIR, {
+    index: false,
+    maxAge: '7d',
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    },
+  }));
+} catch (error) {
+  appLogger.error({ error }, 'Failed to initialize TTS static directory');
+}
+
 // 静态文件服务（前端）
 // ✅ 改成"在非开发环境，或显式要求时，一律服务静态资源"
 const staticCandidates = [
