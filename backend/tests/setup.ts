@@ -1,6 +1,8 @@
 // 测试环境设置文件
 import { config } from 'dotenv';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import os from 'os';
+import path from 'path';
 
 const { resetLoadState } = require('../../config/env-loader');
 
@@ -50,8 +52,22 @@ jest.setTimeout(120000);
 beforeAll(async () => {
   // 设置测试环境
   process.env.NODE_ENV = 'test';
+  process.env.IFLYTEK_TTS_TEST_FAKE = process.env.IFLYTEK_TTS_TEST_FAKE || '1';
 
-  const mongoServer = await MongoMemoryServer.create();
+  const binaryOptions: Record<string, unknown> = {};
+  if (process.env.MONGOMS_SYSTEM_BINARY) {
+    binaryOptions.systemBinary = process.env.MONGOMS_SYSTEM_BINARY;
+  } else {
+    binaryOptions.version = process.env.MONGOMS_VERSION || '7.0.14';
+    const downloadDir =
+      process.env.MONGOMS_DOWNLOAD_DIR ||
+      path.join((typeof os.homedir === 'function' ? os.homedir() : undefined) || os.tmpdir(), '.cache', 'mongodb-memory-server');
+    binaryOptions.downloadDir = downloadDir;
+  }
+
+  const createOptions = Object.keys(binaryOptions).length > 0 ? { binary: binaryOptions } : undefined;
+
+  const mongoServer = await MongoMemoryServer.create(createOptions);
   const uri = mongoServer.getUri();
 
   process.env.MONGODB_URI = uri;

@@ -1,14 +1,19 @@
 import client from 'prom-client';
 
+const isTestEnv = process.env.NODE_ENV === 'test' || typeof process.env.JEST_WORKER_ID !== 'undefined';
+
 // Create a Registry to register metrics
 export const register = new client.Registry();
 
-// Add default metrics (process and Node.js metrics)
-client.collectDefaultMetrics({
-  register,
-  prefix: 'storyapp_backend_',
-  gcDurationBuckets: [0.001, 0.01, 0.1, 1, 2, 5], // These are in seconds
-});
+let defaultMetricsInterval: NodeJS.Timeout | undefined;
+if (!isTestEnv) {
+  // Add default metrics (process and Node.js metrics)
+  defaultMetricsInterval = client.collectDefaultMetrics({
+    register,
+    prefix: 'storyapp_backend_',
+    gcDurationBuckets: [0.001, 0.01, 0.1, 1, 2, 5], // These are in seconds
+  }) as unknown as NodeJS.Timeout;
+}
 
 // Custom application metrics
 
@@ -137,21 +142,24 @@ export const updateMemoryMetrics = () => {
   memoryUsage.set({ type: 'external' }, memUsage.external);
 };
 
-// Start memory monitoring
-const memoryMetricsInterval = setInterval(updateMemoryMetrics, 30000); // Update every 30 seconds
+// Start memory monitoring（测试环境关闭定时器，避免阻塞 Jest 退出）
+const memoryMetricsInterval = isTestEnv ? undefined : setInterval(updateMemoryMetrics, 30000);
 
 // 优雅关闭处理
 const cleanupMemoryMetrics = () => {
   if (memoryMetricsInterval) {
     clearInterval(memoryMetricsInterval);
-    console.log('🧹 内存监控定时器已清理');
+  }
+  if (defaultMetricsInterval) {
+    clearInterval(defaultMetricsInterval);
   }
 };
 
-// 监听进程退出事件
-process.on('SIGINT', cleanupMemoryMetrics);
-process.on('SIGTERM', cleanupMemoryMetrics);
-process.on('exit', cleanupMemoryMetrics);
+if (!isTestEnv) {
+  process.on('SIGINT', cleanupMemoryMetrics);
+  process.on('SIGTERM', cleanupMemoryMetrics);
+  process.on('exit', cleanupMemoryMetrics);
+}
 
 // Helper function to record HTTP metrics
 export const recordHttpMetrics = (req: any, res: any, startTime: number) => {
