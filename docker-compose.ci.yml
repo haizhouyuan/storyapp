@@ -29,13 +29,16 @@ services:
       - DEEPSEEK_API_KEY=sk-test-dummy
       - DEEPSEEK_API_URL=https://api.deepseek.com
       - MONGODB_URI=mongodb://root:${MONGO_TEST_PASSWORD:-pass123}@mongo:27017/storyapp?authSource=admin
-      - NODE_ENV=test
+      - NODE_ENV=production  # E2E 测试使用生产模式，避免触发测试环境特殊逻辑
       - PORT=5000
       - RATE_LIMIT_MAX_REQUESTS=2000
       - RATE_LIMIT_WINDOW_MS=600000
       - HSTS_DISABLED=true
       - DISABLE_UPGRADE_INSECURE=true
       - DISABLE_RATE_LIMIT=1
+      - TTS_PROVIDER=mock  # E2E 使用 mock provider
+      - TTS_AUDIO_OUTPUT_DIR=/app/storage/tts  # 使用容器内绝对路径
+      - TTS_AUDIO_BASE_URL=http://localhost:5001/static/tts
     depends_on:
       mongo:
         condition: service_healthy
