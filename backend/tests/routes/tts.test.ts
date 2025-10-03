@@ -2,6 +2,16 @@ import request from 'supertest';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+
+// 在导入任何业务代码之前设置环境变量
+// 使用绝对路径避免 cwd 不一致问题
+const TEMP_TTS_DIR = path.join(os.tmpdir(), `storyapp-tts-test-${process.pid}`);
+
+process.env.TTS_PROVIDER = 'mock';
+process.env.TTS_AUDIO_BASE_URL = 'http://localhost:5001/static/tts';
+process.env.TTS_AUDIO_OUTPUT_DIR = TEMP_TTS_DIR;
+process.env.TTS_AUDIO_DOWNLOAD_TIMEOUT_MS = '5000';
 
 jest.mock('prom-client', () => {
   const buildMetric = () => ({ observe: jest.fn(), inc: jest.fn(), dec: jest.fn(), set: jest.fn() });
@@ -19,19 +29,13 @@ jest.mock('prom-client', () => {
 
 import ttsRouter from '../../src/routes/tts';
 
-const TEMP_TTS_DIR = path.join(__dirname, '..', 'tmp-tts');
-
-process.env.TTS_PROVIDER = 'mock';
-process.env.TTS_AUDIO_BASE_URL = 'http://localhost:5001/static/tts';
-process.env.TTS_AUDIO_OUTPUT_DIR = TEMP_TTS_DIR;
-process.env.TTS_AUDIO_DOWNLOAD_TIMEOUT_MS = '5000';
-
 const app = express();
 app.use(express.json());
 app.use('/api/tts', ttsRouter);
 
 describe('TTS API Routes', () => {
   beforeAll(() => {
+    // 确保测试目录存在（在导入路由之前目录可能不存在）
     fs.rmSync(TEMP_TTS_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEMP_TTS_DIR, { recursive: true });
   });
