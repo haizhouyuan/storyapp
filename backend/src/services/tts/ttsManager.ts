@@ -27,7 +27,10 @@ export class TtsManager {
     this.cacheDriver = options.cacheDriver ?? new InMemoryTtsCache();
     this.metrics = options.metrics;
     const configuredOutputDir = options.audioOutputDir || process.env.TTS_AUDIO_OUTPUT_DIR;
-    this.audioOutputDir = path.resolve(process.cwd(), configuredOutputDir || 'storage/tts');
+    // 若已提供绝对路径则直接使用，否则相对于 cwd 解析
+    this.audioOutputDir = configuredOutputDir && path.isAbsolute(configuredOutputDir)
+      ? configuredOutputDir
+      : path.resolve(process.cwd(), configuredOutputDir || 'storage/tts');
     this.audioBaseUrl = this.normalizeBaseUrl(options.audioBaseUrl || process.env.TTS_AUDIO_BASE_URL || 'http://localhost:5001/static/tts');
     this.audioDownloadTimeoutMs = options.audioDownloadTimeoutMs ?? parseInt(process.env.TTS_AUDIO_DOWNLOAD_TIMEOUT_MS || '20000', 10);
 
