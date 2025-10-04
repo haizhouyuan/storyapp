@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test';
 
 // 测试配置常量（支持通过环境变量覆盖，便于CI/容器环境运行）
 const FRONTEND_URL = process.env.BASE_URL || 'http://localhost:3000';
-const DEFAULT_BACKEND = process.env.CI ? 'http://127.0.0.1:5001' : 'http://localhost:5000';
+const DEFAULT_BACKEND = process.env.CI ? 'http://localhost:5001' : 'http://localhost:5000';
 const BACKEND_URL = (process.env.API_URL || DEFAULT_BACKEND).replace(/\/$/, '');
 
 // 测试数据

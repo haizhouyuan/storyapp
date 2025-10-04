@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
  */
 
 // 测试配置
-const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:5001';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5001';
 
 // 预期的种子数据（与seed-e2e-data.js保持同步）
 const EXPECTED_SEED_STORIES = [

@@ -18,15 +18,23 @@ const testStories = [
     title: '测试故事：小兔子的冒险',
     content: JSON.stringify({
       storySegment: '这是一个测试故事片段，用于E2E测试。小兔子在神奇的森林里开始了它的冒险之旅。',
-      choices: ['进入神秘洞穴', '爬上大橡树', '跟随蝴蝶'],
+      choices: ['选择走向花香阵阵的左边小路', '选择走向鸟语花香的中间大路', '选择走向神秘幽静的右边小径'],
       isEnding: false
     })
   },
   {
-    title: '测试故事：彩虹城堡',
+    title: '测试故事：月亮上的旅行',
     content: JSON.stringify({
-      storySegment: '在遥远的天边，有一座美丽的彩虹城堡。这里住着善良的彩虹公主。',
-      choices: ['敲响城堡大门', '在花园里休息', '寻找彩虹桥'],
+      storySegment: '小朋友乘着梦想的翅膀，来到了神奇的月球上。月亮上到处都是银色的光芒。',
+      choices: ['去拜访住在月宫里的嫦娥姐姐', '和可爱的月兔一起玩耍', '收集美丽的星星做项链'],
+      isEnding: false
+    })
+  },
+  {
+    title: '测试故事：彩虹城堡的秘密',
+    content: JSON.stringify({
+      storySegment: '在遥远的天边，有一座美丽的彩虹城堡。这里住着善良的彩虹公主，城堡里藏着一个神奇的秘密。',
+      choices: ['按下红色按钮（代表勇气）', '按下蓝色按钮（代表智慧）', '按下黄色按钮（代表友善）'],
       isEnding: false
     })
   }
