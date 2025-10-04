@@ -2,9 +2,18 @@ import { Router, Request, Response } from 'express';
 import type { TtsSynthesisRequest } from '../services/tts/types';
 import { createTtsManager } from '../services/tts';
 import { EventType, logError, logInfo } from '../utils/logger';
+import type { TtsManager } from '../services/tts/ttsManager';
 
 const router = Router();
-const manager = createTtsManager();
+let manager: TtsManager | undefined;
+
+// 延迟初始化 TTS Manager，避免在模块加载时出错
+const getManager = (): TtsManager => {
+  if (!manager) {
+    manager = createTtsManager();
+  }
+  return manager;
+};
 
 const parseNumber = (value: unknown, fallback?: number): number | undefined => {
   if (value === undefined || value === null) return fallback;
@@ -14,15 +23,16 @@ const parseNumber = (value: unknown, fallback?: number): number | undefined => {
 };
 
 router.get('/voices', (_req: Request, res: Response) => {
-  const capabilities = manager.getCapabilities();
+  const mgr = getManager();
+  const capabilities = mgr.getCapabilities();
   res.json({
-    provider: manager.getProviderId(),
+    provider: mgr.getProviderId(),
     voices: capabilities.voices,
     speedRange: capabilities.speedRange,
     pitchRange: capabilities.pitchRange,
     formats: capabilities.formats,
     defaultVoice: capabilities.defaultVoice,
-    metadata: manager.getMetadata(),
+    metadata: mgr.getMetadata(),
   });
 });
 
@@ -54,7 +64,8 @@ router.post('/', async (req: Request<unknown, unknown, TtsSynthesisRequest>, res
   }
 
   try {
-    const result = await manager.synthesize({
+    const mgr = getManager();
+    const result = await mgr.synthesize({
       text,
       voiceId: typeof voiceId === 'string' ? voiceId : undefined,
       speed: parseNumber(speed, 1),
@@ -90,7 +101,7 @@ router.post('/', async (req: Request<unknown, unknown, TtsSynthesisRequest>, res
     const status = error?.statusCode || error?.status || 503;
 
     logError(EventType.TTS_ERROR, 'TTS 请求处理失败', error, {
-      provider: manager.getProviderId(),
+      provider: getManager().getProviderId(),
       status,
     }, sessionId);
 
