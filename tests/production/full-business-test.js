@@ -2,7 +2,7 @@ const axios = require('axios');
 const { execSync } = require('child_process');
 
 // 测试配置
-const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
+const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5001').replace(/\/$/, '');
 const API_BASE = (process.env.PLAYWRIGHT_API_URL || `${BASE_URL}/api`).replace(/\/$/, '');
 const FRONTEND_URL = BASE_URL;
 

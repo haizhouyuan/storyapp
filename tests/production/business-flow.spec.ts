@@ -6,7 +6,7 @@ import { test, expect, Page } from '@playwright/test';
  */
 
 // 测试配置（支持通过环境变量覆盖）
-const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
+const BASE_URL = (process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5001').replace(/\/$/, '');
 const API_URL = (process.env.PLAYWRIGHT_API_URL || `${BASE_URL}/api`).replace(/\/$/, '');
 const API_ONLY = process.env.PLAYWRIGHT_API_ONLY === 'true';
 
