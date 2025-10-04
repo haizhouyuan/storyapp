@@ -9,7 +9,7 @@ async function globalSetup(config: FullConfig) {
   console.log('🌱 开始Playwright全局设置...');
   
   // 确定base URL
-  const baseURL = config.use?.baseURL || process.env.BASE_URL || 'http://127.0.0.1:5001';
+  const baseURL = config.use?.baseURL || process.env.BASE_URL || 'http://localhost:5001';
   console.log(`目标服务: ${baseURL}`);
   
   console.log('ℹ️ 服务健康检查和种子数据已在CI工作流中完成');
