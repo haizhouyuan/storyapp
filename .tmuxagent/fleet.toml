@@ -1,0 +1,14 @@
+[agent]
+command = ". ~/.proxy-on.sh && exec bash"
+model = "gpt-5-codex"
+templates_dir = ".tmuxagent/templates"
+
+[worktree]
+root = ".tmuxagent/worktrees"
+
+[tmux]
+prefix = "agent-"
+bin = "tmux"
+
+[state]
+db = "~/.tmux_agent/state.db"
