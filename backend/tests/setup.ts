@@ -81,6 +81,7 @@ beforeAll(async () => {
     (global as typeof globalThis & { __MONGO_MEMORY__?: MongoMemoryServer }).__MONGO_MEMORY__ = mongoServer;
   } else {
     // CI 环境：使用外部 MongoDB
+    console.log('Using existing MongoDB from environment:', process.env.MONGODB_URI);
     process.env.MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'storyapp_test';
   }
 
