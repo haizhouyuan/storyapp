@@ -88,6 +88,11 @@ module.exports = {
             })
           );
         }
+
+        // 移除 CRA 默认的 GenerateSW，改用构建后注入脚本
+        webpackConfig.plugins = (webpackConfig.plugins || []).filter(
+          (plugin) => plugin.constructor?.name !== 'GenerateSW'
+        );
       }
 
       // 4. 开发环境优化

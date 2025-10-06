@@ -1,0 +1,42 @@
+{
+  "name": "儿童睡前故事",
+  "short_name": "睡前故事",
+  "lang": "zh-CN",
+  "description": "AI 驱动的儿童睡前互动故事应用，支持个性化分支和语音朗读。",
+  "start_url": ".", 
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F1FF",
+  "theme_color": "#8E8DFF",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "继续最近故事",
+      "short_name": "继续故事",
+      "description": "快速返回最近一次阅读的故事。",
+      "url": "/?intent=resume"
+    },
+    {
+      "name": "创建新故事",
+      "short_name": "新故事",
+      "description": "根据孩子兴趣生成新的睡前故事。",
+      "url": "/create?source=pwa"
+    }
+  ],
+  "categories": ["education", "kids", "entertainment"],
+  "dir": "ltr"
+}

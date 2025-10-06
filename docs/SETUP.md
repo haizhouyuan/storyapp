@@ -142,6 +142,16 @@ npx playwright install
 npm test
 ```
 
+### 7. 启用 PWA 功能
+
+前端已内置渐进式 Web 应用（PWA）支持，构建生产环境时会自动生成 `service-worker.js` 并注入离线缓存清单。首次部署或变更后建议执行以下检查：
+
+1. **安装依赖**：`npm install` 会自动拉取 Workbox 相关依赖；若采用分包安装，请在 `frontend` 目录下执行。
+2. **构建产物**：运行 `npm run -w frontend build`，确认 `build/manifest.json`、`build/service-worker.js`、`build/offline.html` 等文件生成。
+3. **本地验证**：使用 `serve -s build` 等静态服务器打开构建结果，在浏览器开发者工具 > Application > Service Workers 中确认注册成功。
+4. **离线体验**：在 DevTools Network 选项卡切换为 `Offline`，刷新页面应自动展示离线提示页，恢复网络后点击“重新尝试”按钮可继续使用。
+5. **HTTPS 部署**：在生产环境启用 HTTPS，可保证 Service Worker 正常注册并提升安装到主屏幕的体验。
+
 ## 故障排除
 
 ### 常见问题
