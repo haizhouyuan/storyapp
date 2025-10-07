@@ -85,3 +85,6 @@ backend/storage/tts/*
 
 # Ignore MS Office lock files
 ~
+
+# Node.js binary distribution (should not be committed)
+.node/

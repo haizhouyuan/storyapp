@@ -29,12 +29,17 @@ cd ../frontend && npm install --legacy-peer-deps
 
 ### 开发模式
 ```bash
-# 同时启动前后端开发服务器
+# 同时启动前后端开发服务器（开发模式，热重载）
 npm run dev
 
 # 分别启动
 npm run dev:backend  # 后端: http://localhost:5000
 npm run dev:frontend # 前端: http://localhost:3000
+
+# NAS 本地部署模式（生产级稳定运行）
+npm run local:up     # 一键启动：后端(PM2) + 前端(Nginx容器)
+npm run local:be     # 仅启动后端（PM2）
+npm run local:fe     # 仅启动前端（Nginx容器）
 ```
 
 ### 构建和部署
