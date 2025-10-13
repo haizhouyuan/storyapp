@@ -7,20 +7,58 @@ const typedConfig = getTypedConfig();
 const DEEPSEEK_API_URL = typedConfig.api.deepseek.apiUrl;
 const DEEPSEEK_API_KEY = typedConfig.api.deepseek.apiKey;
 
+export const isDeepseekApiKeyValid = (apiKey: string | undefined = DEEPSEEK_API_KEY): boolean => {
+  if (!apiKey) {
+    return false;
+  }
+  const trimmed = apiKey.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  const lowered = trimmed.toLowerCase();
+  return !lowered.includes('placeholder') && !lowered.includes('example');
+};
+
+type DeepseekHealthStatus = 'missing' | 'ok' | 'error';
+
+export interface DeepseekHealthResult {
+  available: boolean;
+  status: DeepseekHealthStatus;
+  checkedAt: string;
+  latencyMs?: number;
+  errorMessage?: string;
+}
+
+const HEALTHCHECK_CACHE_MS = parseInt(process.env.DEEPSEEK_HEALTHCHECK_CACHE_MS || '60000', 10);
+
+let lastHealthCheck: { timestamp: number; result: DeepseekHealthResult } = {
+  timestamp: 0,
+  result: {
+    available: false,
+    status: 'missing',
+    checkedAt: new Date(0).toISOString(),
+  },
+};
+
 // API密钥状态检查（安全起见，不在日志中显示）
 
 if (!DEEPSEEK_API_KEY) {
   console.warn('⚠️  未配置DeepSeek API Key，将使用模拟数据进行测试');
 }
 
+const defaultHeaders: Record<string, string> = {
+  'Content-Type': 'application/json',
+};
+
+if (DEEPSEEK_API_KEY) {
+  defaultHeaders.Authorization = `Bearer ${DEEPSEEK_API_KEY}`;
+}
+
 // 创建DeepSeek API客户端
 export const deepseekClient = axios.create({
   baseURL: DEEPSEEK_API_URL,
   timeout: 180000, // 增加到180秒超时，适应AI推理/生成
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
-  },
+  headers: defaultHeaders,
   // 添加重试和连接配置
   maxRedirects: 5,
   // 添加请求重试配置
@@ -77,6 +115,73 @@ export const DEEPSEEK_CONFIG = {
   TEMPERATURE: 0.7,
   STREAM: false
 } as const;
+
+export async function checkDeepseekHealth(force = false): Promise<DeepseekHealthResult> {
+  const now = Date.now();
+  if (!force && now - lastHealthCheck.timestamp < HEALTHCHECK_CACHE_MS) {
+    return lastHealthCheck.result;
+  }
+
+  if (!isDeepseekApiKeyValid()) {
+    const result: DeepseekHealthResult = {
+      available: false,
+      status: 'missing',
+      checkedAt: new Date(now).toISOString(),
+    };
+    lastHealthCheck = { timestamp: now, result };
+    return result;
+  }
+
+  const start = Date.now();
+
+  try {
+    const response = await deepseekClient.post(
+      '/chat/completions',
+      {
+        model: DEEPSEEK_CONFIG.CHAT_MODEL,
+        messages: [
+          { role: 'system', content: 'You are a health check assistant.' },
+          { role: 'user', content: 'Reply with the word OK.' },
+        ],
+        max_tokens: 1,
+        temperature: 0,
+        stream: false,
+      },
+      { timeout: 7000 },
+    );
+
+    const latencyMs = Date.now() - start;
+    const ok = Array.isArray(response?.data?.choices) && response.data.choices.length > 0;
+
+    const result: DeepseekHealthResult = {
+      available: ok,
+      status: ok ? 'ok' : 'error',
+      checkedAt: new Date(now).toISOString(),
+      latencyMs,
+      errorMessage: ok ? undefined : 'DeepSeek 响应内容为空',
+    };
+
+    lastHealthCheck = { timestamp: Date.now(), result };
+    return result;
+  } catch (error: any) {
+    const latencyMs = Date.now() - start;
+    const message =
+      error?.response?.data?.error?.message ||
+      error?.message ||
+      (typeof error === 'string' ? error : '未知错误');
+
+    const result: DeepseekHealthResult = {
+      available: false,
+      status: 'error',
+      checkedAt: new Date().toISOString(),
+      latencyMs,
+      errorMessage: message,
+    };
+
+    lastHealthCheck = { timestamp: Date.now(), result };
+    return result;
+  }
+}
 
 // 故事生成的系统提示词（针对8-12岁儿童优化）
 export const STORY_SYSTEM_PROMPT = `你是一个专业的儿童故事创作助手。请根据以下要求创作睡前故事：

@@ -36,7 +36,14 @@ export async function initializeDatabase(): Promise<void> {
     await logsCollection.createIndex({ logLevel: 1, timestamp: -1 });
     
     // 过期索引 - 自动清理30天前的日志
-    const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS || '30');
+    const retentionRaw = process.env.LOG_RETENTION_DAYS;
+    const parsedRetention = Number.parseInt(retentionRaw ?? '30', 10);
+    const retentionDays = Number.isFinite(parsedRetention) && parsedRetention > 0 ? parsedRetention : 30;
+    if (!Number.isFinite(parsedRetention) || parsedRetention <= 0) {
+      console.warn(
+        `⚠️  LOG_RETENTION_DAYS 配置无效("${retentionRaw}"), 已回退为默认值 ${retentionDays} 天`
+      );
+    }
     await logsCollection.createIndex(
       { timestamp: 1 }, 
       { expireAfterSeconds: retentionDays * 24 * 60 * 60 }

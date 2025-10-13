@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { checkDatabaseHealth } from '../config/database';
-import { deepseekClient } from '../config/deepseek';
+import { checkDeepseekHealth } from '../config/deepseek';
 
 const router = Router();
 
@@ -13,7 +13,10 @@ router.get('/', async (req: Request, res: Response) => {
       database: false,
       deepseek: {
         available: false,
-        status: 'unknown' as 'ok' | 'missing' | 'unknown'
+        status: 'unknown' as 'ok' | 'missing' | 'unknown' | 'error',
+        checkedAt: undefined as string | undefined,
+        latencyMs: undefined as number | undefined,
+        message: undefined as string | undefined,
       }
     };
 
@@ -26,16 +29,22 @@ router.get('/', async (req: Request, res: Response) => {
 
     // 检查DeepSeek API配置（非关键依赖）
     try {
-      const hasApiKey = !!process.env.DEEPSEEK_API_KEY;
+      const deepseekStatus = await checkDeepseekHealth();
       checks.deepseek = {
-        available: hasApiKey,
-        status: hasApiKey ? 'ok' : 'missing'
+        available: deepseekStatus.available,
+        status: deepseekStatus.status,
+        latencyMs: deepseekStatus.latencyMs,
+        checkedAt: deepseekStatus.checkedAt,
+        message: deepseekStatus.errorMessage,
       };
     } catch (error) {
       console.warn('DeepSeek API检查失败:', error);
       checks.deepseek = {
         available: false,
-        status: 'unknown'
+        status: 'error',
+        checkedAt: new Date().toISOString(),
+        latencyMs: undefined,
+        message: error instanceof Error ? error.message : String(error),
       };
     }
 
@@ -48,12 +57,21 @@ router.get('/', async (req: Request, res: Response) => {
       statusMessage += ' (AI功能降级：使用模拟数据)';
     }
 
+    const warnings: string[] = [];
+    if (!checks.deepseek.available) {
+      if (checks.deepseek.status === 'missing') {
+        warnings.push('DeepSeek API未配置，AI故事生成将使用模拟数据');
+      } else {
+        warnings.push('DeepSeek API健康检查失败，已自动降级为模拟模式');
+      }
+    }
+
     res.status(coreHealthy ? 200 : 503).json({
       status: coreHealthy ? 'healthy' : 'unhealthy',
       checks,
       version: '1.0.0',
       message: statusMessage,
-      warnings: !checks.deepseek.available ? ['DeepSeek API未配置，AI故事生成将使用模拟数据'] : []
+      warnings
     });
   } catch (error) {
     console.error('健康检查错误:', error);

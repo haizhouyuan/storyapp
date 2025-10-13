@@ -88,3 +88,18 @@ backend/storage/tts/*
 
 # Node.js binary distribution (should not be committed)
 .node/
+# SSL certificates and private keys (do not commit)
+nginx/certs/
+*.pem
+*.key
+*.crt
+
+# 临时文件和备份
+*.backup
+*.gz
+.tmp-*/
+.tools/
+scripts/router/
+
+# TypeScript build info
+*.tsbuildinfo

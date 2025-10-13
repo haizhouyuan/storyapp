@@ -50,6 +50,13 @@ router.post('/generate-story', async (req: Request, res: Response) => {
     res.json(result);
   } catch (error: any) {
     console.error('生成故事失败:', error);
+
+    if (error.code === 'DEEPSEEK_CONFIG_ERROR') {
+      return res.status(503).json({
+        error: 'AI 服务配置缺失，请联系管理员',
+        code: 'SERVICE_CONFIGURATION_ERROR'
+      });
+    }
     
     if (error.code === 'DEEPSEEK_API_ERROR') {
       return res.status(503).json({
@@ -276,6 +283,13 @@ router.post('/generate-full-story', async (req: Request, res: Response) => {
     res.json(result);
   } catch (error: any) {
     console.error('生成故事树失败:', error);
+
+    if (error.code === 'DEEPSEEK_CONFIG_ERROR') {
+      return res.status(503).json({
+        error: 'AI 服务配置缺失，请联系管理员',
+        code: 'SERVICE_CONFIGURATION_ERROR'
+      });
+    }
     
     if (error.code === 'STORY_TREE_GENERATION_ERROR') {
       return res.status(503).json({

@@ -22,11 +22,13 @@ fi
 echo "==> 2. 停止旧的前端容器"
 docker rm -f storyapp-nginx 2>/dev/null || true
 
-echo "==> 3. 启动 Nginx 容器（端口 8081）"
+echo "==> 3. 启动 Nginx 容器（端口 8081/8443）"
 docker run -d --name storyapp-nginx \
   -p 8081:80 \
+  -p 8443:443 \
   -v "$PWD/frontend/build:/usr/share/nginx/html:ro" \
   -v "$PWD/nginx/conf:/etc/nginx/conf.d:ro" \
+  -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
   --add-host=host.docker.internal:host-gateway \
   nginx:alpine
 
@@ -48,8 +50,10 @@ fi
 
 echo ""
 echo "✅ 前端服务已启动"
-echo "   本地访问: http://localhost:8081"
-echo "   局域网访问: http://192.168.1.7:8081"
+echo "   本地HTTP: http://localhost:8081"
+echo "   本地HTTPS: https://localhost:8443"
+echo "   外网HTTP: http://fnos.dandanbaba.xyz:8081"
+echo "   外网HTTPS: https://fnos.dandanbaba.xyz:8443"
 echo ""
 echo "查看日志: docker logs -f storyapp-nginx"
 echo "停止服务: docker rm -f storyapp-nginx"

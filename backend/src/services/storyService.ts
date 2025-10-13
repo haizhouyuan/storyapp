@@ -1,68 +1,38 @@
 import { ObjectId } from 'mongodb';
 import { getDatabase, TABLES } from '../config/database';
-
-// 检查是否为有效的API Key
-function isValidApiKey(apiKey: string | undefined): boolean {
-  return !!(apiKey && 
-    apiKey !== 'your_deepseek_api_key_here' && 
-    apiKey !== 'mock-mode-key' &&
-    apiKey.trim().length > 0 &&
-    !apiKey.includes('placeholder') &&
-    !apiKey.includes('example') &&
-    apiKey.startsWith('sk-') &&
-    apiKey.length > 20);
-}
-
-// 智能判断是否应该使用mock模式
-function shouldUseMockMode(): boolean {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  const nodeEnv = process.env.NODE_ENV;
-  
-  // 如果明确是测试环境且没有有效API key，使用mock模式
-  if (nodeEnv === 'test' && !isValidApiKey(apiKey)) {
-    return true;
-  }
-  
-  // 如果API key无效，使用mock模式
-  if (!isValidApiKey(apiKey)) {
-    console.warn('⚠️  DeepSeek API Key无效，使用mock模式');
-    return true;
-  }
-  
-  return false;
-}
-import { 
-  StoryDocument, 
-  createStoryDocument, 
-  validateStoryDocument, 
-  storyDocumentToResponse, 
-  requestToStoryDocument 
+import {
+  StoryDocument,
+  createStoryDocument,
+  validateStoryDocument,
+  storyDocumentToResponse,
+  requestToStoryDocument,
 } from '../models/Story';
-import { 
-  deepseekClient, 
-  DEEPSEEK_CONFIG, 
-  STORY_SYSTEM_PROMPT, 
+import {
+  deepseekClient,
+  DEEPSEEK_CONFIG,
+  STORY_SYSTEM_PROMPT,
   STORY_CONTINUE_PROMPT,
   STORY_TREE_SYSTEM_PROMPT,
   STORY_TREE_NODE_PROMPT,
   STORY_PLANNING_PROMPT,
   STORY_WRITING_PROMPT,
-  STORY_REVIEW_PROMPT
+  STORY_REVIEW_PROMPT,
+  isDeepseekApiKeyValid,
 } from '../config/deepseek';
-import { 
-  logger, 
-  createSession, 
-  endSession, 
-  LogLevel, 
-  EventType, 
-  logAIApiCall, 
-  logPerformance
+import {
+  logger,
+  createSession,
+  endSession,
+  LogLevel,
+  EventType,
+  logAIApiCall,
+  logPerformance,
 } from '../utils/logger';
 import type { PerformanceMetrics } from '../types';
-import type { 
-  GenerateStoryRequest, 
+import type {
+  GenerateStoryRequest,
   GenerateStoryResponse,
-  SaveStoryRequest, 
+  SaveStoryRequest,
   SaveStoryResponse,
   GetStoriesResponse,
   GetStoryResponse,
@@ -71,8 +41,35 @@ import type {
   GenerateFullStoryRequest,
   GenerateFullStoryResponse,
   StoryTree,
-  StoryTreeNode
+  StoryTreeNode,
 } from '../types';
+
+type GenerationMode = 'mock' | 'live';
+
+function resolveGenerationMode(): GenerationMode {
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const hasValidKey = isDeepseekApiKeyValid();
+
+  if (!hasValidKey) {
+    if (nodeEnv === 'production') {
+      const configError = new Error('DeepSeek API Key 缺失或无效，请检查生产环境配置');
+      (configError as any).code = 'DEEPSEEK_CONFIG_ERROR';
+      throw configError;
+    }
+
+    logger.warn(EventType.STORY_GENERATION_START, 'DeepSeek API Key 缺失或无效，使用 Mock 模式', {
+      nodeEnv,
+      hasKey: !!process.env.DEEPSEEK_API_KEY,
+    });
+    return 'mock';
+  }
+
+  if (nodeEnv === 'test' && process.env.DEEPSEEK_USE_REAL !== 'true') {
+    return 'mock';
+  }
+
+  return 'live';
+}
 
 function extractJson(content: string): any {
   const cleaned = String(content || '')
@@ -140,27 +137,61 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
       throw customError;
     }
     
-    // 智能API Key检查与Mock模式降级
-    if (shouldUseMockMode()) {
-      logger.info(EventType.STORY_GENERATION_START, '使用Mock模式生成故事', {
-        reason: 'API key invalid or test environment',
-        nodeEnv: process.env.NODE_ENV,
-        hasApiKey: !!process.env.DEEPSEEK_API_KEY
-      }, undefined, sessionId);
-      
-      const mockResponse = generateMockStoryResponse(topic, currentStory, selectedChoice, turnIndex, maxChoices, forceEnding);
-      
-      logger.info(EventType.STORY_GENERATION_COMPLETE, 'Mock故事生成完成', {
-        storyLength: mockResponse.storySegment.length,
-        choicesCount: mockResponse.choices.length,
-        isEnding: mockResponse.isEnding,
-        success: true
-      }, {
-        startTime,
-        endTime: Date.now(),
-        duration: Date.now() - startTime
-      }, sessionId);
-      
+    let generationMode: GenerationMode;
+    try {
+      generationMode = resolveGenerationMode();
+    } catch (configError) {
+      logger.error(
+        EventType.STORY_GENERATION_ERROR,
+        'DeepSeek 配置无效，无法生成真实故事',
+        configError as Error,
+        {
+          nodeEnv: process.env.NODE_ENV,
+        },
+        sessionId,
+      );
+      throw configError;
+    }
+
+    if (generationMode === 'mock') {
+      logger.info(
+        EventType.STORY_GENERATION_START,
+        '使用Mock模式生成故事',
+        {
+          reason: 'API key 缺失或测试环境',
+          nodeEnv: process.env.NODE_ENV,
+          hasApiKey: !!process.env.DEEPSEEK_API_KEY,
+        },
+        undefined,
+        sessionId,
+      );
+
+      const mockResponse = generateMockStoryResponse(
+        topic,
+        currentStory,
+        selectedChoice,
+        turnIndex,
+        maxChoices,
+        forceEnding,
+      );
+
+      logger.info(
+        EventType.STORY_GENERATION_COMPLETE,
+        'Mock故事生成完成',
+        {
+          storyLength: mockResponse.storySegment.length,
+          choicesCount: mockResponse.choices.length,
+          isEnding: mockResponse.isEnding,
+          success: true,
+        },
+        {
+          startTime,
+          endTime: Date.now(),
+          duration: Date.now() - startTime,
+        },
+        sessionId,
+      );
+
       endSession(sessionId, true);
       return mockResponse;
     }
@@ -446,6 +477,20 @@ export async function generateStoryService(params: GenerateStoryRequest): Promis
   } catch (error: any) {
     // 记录错误
     const totalDuration = Date.now() - startTime;
+
+    if ((error as any)?.code === 'DEEPSEEK_CONFIG_ERROR') {
+      logger.error(
+        EventType.STORY_GENERATION_ERROR,
+        'DeepSeek 配置错误，生成流程终止',
+        error,
+        {
+          duration: totalDuration,
+        },
+        sessionId,
+      );
+      endSession(sessionId, false);
+      throw error;
+    }
     
     if (error.response) {
       logger.error(EventType.AI_API_ERROR, 'DeepSeek API响应错误', error, {
@@ -730,8 +775,15 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
     console.log(`开始生成完整故事树，主题: ${topic}`);
     
-    // 智能API Key检查与Mock模式降级
-    if (shouldUseMockMode()) {
+    let generationMode: GenerationMode;
+    try {
+      generationMode = resolveGenerationMode();
+    } catch (configError) {
+      console.error('DeepSeek 配置无效，无法生成真实故事树', configError);
+      throw configError;
+    }
+
+    if (generationMode === 'mock') {
       console.log('使用Mock模式生成故事树');
       const storyTreeId = new ObjectId().toString();
       const timestamp = new Date().toISOString();
@@ -749,7 +801,10 @@ export async function generateFullStoryTreeService(params: GenerateFullStoryRequ
     
   } catch (error: any) {
     console.error('故事树生成失败:', error);
-    
+    if ((error as any)?.code === 'DEEPSEEK_CONFIG_ERROR') {
+      throw error;
+    }
+
     const customError = new Error('故事树生成失败');
     (customError as any).code = 'STORY_TREE_GENERATION_ERROR';
     throw customError;
@@ -1052,7 +1107,15 @@ export async function generateBasicStoryTreeService(params: GenerateFullStoryReq
     const timestamp = new Date().toISOString();
 
     // 智能API Key检查与Mock模式降级
-    if (shouldUseMockMode()) {
+    let generationMode: GenerationMode;
+    try {
+      generationMode = resolveGenerationMode();
+    } catch (configError) {
+      console.error('DeepSeek 配置无效，无法生成基础故事树', configError);
+      throw configError;
+    }
+
+    if (generationMode === 'mock') {
       console.log('使用Mock模式生成基础故事树');
       return generateMockStoryTree(topic, storyTreeId, timestamp);
     }
@@ -1103,6 +1166,9 @@ export async function generateBasicStoryTreeService(params: GenerateFullStoryReq
     };
   } catch (error: any) {
     console.error('故事树生成失败:', error);
+    if ((error as any)?.code === 'DEEPSEEK_CONFIG_ERROR') {
+      throw error;
+    }
     
     const customError = new Error('故事树生成失败');
     (customError as any).code = 'STORY_TREE_GENERATION_ERROR';

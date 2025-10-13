@@ -10,6 +10,7 @@ import {
 } from '../config/metrics';
 import { logHttpRequest, logError, createLogger } from '../config/logger';
 import { securityConfig, rateLimitConfig } from '../config';
+import { checkDatabaseHealth } from '../config/database';
 
 const logger = createLogger('middleware');
 
@@ -262,29 +263,39 @@ export const healthCheckMiddleware = (req: Request, res: Response, next: NextFun
 export const readyCheckMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   if (req.path === '/api/ready' || req.path === '/ready') {
     try {
-      // TODO: Add actual database connectivity check
+      const databaseHealthy = await checkDatabaseHealth();
+      const memoryHealthy =
+        process.memoryUsage().heapUsed / process.memoryUsage().heapTotal < 0.9;
+
       const ready = {
-        status: 'ready',
+        status: databaseHealthy && memoryHealthy ? 'ready' : 'degraded',
         timestamp: new Date().toISOString(),
         checks: {
-          database: 'healthy', // Will be implemented when we add real DB
-          memory: process.memoryUsage().heapUsed / process.memoryUsage().heapTotal < 0.9 ? 'healthy' : 'warning'
-        }
+          database: databaseHealthy ? 'healthy' : 'unhealthy',
+          memory: memoryHealthy ? 'healthy' : 'warning',
+        },
       };
-      
-      const allHealthy = Object.values(ready.checks).every(check => check === 'healthy');
+
+      const allHealthy = Object.values(ready.checks).every((check) => check === 'healthy');
       res.status(allHealthy ? 200 : 503).json(ready);
       return;
     } catch (error) {
+      logger.error(
+        {
+          error: error as Error,
+          requestId: (req as any).requestId,
+        },
+        'Ready check failed',
+      );
       res.status(503).json({
         status: 'not ready',
         timestamp: new Date().toISOString(),
-        error: 'Service checks failed'
+        error: 'Service checks failed',
       });
       return;
     }
   }
-  
+
   next();
 };
 
