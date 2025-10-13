@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="/home/yuanhaizhou/projects/storyapp"
+export PATH="$ROOT/.tools/node-v22/bin:$PATH"
+exec "$@"

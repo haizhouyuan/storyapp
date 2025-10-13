@@ -1,5 +1,50 @@
 # Repository Guidelines
 
+## ⚠️ 重要：Node.js 环境配置
+
+**本项目使用仓库内的 Node.js v22.19.0，禁止直接使用系统 `node` 或 `npm` 命令！**
+
+### 所有 Node/npm 命令必须通过以下方式执行：
+
+```bash
+# 方式1：使用 nodehere 脚本（推荐）
+scripts/dev/nodehere node -v
+scripts/dev/nodehere npm run -w backend type-check
+scripts/dev/nodehere npm run -w frontend build
+scripts/dev/nodehere npm test
+
+# 方式2：手动设置 PATH（不推荐，容易忘记）
+export PATH="$PWD/.tools/node-v22/bin:$PATH"
+node -v
+npm -v
+```
+
+### 为什么需要这样做？
+- Codex/OpenAI Codex 的沙箱环境无法访问系统级 Node.js
+- 项目在 `.tools/node-v22/` 中包含了完整的 Node.js 环境
+- `scripts/dev/nodehere` 脚本会自动设置正确的 PATH
+
+### 常用命令速查
+
+```bash
+# 类型检查
+scripts/dev/nodehere npm run -w backend type-check
+scripts/dev/nodehere npm run -w frontend type-check
+
+# 构建
+scripts/dev/nodehere npm run build
+
+# 测试
+scripts/dev/nodehere npm test
+
+# 开发模式
+scripts/dev/nodehere npm run dev
+```
+
+📝 **详细文档**：`docs/CODEX_NODE_SETUP.md`
+
+---
+
 ## Project Overview
 
 这是一个儿童睡前互动故事应用，使用AI生成个性化故事内容，让孩子通过选择不同的情节分支来推动故事发展。
@@ -21,49 +66,51 @@
 
 ## Build, Test, and Development Commands
 
+⚠️ **重要提醒**：所有命令都必须使用 `scripts/dev/nodehere` 前缀！
+
 ### 安装依赖
 ```bash
 # 安装所有依赖（推荐）
-npm run install:all
+scripts/dev/nodehere npm run install:all
 
 # 或分别安装
-npm install
-cd backend && npm install
-cd ../frontend && npm install --legacy-peer-deps
+scripts/dev/nodehere npm install
+cd backend && ../scripts/dev/nodehere npm install
+cd ../frontend && ../scripts/dev/nodehere npm install --legacy-peer-deps
 ```
 
 ### 开发模式
 ```bash
 # 同时启动前后端开发服务器
-npm run dev
+scripts/dev/nodehere npm run dev
 
 # 分别启动
-npm run dev:backend  # 后端: http://localhost:5000
-npm run dev:frontend # 前端: http://localhost:3000
+scripts/dev/nodehere npm run dev:backend  # 后端: http://localhost:5000
+scripts/dev/nodehere npm run dev:frontend # 前端: http://localhost:3000
 ```
 
 ### 构建和部署
 ```bash
 # 构建生产版本
-npm run build
+scripts/dev/nodehere npm run build
 
 # 启动生产服务器
-npm run start
+scripts/dev/nodehere npm run start
 ```
 
 ### 测试
 ```bash
 # 安装Playwright浏览器
-npx playwright install
+scripts/dev/nodehere npx playwright install
 
 # 运行E2E测试
-npm test
+scripts/dev/nodehere npm test
 
 # 运行后端测试
-cd backend && npm test
+cd backend && ../scripts/dev/nodehere npm test
 
 # 测试日志记录系统（新增）
-node test-logging-system.js
+scripts/dev/nodehere node test-logging-system.js
 ```
 
 ## Coding Style & Naming Conventions
