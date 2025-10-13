@@ -30,7 +30,7 @@ git clone <your-repo-url>
 cd storyapp
 
 # 安装所有依赖
-npm run install:all
+scripts/dev/nodehere npm run install:all
 ```
 
 ### 2. 环境配置
@@ -72,18 +72,18 @@ MongoDB 会在启动时自动创建集合与索引：
 
 ```bash
 # 同时启动前后端开发服务器
-npm run dev
+scripts/dev/nodehere npm run dev
 
 # 或分别启动
-npm run dev:backend  # 后端: http://localhost:5001
-npm run dev:frontend # 前端: http://localhost:3000
+scripts/dev/nodehere npm run dev:backend  # 后端: http://localhost:5001
+scripts/dev/nodehere npm run dev:frontend # 前端: http://localhost:3000
 ```
 
 ### 5. 运行测试
 
 ```bash
 # 运行Playwright端到端测试
-npm test
+scripts/dev/nodehere npm test
 ```
 
 ## 项目结构

@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { checkDatabaseHealth } from '../config/database';
 import { checkDeepseekHealth } from '../config/deepseek';
+import { createLogger } from '../config/logger';
 
 const router = Router();
+const healthLogger = createLogger('routes:health');
 
 // 健康检查接口
 router.get('/', async (req: Request, res: Response) => {
@@ -24,7 +26,7 @@ router.get('/', async (req: Request, res: Response) => {
     try {
       checks.database = await checkDatabaseHealth();
     } catch (error) {
-      console.warn('数据库健康检查失败:', error);
+      healthLogger.warn({ err: error }, '数据库健康检查失败');
     }
 
     // 检查DeepSeek API配置（非关键依赖）
@@ -38,7 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
         message: deepseekStatus.errorMessage,
       };
     } catch (error) {
-      console.warn('DeepSeek API检查失败:', error);
+      healthLogger.warn({ err: error }, 'DeepSeek API检查失败');
       checks.deepseek = {
         available: false,
         status: 'error',
@@ -74,7 +76,7 @@ router.get('/', async (req: Request, res: Response) => {
       warnings
     });
   } catch (error) {
-    console.error('健康检查错误:', error);
+    healthLogger.error({ err: error }, '健康检查错误');
     res.status(500).json({
       status: 'error',
       message: '健康检查失败',

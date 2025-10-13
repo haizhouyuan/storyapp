@@ -1,120 +1,89 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# 儿童故事应用 - 阿里云服务器部署脚本
-# 用于在生产服务器上执行部署
+# 儿童故事应用 - 服务器部署脚本
+# 与 GitHub Actions 保持一致的 Docker Compose 部署流程
+#
+# 可选环境变量：
+#   USE_GHCR=true|false    # 是否使用 GHCR 镜像（默认 true）
+#   APP_TAG=latest         # 使用的镜像标签，在 USE_GHCR=true 时生效
+#   GHCR_USERNAME=...      # docker login 用户名（未提供时使用当前 git 用户）
+#   GHCR_TOKEN=...         # docker login 令牌
 
 echo "🚀 儿童故事应用 - 开始服务器部署流程..."
-echo "📍 部署环境: 生产环境"
-echo ""
 
-# 检查当前目录
-echo "🔍 检查项目结构..."
+if ! command -v docker &>/dev/null; then
+  echo "❌ 必须先安装 Docker 才能部署"
+  exit 1
+fi
+
+if ! command -v docker compose &>/dev/null; then
+  echo "❌ 当前环境未安装 docker compose v2，请安装后重试"
+  exit 1
+fi
+
 if [ ! -f "package.json" ]; then
-    echo "❌ 错误: 请在项目根目录运行此脚本"
-    exit 1
+  echo "❌ 当前目录不是项目根目录，请 cd 到仓库根目录执行"
+  exit 1
 fi
 
-if [ ! -f "deploy.sh" ]; then
-    echo "❌ 错误: 未找到部署脚本 deploy.sh"
-    exit 1
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "❌ 当前目录不是 git 仓库，请检查仓库状态"
+  exit 1
 fi
 
-# 检查git仓库
-echo "🔍 检查git配置..."
-if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    echo "❌ 错误: 当前不在git仓库中"
-    exit 1
-fi
+echo "🔍 拉取最新代码..."
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+git fetch origin --prune
+git pull --ff-only origin "$CURRENT_BRANCH"
 
-# 检查远程仓库配置
-if ! git remote | grep -q "gitee"; then
-    echo "❌ 错误: 未配置gitee远程仓库"
-    echo "💡 请运行: git remote add gitee https://gitee.com/yuanhaizhou123/storyapp.git"
-    exit 1
-fi
+COMPOSE_FILES=(-f docker-compose.yml)
+USE_GHCR="${USE_GHCR:-true}"
+APP_TAG="${APP_TAG:-latest}"
 
-# 从Gitee拉取最新代码
-echo ""
-echo "📥 从Gitee拉取最新代码..."
-git pull gitee main
-PULL_EXIT_CODE=$?
-
-if [ $PULL_EXIT_CODE -ne 0 ]; then
-    echo "❌ 拉取代码失败 (退出码: $PULL_EXIT_CODE)"
-    echo "💡 提示: 检查网络连接或仓库权限"
-    exit 1
-fi
-
-echo "✅ 代码拉取成功"
-
-# 检查是否有package.json变更
-echo ""
-echo "📦 检查依赖变更..."
-if git diff --name-only HEAD~1 HEAD | grep -q "package.json\|package-lock.json"; then
-    echo "🔄 检测到依赖变更，重新安装依赖..."
-    npm run install:all
-    if [ $? -ne 0 ]; then
-        echo "❌ 依赖安装失败"
-        exit 1
-    fi
-    echo "✅ 依赖安装完成"
+if [ "$USE_GHCR" = "true" ] && [ -f "docker-compose.ghcr.yml" ]; then
+  echo "📦 使用 GHCR 镜像部署，标签: ${APP_TAG}"
+  COMPOSE_FILES+=(-f docker-compose.ghcr.yml)
+  GHCR_USER="${GHCR_USERNAME:-${GHCR_USER:-${GH_USERNAME:-$(git config user.name || echo "storyapp")}}}"
+  if [ -n "${GHCR_TOKEN:-}" ]; then
+    echo "🔑 登录 GHCR..."
+    printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+  else
+    echo "⚠️ 未设置 GHCR_TOKEN，跳过 docker login（若镜像为私有将导致拉取失败）"
+  fi
+  export APP_TAG
 else
-    echo "📋 无依赖变更，跳过安装"
-fi
-
-# 构建生产版本
-echo ""
-echo "🔨 构建生产版本..."
-npm run build
-BUILD_EXIT_CODE=$?
-
-if [ $BUILD_EXIT_CODE -ne 0 ]; then
-    echo "❌ 构建失败 (退出码: $BUILD_EXIT_CODE)"
-    echo "💡 提示: 检查构建错误信息"
+  if [ -f "docker-compose.optimized.yml" ]; then
+    COMPOSE_FILES+=(-f docker-compose.optimized.yml)
+  fi
+  echo "🔨 本地构建应用镜像..."
+  if ! docker compose "${COMPOSE_FILES[@]}" build app; then
+    echo "❌ 构建失败，请确认 docker-compose.optimized.yml 定义了 app 的 build 配置"
     exit 1
+  fi
 fi
 
-echo "✅ 构建完成"
+echo "🧹 清理残留容器（若存在）..."
+docker compose "${COMPOSE_FILES[@]}" down --remove-orphans || true
 
-# Docker部署
-echo ""
-echo "🐳 使用Docker部署应用..."
-./deploy.sh --rebuild production
-DEPLOY_EXIT_CODE=$?
+echo "🐳 启动服务..."
+docker compose "${COMPOSE_FILES[@]}" up -d
 
-if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
-    echo "❌ Docker部署失败 (退出码: $DEPLOY_EXIT_CODE)"
-    exit 1
+echo "⏳ 等待应用通过健康检查..."
+HEALTH_ENDPOINT="http://localhost:5000/api/health"
+if [ -n "${PORT:-}" ]; then
+  HEALTH_ENDPOINT="http://localhost:${PORT}/api/health"
 fi
 
-# 健康检查
-echo ""
-echo "🏥 等待服务启动并进行健康检查..."
-sleep 15
+for _ in {1..30}; do
+  if curl -fsS "${HEALTH_ENDPOINT}" >/dev/null 2>&1; then
+    echo "✅ 部署成功，服务健康"
+    echo "🌐 访问地址: ${HEALTH_ENDPOINT%/api/health}"
+    exit 0
+  fi
+  sleep 5
+done
 
-echo ""
-echo "📊 检查服务状态..."
-./deploy.sh --status
-
-# 最终API健康检查
-echo ""
-echo "🔬 执行最终API健康检查..."
-if curl -f http://localhost:5001/api/health > /dev/null 2>&1; then
-    echo "✅ API健康检查通过"
-else
-    echo "❌ API健康检查失败"
-    echo "💡 提示: 查看容器日志: docker-compose logs app"
-    exit 1
-fi
-
-echo ""
-echo "🎉 部署完成！"
-echo "🌐 应用地址: http://localhost:5001"
-echo "🔧 健康检查: http://localhost:5001/api/health"
-echo ""
-echo "📋 常用管理命令:"
-echo "  查看日志: docker-compose logs -f app"
-echo "  服务状态: ./deploy.sh --status"
-echo "  重启服务: ./deploy.sh --rebuild production"
-echo ""
-echo "🚀 儿童故事应用已成功部署到生产环境！"
+echo "❌ 健康检查超时，请查看日志: docker compose ${COMPOSE_FILES[*]} logs app"
+docker compose "${COMPOSE_FILES[@]}" logs app
+exit 1

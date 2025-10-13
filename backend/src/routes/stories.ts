@@ -12,8 +12,10 @@ import type {
   SaveStoryRequest,
   GenerateFullStoryRequest
 } from '../types';
+import { createLogger } from '../config/logger';
 
 const router = Router();
+const storiesLogger = createLogger('routes:stories');
 
 // POST /api/generate-story - 生成故事片段
 router.post('/generate-story', async (req: Request, res: Response) => {
@@ -35,7 +37,7 @@ router.post('/generate-story', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`正在为主题"${topic}"生成故事...`);
+    storiesLogger.info({ topic }, '开始生成故事片段');
     
     // 调用故事生成服务
     const result = await generateStoryService({
@@ -49,7 +51,7 @@ router.post('/generate-story', async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (error: any) {
-    console.error('生成故事失败:', error);
+    storiesLogger.error({ err: error, topic: req.body?.topic }, '生成故事失败');
 
     if (error.code === 'DEEPSEEK_CONFIG_ERROR') {
       return res.status(503).json({
@@ -99,7 +101,7 @@ router.post('/save-story', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`正在保存故事"${title}"...`);
+    storiesLogger.info({ title }, '开始保存故事');
 
     // 调用故事保存服务
     const result = await saveStoryService({
@@ -109,7 +111,7 @@ router.post('/save-story', async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (error: any) {
-    console.error('保存故事失败:', error);
+    storiesLogger.error({ err: error, title: req.body?.title }, '保存故事失败');
     
     if (error.code === 'DATABASE_ERROR') {
       return res.status(503).json({
@@ -128,14 +130,14 @@ router.post('/save-story', async (req: Request, res: Response) => {
 // GET /api/get-stories - 获取故事列表
 router.get('/get-stories', async (req: Request, res: Response) => {
   try {
-    console.log('正在获取故事列表...');
+    storiesLogger.info('开始获取故事列表');
     
     // 调用故事列表服务
     const result = await getStoriesService();
     
     res.json(result);
   } catch (error: any) {
-    console.error('获取故事列表失败:', error);
+    storiesLogger.error({ err: error }, '获取故事列表失败');
     
     if (error.code === 'DATABASE_ERROR') {
       return res.status(503).json({
@@ -164,7 +166,7 @@ router.get('/get-story/:id', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`正在获取故事详情, ID: ${id}`);
+    storiesLogger.info({ storyId: id }, '开始获取故事详情');
     
     // 调用故事详情服务
     const result = await getStoryByIdService(id);
@@ -178,7 +180,7 @@ router.get('/get-story/:id', async (req: Request, res: Response) => {
     
     res.json(result);
   } catch (error: any) {
-    console.error('获取故事详情失败:', error);
+    storiesLogger.error({ err: error, storyId: req.params?.id }, '获取故事详情失败');
     
     // 检查是否是无效ID格式错误
     if (error.message === '无效的故事ID格式') {
@@ -215,14 +217,14 @@ router.delete('/delete-story/:id', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`正在删除故事, ID: ${id}`);
+    storiesLogger.info({ storyId: id }, '开始删除故事');
     
     // 调用故事删除服务
     const result = await deleteStoryService({ id });
     
     res.json(result);
   } catch (error: any) {
-    console.error('删除故事失败:', error);
+    storiesLogger.error({ err: error, storyId: req.params?.id }, '删除故事失败');
     
     // 检查是否是无效ID格式错误
     if (error.message === '无效的故事ID格式') {
@@ -273,7 +275,7 @@ router.post('/generate-full-story', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`正在为主题"${topic}"生成完整故事树...`);
+    storiesLogger.info({ topic }, '开始生成完整故事树');
     
     // 调用故事树生成服务
     const result = await generateFullStoryTreeService({
@@ -282,7 +284,7 @@ router.post('/generate-full-story', async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (error: any) {
-    console.error('生成故事树失败:', error);
+    storiesLogger.error({ err: error, topic: req.body?.topic }, '生成故事树失败');
 
     if (error.code === 'DEEPSEEK_CONFIG_ERROR') {
       return res.status(503).json({

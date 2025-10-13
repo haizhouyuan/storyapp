@@ -41,56 +41,31 @@ cd /opt/storyapp
 # 3. 从GitHub拉取最新代码
 git pull origin main
 
-# 4. 安装依赖（如果需要）
-npm run install:all
+# 4. 部署（推荐脚本方式，默认使用 GHCR 镜像）
+GHCR_TOKEN=xxxx ./scripts/server-deploy.sh
 
-# 5. 构建生产版本
-npm run build
+# 5. 如需本地构建镜像，可执行
+USE_GHCR=false ./scripts/server-deploy.sh
 
-# 6. 使用Docker重新部署
-./deploy.sh --rebuild production
-
-# 7. 验证部署状态
-./deploy.sh --status
+# 6. 验证部署状态
+docker compose -f docker-compose.yml ps
 ```
 
 ## 🚀 自动化部署脚本
 
 ### 服务器部署脚本 (`scripts/server-deploy.sh`)
+- 自动执行 `git fetch` / `git pull`（当前分支）
+- 支持两种模式：
+  - `USE_GHCR=true`（默认）：拉取 GHCR 镜像并根据 `APP_TAG` 启动
+  - `USE_GHCR=false`：本地构建镜像后再启动
+- 使用 `docker compose` 启停服务并等待健康检查
+
 ```bash
-#!/bin/bash
-# 阿里云服务器部署脚本
+# 默认使用 GHCR 镜像（需要先导出 GHCR_TOKEN / GHCR_USERNAME）
+GHCR_TOKEN=xxxx ./scripts/server-deploy.sh
 
-echo "🚀 开始服务器部署..."
-
-# 检查当前目录
-if [ ! -f "package.json" ]; then
-    echo "❌ 请在项目根目录运行此脚本"
-    exit 1
-fi
-
-# 从GitHub拉取最新代码
-echo "📥 从GitHub拉取最新代码..."
-git pull origin main
-
-# 安装依赖
-echo "📦 安装依赖..."
-npm run install:all
-
-# 构建生产版本
-echo "🔨 构建生产版本..."
-npm run build
-
-# Docker部署
-echo "🐳 使用Docker部署..."
-./deploy.sh --rebuild production
-
-# 健康检查
-echo "🏥 进行健康检查..."
-sleep 10
-./deploy.sh --status
-
-echo "🎉 部署完成！"
+# 如需本地构建镜像
+USE_GHCR=false ./scripts/server-deploy.sh
 ```
 
 ## 🔧 Git配置优化
@@ -160,7 +135,7 @@ DOCKER_REGISTRY=your-registry
 ```bash
 # 回滚到上一个版本
 git reset --hard HEAD^
-./deploy.sh --rebuild production
+USE_GHCR=${USE_GHCR:-true} ./scripts/server-deploy.sh
 ```
 
 ## 📞 联系方式

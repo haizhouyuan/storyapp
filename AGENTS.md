@@ -259,7 +259,7 @@ Notes:
   - `DEEPSEEK_API_KEY=...`
   - `DEEPSEEK_API_URL=https://api.deepseek.com`
 
-- Build and run (manual commands; prefer this over batch scripts like `deploy.sh`):
+- Build and run (manual commands; 推荐使用脚本 `scripts/server-deploy.sh`，避免旧版 `deploy.sh`):
   - `docker compose -f docker-compose.yml build --no-cache app`
   - `docker compose -f docker-compose.yml up -d mongo-primary mongo-secondary mongo-arbiter mongo-backup`
   - `docker compose -f docker-compose.yml up -d app`
@@ -273,15 +273,15 @@ Notes:
 - E2E (production):
   - `ssh <prod-user>@<prod-host>` then run on the server:
     - `cd /path/to/storyapp`
-    - `npx playwright install`
-    - `npx playwright test -c playwright.prod.config.ts`
+    - `./scripts/dev/nodehere npx playwright install`
+    - `./scripts/dev/nodehere npx playwright test -c playwright.prod.config.ts`
   - Do NOT run against local services to avoid confusing local smoke tests with production tests.
 
-Note: Prefer these step-by-step commands over batch scripts like `deploy.sh`.
+Note: Prefer these step-by-step commands or `scripts/server-deploy.sh`; legacy `deploy.sh` 已废弃。
 
 ## Testing & Troubleshooting
-- E2E: Playwright (`npm test`); install browsers via `npx playwright install`.
-- Backend unit tests: `cd backend && npm test`.
+- E2E: Playwright (`scripts/dev/nodehere npm test`); install浏览器: `scripts/dev/nodehere npx playwright install`。
+- Backend unit tests: `cd backend && ../scripts/dev/nodehere npm test`。
 - Common issues: see `docs/SETUP.md` (env vars, DB connection, DeepSeek failures, frontend build).
 
 ## UX & Quality Notes
@@ -298,7 +298,7 @@ Note: Prefer these step-by-step commands over batch scripts like `deploy.sh`.
 ### 快速测试
 ```bash
 # 运行完整的系统功能测试
-node test-logging-system.js
+scripts/dev/nodehere node test-logging-system.js
 ```
 
 ### 主要功能

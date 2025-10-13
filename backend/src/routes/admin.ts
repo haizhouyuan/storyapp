@@ -3,8 +3,10 @@ import { ObjectId } from 'mongodb';
 import { getDatabase } from '../config/database';
 import { COLLECTIONS, getDatabaseStats, cleanupOldLogs } from '../config/initializeDatabase';
 import { LogLevel, EventType } from '../utils/logger';
+import { createLogger } from '../config/logger';
 
 const router = Router();
+const adminLogger = createLogger('routes:admin');
 
 // GET /api/admin/logs - 获取日志列表（支持分页和筛选）
 router.get('/logs', async (req: Request, res: Response) => {
@@ -98,7 +100,7 @@ router.get('/logs', async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('获取日志列表失败:', error);
+    adminLogger.error({ err: error }, '获取日志列表失败');
     res.status(500).json({
       success: false,
       error: '获取日志列表失败',
@@ -153,7 +155,7 @@ router.get('/logs/:sessionId', async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('获取会话日志失败:', error);
+    adminLogger.error({ err: error }, '获取会话日志失败');
     res.status(500).json({
       success: false,
       error: '获取会话日志失败',
@@ -325,7 +327,7 @@ router.get('/stats', async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('获取统计信息失败:', error);
+    adminLogger.error({ err: error }, '获取统计信息失败');
     res.status(500).json({
       success: false,
       error: '获取统计信息失败',
@@ -406,7 +408,7 @@ router.get('/performance', async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('获取性能指标失败:', error);
+    adminLogger.error({ err: error }, '获取性能指标失败');
     res.status(500).json({
       success: false,
       error: '获取性能指标失败',
@@ -487,7 +489,7 @@ router.post('/logs/export', async (req: Request, res: Response) => {
       });
     }
   } catch (error: any) {
-    console.error('导出日志失败:', error);
+    adminLogger.error({ err: error }, '导出日志失败');
     res.status(500).json({
       success: false,
       error: '导出日志失败',
@@ -508,7 +510,7 @@ router.delete('/logs/cleanup', async (req: Request, res: Response) => {
       deletedCount
     });
   } catch (error: any) {
-    console.error('清理日志失败:', error);
+    adminLogger.error({ err: error }, '清理日志失败');
     res.status(500).json({
       success: false,
       error: '清理日志失败',
@@ -593,7 +595,7 @@ router.get('/sessions/active', async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('获取活跃会话失败:', error);
+    adminLogger.error({ err: error }, '获取活跃会话失败');
     res.status(500).json({
       success: false,
       error: '获取活跃会话失败',

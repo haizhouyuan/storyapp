@@ -162,6 +162,8 @@ services:
   app:
     container_name: storyapp-app
     # 镜像在 override 中指定
+    # 默认挂载根目录 .env，至少需要包含 DEEPSEEK_API_KEY、MONGODB_URI 等关键变量
+    # 如需使用不同环境文件，可通过 COMPOSE_FILE 或 env_file 覆盖
     env_file:
       - .env
     environment:
@@ -196,7 +198,7 @@ services:
       app:
         condition: service_healthy
     volumes:
-      - ./ops/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
     networks:
       - storyapp-net
     ports:
