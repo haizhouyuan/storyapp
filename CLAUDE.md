@@ -239,8 +239,7 @@ REACT_APP_DEBUG=true
 ### 代码管理和部署流程
 
 #### 📋 远程仓库配置
-- **GitHub (主要开发)**: `https://github.com/haizhouyuan/storyapp.git`
-- **Gitee (生产部署)**: `https://gitee.com/yuanhaizhou123/storyapp.git`
+- **GitHub (主要仓库)**: `https://github.com/haizhouyuan/storyapp.git`
 
 #### 🔐 阿里云连接方式与项目路径
 - SSH 登录：`ssh root@47.120.74.212`
@@ -252,11 +251,8 @@ REACT_APP_DEBUG=true
 git add -A
 git commit -m "feat(backend): implement POST /api/generate-story"
 
-# 双仓库推送（推荐使用脚本，也可手动）
-./scripts/push-to-all.sh
-# 或者手动（当前分支）：
+# 推送（当前分支）
 git push origin $(git branch --show-current)
-git push gitee $(git branch --show-current)
 ```
 
 #### 🌐 生产环境域名和服务配置

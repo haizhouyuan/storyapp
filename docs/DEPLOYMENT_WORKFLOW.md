@@ -3,8 +3,7 @@
 ## 📋 代码管理流程
 
 ### 1. 远程仓库配置
-- **GitHub (主要开发仓库)**: `https://github.com/haizhouyuan/storyapp.git`
-- **Gitee (生产部署仓库)**: `https://gitee.com/yuanhaizhou123/storyapp.git`
+- **GitHub (唯一远程仓库)**: `https://github.com/haizhouyuan/storyapp.git`
 
 ### 2. 本地开发流程
 ```bash
@@ -25,18 +24,10 @@ git push origin feature/your-feature-name
 # (在GitHub界面上操作)
 ```
 
-### 3. 双推送流程（本地 → GitHub + Gitee）
+### 3. 推送流程（本地 → GitHub）
 ```bash
-# 方法1: 分别推送
-git push origin main      # 推送到GitHub
-git push gitee main       # 推送到Gitee
-
-# 方法2: 使用脚本一键双推送
-./scripts/push-to-all.sh
-
-# 方法3: 配置git别名（推荐）
-git config alias.push-all '!git push origin main && git push gitee main'
-git push-all
+# 推送到 GitHub（单远程）
+git push origin main
 ```
 
 ### 4. 阿里云服务器部署流程
@@ -47,8 +38,8 @@ ssh root@your-server-ip
 # 2. 进入项目目录
 cd /opt/storyapp
 
-# 3. 从Gitee拉取最新代码
-git pull gitee main
+# 3. 从GitHub拉取最新代码
+git pull origin main
 
 # 4. 安装依赖（如果需要）
 npm run install:all
@@ -65,36 +56,6 @@ npm run build
 
 ## 🚀 自动化部署脚本
 
-### 一键双推送脚本 (`scripts/push-to-all.sh`)
-```bash
-#!/bin/bash
-# 一键推送到所有远程仓库
-
-echo "🚀 开始双推送流程..."
-
-# 推送到GitHub
-echo "📤 推送到GitHub..."
-git push origin main
-if [ $? -eq 0 ]; then
-    echo "✅ GitHub推送成功"
-else
-    echo "❌ GitHub推送失败"
-    exit 1
-fi
-
-# 推送到Gitee
-echo "📤 推送到Gitee..."
-git push gitee main
-if [ $? -eq 0 ]; then
-    echo "✅ Gitee推送成功"
-else
-    echo "❌ Gitee推送失败"
-    exit 1
-fi
-
-echo "🎉 双推送完成！"
-```
-
 ### 服务器部署脚本 (`scripts/server-deploy.sh`)
 ```bash
 #!/bin/bash
@@ -108,9 +69,9 @@ if [ ! -f "package.json" ]; then
     exit 1
 fi
 
-# 从Gitee拉取最新代码
-echo "📥 从Gitee拉取最新代码..."
-git pull gitee main
+# 从GitHub拉取最新代码
+echo "📥 从GitHub拉取最新代码..."
+git pull origin main
 
 # 安装依赖
 echo "📦 安装依赖..."
@@ -137,17 +98,17 @@ echo "🎉 部署完成！"
 ### 添加git别名
 ```bash
 # 添加到 ~/.gitconfig 或项目 .git/config
-git config alias.pa '!git push origin main && git push gitee main'
-git config alias.sync '!git pull origin main && git push gitee main'
+git config alias.po 'push origin main'
+git config alias.plo 'pull origin main'
 ```
 
 ### 常用命令
 ```bash
-# 双推送
-git pa
+# 推送到远程主分支
+git po
 
-# 同步代码（从GitHub拉取，推送到Gitee）
-git sync
+# 从远程主分支拉取
+git plo
 
 # 查看远程仓库状态
 git remote -v
@@ -205,7 +166,6 @@ git reset --hard HEAD^
 ## 📞 联系方式
 
 - **GitHub Issues**: 功能请求和bug报告
-- **Gitee**: 生产环境问题
 - **服务器SSH**: 直接登录服务器处理紧急问题
 
 ---

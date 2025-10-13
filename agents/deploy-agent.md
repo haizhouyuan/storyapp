@@ -7,23 +7,19 @@
 
 ### 1. 代码管理流程
 ```
-本地开发 → 提交到GitHub → 双推送到Gitee → 阿里云服务器拉取部署
+本地开发 → 提交到GitHub → 阿里云服务器拉取部署
 ```
 
 ### 2. 远程仓库配置
 - **GitHub (origin)**: `https://github.com/haizhouyuan/storyapp.git`
-- **Gitee (gitee)**: `https://gitee.com/yuanhaizhou123/storyapp.git`
-- **服务器使用**: Gitee仓库
+- **服务器使用**: GitHub 仓库
 
 ## 🚀 部署命令
 
 ### 本地开发命令
 ```bash
-# 双推送代码
-./scripts/push-to-all.sh
-
-# 或使用git别名
-git pa  # git push origin main && git push gitee main
+# 推送代码（GitHub 单远程）
+git push origin main
 ```
 
 ### 服务器部署命令
@@ -32,7 +28,7 @@ git pa  # git push origin main && git push gitee main
 ./scripts/server-deploy.sh
 
 # 或分步执行
-git pull gitee main
+git pull origin main
 npm run install:all
 npm run build
 ./deploy.sh --rebuild production
@@ -48,10 +44,6 @@ curl http://localhost:5001/api/health
 ```
 
 ## 🔧 工具脚本
-
-### push-to-all.sh
-- 功能: 一键推送到GitHub和Gitee
-- 使用: `./scripts/push-to-all.sh`
 
 ### server-deploy.sh  
 - 功能: 服务器端完整部署流程

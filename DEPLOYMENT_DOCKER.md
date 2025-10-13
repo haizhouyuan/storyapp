@@ -56,8 +56,6 @@ cd /root/projects/storyapp
 
 # 拉取最新代码
 git pull origin master
-# 或从Gitee拉取
-git pull gitee master
 
 # 检查项目文件
 ls -la

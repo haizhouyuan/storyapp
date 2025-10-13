@@ -247,15 +247,13 @@ Notes:
 
 - Repos:
   - GitHub (primary): `https://github.com/haizhouyuan/storyapp.git`
-  - Gitee (prod): `https://gitee.com/yuanhaizhou123/storyapp.git`
 
 - Server Access:
   - SSH: `ssh root@47.120.74.212`
   - Project path (absolute): `/root/projects/storyapp`
 
 - Code flow:
-  - Commit with Conventional Commits, push to both remotes.
-  - Use `./scripts/push-to-all.sh` or push `origin` and `gitee` manually.
+  - Commit with Conventional Commits 并推送到 GitHub `origin`。
 
 - Server prep (.env at repo root; do not commit):
   - `DEEPSEEK_API_KEY=...`
