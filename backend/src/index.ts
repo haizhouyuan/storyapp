@@ -155,33 +155,53 @@ try {
 
 
 // 静态文件服务（前端）
-// ✅ 改成"在非开发环境，或显式要求时，一律服务静态资源"
-const staticCandidates = [
-  path.resolve(__dirname, '../public'),
-  path.resolve(__dirname, './public'),
-  path.resolve(process.cwd(), 'public')
-];
+// 只允许 backend/public；可通过 FRONTEND_STATIC_DIR 显式覆盖
+const STATIC_DIR =
+  process.env.FRONTEND_STATIC_DIR
+    ? path.resolve(process.cwd(), process.env.FRONTEND_STATIC_DIR)
+    : path.resolve(__dirname, '../public');
 
-const STATIC_DIR = staticCandidates.find((candidate) =>
-  fs.existsSync(candidate)
-);
+const shouldServeStatic =
+  process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development';
 
-const serveStatic =
-  !!STATIC_DIR && (process.env.SERVE_STATIC === '1' || process.env.NODE_ENV !== 'development');
+if (shouldServeStatic) {
+  appLogger.info({ dir: STATIC_DIR }, 'Serving static frontend');
+  app.use(express.static(STATIC_DIR, {
+    index: false,
+    etag: true,
+    maxAge: '1y',
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('/service-worker.js')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+    },
+  }));
 
-if (serveStatic && STATIC_DIR) {
-  // 服务React构建的静态文件
-  app.use(express.static(STATIC_DIR));
+  // 首页与前端路由回退（index.html 不缓存）
+  app.get(['/', '/index.html'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(path.join(STATIC_DIR, 'index.html'));
+  });
 
-  // 首页与前端路由回退
-  app.get(['/', '/index.html'], (_req, res) =>
-    res.sendFile(path.join(STATIC_DIR, 'index.html'))
-  );
-  app.get(/^(?!\/api\/).+/, (_req, res) =>
-    res.sendFile(path.join(STATIC_DIR, 'index.html'))
-  );
-} else {
-  appLogger.warn({ STATIC_DIR, candidates: staticCandidates }, 'Static assets directory not found; frontend routes will not be served');
+  // 显式 SW 路由（no-cache）
+  app.get('/service-worker.js', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(path.join(STATIC_DIR, 'service-worker.js'));
+  });
+
+  // 其余前端路由回退（no-cache）
+  app.get(/^(?!\/api\/).+/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(path.join(STATIC_DIR, 'index.html'));
+  });
 }
 
 // 404处理

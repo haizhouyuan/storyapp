@@ -103,3 +103,10 @@ scripts/router/
 
 # TypeScript build info
 *.tsbuildinfo
+# Local environment overrides
+.env.*
+*.local
+# Frontend build synced into backend/static
+backend/public/
+# Runtime nginx confs
+storage/nginx-runtime/*.conf
