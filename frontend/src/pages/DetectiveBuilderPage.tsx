@@ -181,8 +181,6 @@ export default function DetectiveBuilderPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium">章节字数目标</label>
-              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">随机机制</label>
@@ -209,8 +207,6 @@ export default function DetectiveBuilderPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium">章节字数目标</label>
-              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
           </div>
 
@@ -223,8 +219,6 @@ export default function DetectiveBuilderPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium">章节字数目标</label>
-              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
 
             <div className="bg-white rounded-lg shadow p-4">
@@ -235,8 +229,6 @@ export default function DetectiveBuilderPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium">章节字数目标</label>
-              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
 
             <div className="bg-white rounded-lg shadow p-4">
@@ -288,6 +280,11 @@ function QuickValidate({ projectId, chapter, draft }:{ projectId: string|null, c
       {report && (
         <div className="mt-2">
           <div className="text-sm mb-1">结果：pass={report?.summary?.pass||0} warn={report?.summary?.warn||0} fail={report?.summary?.fail||0}</div>
+          {draft && (report?.summary?.pass||0) >= 6 && (report?.summary?.fail||0) === 0 && (
+            <div className="text-green-700 bg-green-50 border border-green-200 inline-block px-2 py-1 rounded text-xs mb-2">
+              已达成可用标准 ✅
+            </div>
+          )}
           <div className="flex flex-wrap gap-1">
             {(report.results||[]).map((r:any)=> (
               <div key={r.ruleId} className="border rounded px-2 py-1 text-xs">

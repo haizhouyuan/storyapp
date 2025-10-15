@@ -81,10 +81,43 @@ export function buildEditorPrompt(options?: PromptBuildOptions): { system: strin
   const systemTpl = readTemplate('editor.system.hbs');
   const userTpl = readTemplate('editor.user.hbs');
   const system = systemTpl || '你是分级编辑器。保持剧情不变，控制句长、词频，删除不当用词。只返回同结构 JSON。';
+  // 读取目标字数（可选），用于扩写/压缩策略
+  const vars = (options?.vars || {}) as Record<string, unknown>;
+  const pick = (o: any, keys: string[]): any => {
+    for (const k of keys) {
+      const seg = k.split('.');
+      let cur: any = o; let ok = true;
+      for (const kk of seg) { if (cur && kk in cur) cur = (cur as any)[kk]; else { ok=false; break; } }
+      if (ok && cur !== undefined && cur !== null && cur !== '') return cur;
+    }
+    return undefined;
+  };
+  const wordsTargetRaw = pick(vars, ['targets.wordsPerScene', 'targetWords', 'words']);
+  const wordsTarget = typeof wordsTargetRaw === 'string' ? parseInt(wordsTargetRaw as string, 10) : (wordsTargetRaw as number | undefined);
+  const minPct = 0.85, maxPct = 1.15;
+  const lengthLine = wordsTarget && Number.isFinite(wordsTarget) && wordsTarget > 0
+    ? `若当前字数 < ${Math.round(wordsTarget*minPct)} 则扩写至约 ${wordsTarget}±15%；若 > ${Math.round(wordsTarget*maxPct)} 则压缩至约 ${wordsTarget}±15%。`
+    : '';
+
   const userBase = userTpl || [
-    '阅读级别 middle_grade；去除可能引发噩梦的描写。',
+    '阅读级别 middle_grade；去除可能引发噩梦的描写（血腥/细节化暴力）。',
     '规范标点：{{profile.editor.normalizePunctuation}}',
-  ].join('\n');
-  const ctx = { profile, seed: options?.seed, ...(options?.vars || {}) };
-  return { system, user: render(userBase, ctx), profile };
+    '保持剧情不变，优先：拆长句、精炼冗词、替换不当词。',
+    '{{lengthLine}}',
+    '输入：章节 JSON（包含 scene_id,title,words,text）。',
+    '输出：同结构 JSON（仅修订 text）。',
+    '仅返回 JSON。'
+] .join('\n');
+  const ctx = { profile, lengthLine, ...(vars) };
+  const user = (function(){
+    // simple mustache-like rendering
+    const renderStr = (tpl: string, context: Record<string, any>) => tpl.replace(/\{\{\s*([\w\.]+)\s*\}\}/g, (_m, key) => {
+      const parts = key.split('.');
+      let cur: any = context;
+      for (const k of parts) { if (cur && k in cur) cur = cur[k]; else { cur=''; break; } }
+      return String(cur ?? '');
+    });
+    return renderStr(userBase, ctx);
+  })();
+  return { system, user, profile };
 }
