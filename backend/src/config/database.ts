@@ -5,7 +5,9 @@ export { connectToDatabase, getDatabase, closeDatabase, checkDatabaseHealth, get
 
 // 数据库表名常量（保持兼容性）
 export const TABLES = {
-  STORIES: COLLECTIONS.STORIES
+  STORIES: COLLECTIONS.STORIES,
+  STORY_WORKFLOWS: COLLECTIONS.STORY_WORKFLOWS,
+  STORY_LOGS: COLLECTIONS.STORY_LOGS,
 } as const;
 
 // 初始化数据库的SQL参考（仅用于文档，MongoDB不需要SQL）

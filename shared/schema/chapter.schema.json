@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://storyapp.local/schemas/chapter.schema.json",
+  "title": "DetectiveSceneChapter",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["scene_id", "title", "words", "text"],
+  "properties": {
+    "scene_id": { "type": "string" },
+    "title": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string" },
+    "words": { "type": "integer", "minimum": 0 },
+    "text": { "type": "string", "minLength": 10 },
+    "cluesEmbedded": { "type": "array", "items": { "type": "string" } },
+    "redHerringsEmbedded": { "type": "array", "items": { "type": "string" } }
+  }
+}

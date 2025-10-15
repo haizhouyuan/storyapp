@@ -112,7 +112,11 @@ const buildMongoOptions = (): MongoClientOptions => {
 
 // 数据库集合名称常量
 export const COLLECTIONS = {
-  STORIES: 'stories'
+  STORIES: 'stories',
+  STORY_WORKFLOWS: 'story_workflows',
+  STORY_LOGS: 'story_logs',
+  STORY_PROJECTS: 'story_projects',
+  STORY_BLUEPRINTS: 'story_blueprints',
 } as const;
 
 let client: MongoClient | null = null;

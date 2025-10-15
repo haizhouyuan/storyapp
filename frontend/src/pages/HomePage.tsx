@@ -133,6 +133,33 @@ export default function HomePage({ onStartStory, onStartStoryTree }: HomePagePro
       <motion.button
         initial={{ opacity: 0, scale: 0 }}
         animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.6, type: 'spring' }}
+        onClick={() => navigate('/mystery-workflows')}
+        className="
+          absolute
+          top-child-xl
+          left-child-xl
+          w-16 h-16
+          bg-gradient-to-r from-child-blue to-child-purple
+          rounded-full
+          shadow-child-lg
+          hover:shadow-child-xl
+          transition-all
+          duration-200
+          flex
+          items-center
+          justify-center
+          group
+          z-20
+        "
+        data-testid="mystery-workflow-button"
+      >
+        <HomeIcon className="w-8 h-8 text-white group-hover:scale-110 transition-transform" />
+      </motion.button>
+
+      <motion.button
+        initial={{ opacity: 0, scale: 0 }}
+        animate={{ opacity: 1, scale: 1 }}
         transition={{ delay: 0.5, type: 'spring' }}
         onClick={() => navigate('/my-stories')}
         className="

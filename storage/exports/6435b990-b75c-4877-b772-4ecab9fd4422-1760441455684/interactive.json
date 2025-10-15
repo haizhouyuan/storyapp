@@ -1,0 +1,58 @@
+{
+  "interactive_pack": {
+    "cast_cards": [
+      {
+        "id": "1",
+        "name": "林远",
+        "role": "侦探",
+        "bio": ""
+      },
+      {
+        "id": "2",
+        "name": "陈伯",
+        "role": "管家",
+        "bio": ""
+      },
+      {
+        "id": "3",
+        "name": "苏雨",
+        "role": "建筑师之女",
+        "bio": ""
+      },
+      {
+        "id": "4",
+        "name": "赵海",
+        "role": "海洋学家",
+        "bio": ""
+      },
+      {
+        "id": "5",
+        "name": "王风",
+        "role": "气象学家",
+        "bio": ""
+      },
+      {
+        "id": "6",
+        "name": "李岩",
+        "role": "古董商",
+        "bio": ""
+      }
+    ],
+    "clue_matrix": [],
+    "timeline_view": [],
+    "quiz": [
+      {
+        "id": "Q1",
+        "question": "第八声的最合理来源？",
+        "options": [
+          "超自然",
+          "共振",
+          "风",
+          "机关"
+        ],
+        "answer": "共振",
+        "explain_scene": "Chapter 3"
+      }
+    ]
+  }
+}

@@ -3,7 +3,10 @@ import { getDatabase } from './database';
 // 数据库集合名称
 export const COLLECTIONS = {
   STORIES: 'stories',
-  STORY_LOGS: 'story_logs'
+  STORY_WORKFLOWS: 'story_workflows',
+  STORY_LOGS: 'story_logs',
+  STORY_PROJECTS: 'story_projects',
+  STORY_BLUEPRINTS: 'story_blueprints',
 } as const;
 
 // 初始化数据库索引和配置
@@ -21,7 +24,30 @@ export async function initializeDatabase(): Promise<void> {
     await storiesCollection.createIndex({ title: 'text' });
     console.log('✅ 故事集合索引创建完成');
     
-    // 2. 日志集合索引 - 新增
+    // 2. 工作流集合索引
+    const workflowsCollection = db.collection(COLLECTIONS.STORY_WORKFLOWS);
+    await workflowsCollection.createIndex({ createdAt: -1 });
+    await workflowsCollection.createIndex({ topic: 'text' });
+    await workflowsCollection.createIndex({ status: 1, updatedAt: -1 });
+    await workflowsCollection.createIndex({ currentRevisionId: 1 });
+    await workflowsCollection.createIndex({ 'stageStates.stage': 1, 'stageStates.status': 1 });
+    console.log('✅ 工作流集合索引创建完成');
+    
+    // 2.1 项目集合索引（新增）
+    const projectsCollection = db.collection(COLLECTIONS.STORY_PROJECTS);
+    await projectsCollection.createIndex({ createdAt: -1 });
+    await projectsCollection.createIndex({ title: 'text' });
+    await projectsCollection.createIndex({ projectId: 1 }, { unique: true });
+    console.log('✅ 项目集合索引创建完成');
+    
+    // 2.2 蓝图集合索引（新增）
+    const blueprintsCollection = db.collection(COLLECTIONS.STORY_BLUEPRINTS);
+    await blueprintsCollection.createIndex({ createdAt: -1 });
+    await blueprintsCollection.createIndex({ projectId: 1 });
+    await blueprintsCollection.createIndex({ blueprintId: 1 }, { unique: true });
+    console.log('✅ 蓝图集合索引创建完成');
+    
+    // 3. 日志集合索引 - 新增
     const logsCollection = db.collection(COLLECTIONS.STORY_LOGS);
     
     // 主要查询索引
@@ -51,7 +77,7 @@ export async function initializeDatabase(): Promise<void> {
     
     console.log('✅ 日志集合索引创建完成');
     
-    // 3. 创建统计视图（可选）
+    // 4. 创建统计视图（可选）
     try {
       await db.createCollection('daily_stats', {
         viewOn: COLLECTIONS.STORY_LOGS,
@@ -101,6 +127,7 @@ export async function getDatabaseStats(): Promise<any> {
     const db = getDatabase();
     
     const storiesStats = await db.collection(COLLECTIONS.STORIES).estimatedDocumentCount();
+    const workflowsStats = await db.collection(COLLECTIONS.STORY_WORKFLOWS).estimatedDocumentCount();
     const logsStats = await db.collection(COLLECTIONS.STORY_LOGS).estimatedDocumentCount();
     
     // 获取最近24小时的活动统计
@@ -130,6 +157,9 @@ export async function getDatabaseStats(): Promise<any> {
       collections: {
         stories: {
           count: storiesStats
+        },
+        storyWorkflows: {
+          count: workflowsStats
         },
         logs: {
           count: logsStats

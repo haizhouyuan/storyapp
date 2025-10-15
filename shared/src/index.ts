@@ -3,6 +3,9 @@
 
 // Export story-related types
 export * from './types/story';
+export * from './types/detective';
 
 // Export constants  
 export * from './constants/story';
+
+export * from './types/project';

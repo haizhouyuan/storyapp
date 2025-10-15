@@ -27,6 +27,9 @@ import storyRoutes from './routes/stories';
 import healthRoutes from './routes/health';
 import adminRoutes from './routes/admin';
 import ttsRoutes from './routes/tts';
+import storyWorkflowRoutes from './routes/storyWorkflows';
+import projectRoutes from './routes/projects';
+import blueprintRoutes from './routes/blueprints';
 // import workflowProjectsRoutes from './routes/workflow/projects';
 // import workflowMiraclesRoutes from './routes/workflow/miracles';
 import docsRoutes from './routes/docs';
@@ -79,6 +82,17 @@ app.use(httpMetricsMiddleware);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Compat: rewrite accidental double "/api/api" to "/api"
+app.use((req, _res, next) => {
+  if (req.url.startsWith('/api/api/')) {
+    req.url = req.url.replace(/^\/api\/api\//, '/api/');
+  } else if (req.url === '/api/api' || req.url === '/api/api/') {
+    req.url = '/api/';
+  }
+  next();
+});
+
+
 // 8. General rate limiting
 app.use(generalRateLimit);
 
@@ -102,6 +116,9 @@ app.use('/api/health', healthRoutes);
 // Main API routes
 app.use('/api/admin', adminRoutes);
 app.use('/api/tts', ttsRateLimit, ttsRoutes);
+app.use('/api/story-workflows', validationRateLimit, storyWorkflowRoutes);
+app.use('/api/projects', createProjectRateLimit, projectRoutes);
+app.use('/api/blueprints', validationRateLimit, blueprintRoutes);
 app.use('/api', storyRoutes);
 
 // TTS 音频静态文件
@@ -119,6 +136,23 @@ try {
 } catch (error) {
   appLogger.error({ error }, 'Failed to initialize TTS static directory');
 }
+
+
+// Exports 静态文件（导出 HTML + 互动包）
+const EXPORTS_STATIC_DIR = path.resolve(process.cwd(), process.env.EXPORTS_OUTPUT_DIR || 'storage/exports');
+try {
+  fs.mkdirSync(EXPORTS_STATIC_DIR, { recursive: true });
+  app.use('/static/exports', express.static(EXPORTS_STATIC_DIR, {
+    index: false,
+    maxAge: '7d',
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    },
+  }));
+} catch (error) {
+  appLogger.error({ error }, 'Failed to initialize Exports static directory');
+}
+
 
 // 静态文件服务（前端）
 // ✅ 改成"在非开发环境，或显式要求时，一律服务静态资源"

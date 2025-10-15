@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://storyapp.local/schemas/detectiveOutline.schema.json",
+  "title": "DetectiveOutline",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "centralTrick": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "summary": { "type": "string" },
+        "mechanism": { "type": "string" },
+        "fairnessNotes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "caseSetup": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "victim": { "type": "string" },
+        "crimeScene": { "type": "string" },
+        "initialMystery": { "type": "string" }
+      }
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "role"],
+        "properties": {
+          "name": { "type": "string" },
+          "role": { "type": "string" },
+          "motive": { "type": "string" },
+          "secrets": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "acts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["act", "focus", "beats"],
+        "properties": {
+          "act": { "type": "integer" },
+          "focus": { "type": "string" },
+          "beats": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["beat", "summary"],
+              "properties": {
+                "beat": { "type": "integer" },
+                "summary": { "type": "string" },
+                "cluesRevealed": { "type": "array", "items": { "type": "string" } },
+                "redHerring": { "type": "string" }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "clueMatrix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["clue"],
+        "properties": {
+          "clue": { "type": "string" },
+          "surfaceMeaning": { "type": "string" },
+          "realMeaning": { "type": "string" },
+          "appearsAtAct": { "type": "integer" },
+          "mustForeshadow": { "type": "boolean" },
+          "explicitForeshadowChapters": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["Chapter 1", "Chapter 2", "Chapter 3"] }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["time", "event"],
+        "properties": {
+          "time": { "type": "string", "pattern": "^Day\d+\s([01]?\d|2[0-3]):[0-5]\d$" },
+          "event": { "type": "string" },
+          "participants": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "themes": { "type": "array", "items": { "type": "string" } },
+    "logicChecklist": { "type": "array", "items": { "type": "string" } }
+  }
+}

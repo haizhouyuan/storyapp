@@ -1,0 +1,106 @@
+{
+  "interactive_pack": {
+    "cast_cards": [
+      {
+        "id": "1",
+        "name": "蛋蛋",
+        "role": "detective",
+        "bio": ""
+      },
+      {
+        "id": "2",
+        "name": "霍华德",
+        "role": "victim",
+        "bio": ""
+      },
+      {
+        "id": "3",
+        "name": "艾琳",
+        "role": "suspect",
+        "bio": ""
+      },
+      {
+        "id": "4",
+        "name": "詹姆斯",
+        "role": "suspect",
+        "bio": ""
+      },
+      {
+        "id": "5",
+        "name": "莉莉安",
+        "role": "suspect",
+        "bio": ""
+      },
+      {
+        "id": "6",
+        "name": "管家",
+        "role": "witness",
+        "bio": ""
+      }
+    ],
+    "clue_matrix": [
+      {
+        "clue_id": "风道锈迹",
+        "scenes": [
+          "Chapter 1",
+          "Chapter 2",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      },
+      {
+        "clue_id": "潮汐时间表",
+        "scenes": [
+          "Chapter 1",
+          "Chapter 2",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      },
+      {
+        "clue_id": "滑轮油渍",
+        "scenes": [
+          "Chapter 2",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      },
+      {
+        "clue_id": "共振异响",
+        "scenes": [
+          "Chapter 2",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      }
+    ],
+    "timeline_view": [
+      {
+        "t": "Day1 19:30",
+        "event": "宾客抵达"
+      },
+      {
+        "t": "Day1 20:00",
+        "event": "第八声与钟响"
+      },
+      {
+        "t": "Day1 20:10",
+        "event": "密室内发现尸体"
+      }
+    ],
+    "quiz": [
+      {
+        "id": "Q1",
+        "question": "第八声的最合理来源？",
+        "options": [
+          "超自然",
+          "共振",
+          "风",
+          "机关"
+        ],
+        "answer": "共振",
+        "explain_scene": "Chapter 3"
+      }
+    ]
+  }
+}

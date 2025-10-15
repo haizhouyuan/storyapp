@@ -31,6 +31,7 @@ const baseHelmetOptions = {
       frameSrc: ["'none'"],
     },
   },
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
   crossOriginEmbedderPolicy: false,
   strictTransportSecurity: {
     maxAge: 31536000,

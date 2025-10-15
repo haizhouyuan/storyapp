@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="/home/yuanhaizhou/projects/storyapp"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 export PATH="$ROOT/.tools/node-v22/bin:$PATH"
 exec "$@"
