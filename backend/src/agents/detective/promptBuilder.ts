@@ -48,15 +48,31 @@ export function buildWriterPrompt(outline: any, options?: PromptBuildOptions): {
   const systemTpl = readTemplate('writer.system.hbs');
   const userTpl = readTemplate('writer.user.hbs');
   const system = systemTpl || '你是儿童向长篇小说写作引擎。只输出指定 JSON 字段。';
+  // 支持从 vars 里读取目标字数（多种命名兼容）
+  const vars = (options?.vars || {}) as Record<string, unknown>;
+  const pick = (o: any, keys: string[]): any => {
+    for (const k of keys) {
+      const v = get(o, k);
+      if (v !== undefined && v !== null && v !== '') return v;
+    }
+    return undefined;
+  };
+  const wordsTargetRaw = pick(vars, ['targets.wordsPerScene', 'targetWords', 'words']);
+  const wordsTarget = typeof wordsTargetRaw === 'string' ? parseInt(wordsTargetRaw as string, 10) : (wordsTargetRaw as number | undefined);
+  const wordsLine = wordsTarget && Number.isFinite(wordsTarget) && wordsTarget > 0
+    ? `字数目标：${wordsTarget}±15%。`
+    : '';
+
   const userBase = userTpl || [
     '大纲：\n{{outline}}',
     '句长目标：≤{{profile.writer.sentenceTarget}}，长句阈值：>{{profile.writer.longSentenceThreshold}} 拆分。',
     '第三章应包含对峙：{{profile.writer.includeInterrogationInFinal}}',
     'Chapter 1 需显式标注至少 {{profile.writer.chapter1CluesMinCount}} 个 [CLUE: ...]。',
     '设备可行性可观察钩子≥{{profile.writer.deviceHooksMinCount}}。',
+    '{{wordsLine}}',
     '仅返回 JSON。'
   ].join('\n');
-  const ctx = { outline: JSON.stringify(outline, null, 2), profile, seed: options?.seed, ...(options?.vars || {}) };
+  const ctx = { outline: JSON.stringify(outline, null, 2), profile, seed: options?.seed, wordsLine, ...(vars) };
   return { system, user: render(userBase, ctx), profile };
 }
 

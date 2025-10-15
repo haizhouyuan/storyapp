@@ -19,6 +19,7 @@ export default function DetectiveBuilderPage() {
 
   const [readingLevel, setReadingLevel] = React.useState('middle_grade');
   const [avgSentenceLen, setAvgSentenceLen] = React.useState(22);
+  const [wordsPerScene, setWordsPerScene] = React.useState<number>(1200);
   const [ch1MinClues, setCh1MinClues] = React.useState(2);
   const [minExposures, setMinExposures] = React.useState(2);
   const [misdirectionCap, setMisdirectionCap] = React.useState(0.3);
@@ -26,7 +27,7 @@ export default function DetectiveBuilderPage() {
 
   const optionsRef = React.useRef({
     readingLevel: 'middle_grade',
-    targets: { avgSentenceLen: 22 },
+    targets: { avgSentenceLen: 22, wordsPerScene: 1200 },
     cluePolicy: { ch1MinClues: 2, minExposures: 2 },
     misdirectionCap: 0.3,
     randomMechanism: true,
@@ -34,7 +35,7 @@ export default function DetectiveBuilderPage() {
   function syncOptions() {
     optionsRef.current = {
       readingLevel,
-      targets: { avgSentenceLen },
+      targets: { avgSentenceLen, wordsPerScene },
       cluePolicy: { ch1MinClues, minExposures },
       misdirectionCap,
       randomMechanism,
@@ -165,6 +166,10 @@ export default function DetectiveBuilderPage() {
                 <input type="number" step="0.05" min="0" max="0.6" value={misdirectionCap} onChange={e=>{ setMisdirectionCap(parseFloat(e.target.value||'0.3')); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
               </div>
             </div>
+            <div>
+              <label className="block text-sm font-medium">章节字数目标</label>
+              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-sm font-medium">Ch1最少线索数</label>
@@ -174,6 +179,10 @@ export default function DetectiveBuilderPage() {
                 <label className="block text-sm font-medium">线索曝光次数≥</label>
                 <input type="number" value={minExposures} onChange={e=>{ setMinExposures(parseInt(e.target.value||'2',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium">章节字数目标</label>
+              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">随机机制</label>
@@ -199,6 +208,10 @@ export default function DetectiveBuilderPage() {
                 <button onClick={handleCompile} disabled={busy || !projectId || !draft} className="bg-slate-700 text-white rounded px-3 py-2 disabled:opacity-50">导出 HTML+互动包</button>
               </div>
             </div>
+            <div>
+              <label className="block text-sm font-medium">章节字数目标</label>
+              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+            </div>
           </div>
 
           <div className="md:col-span-2 space-y-6">
@@ -209,6 +222,10 @@ export default function DetectiveBuilderPage() {
                 <QuickValidate projectId={projectId} chapter={chapter} draft={draft} />
               </div>
             </div>
+            <div>
+              <label className="block text-sm font-medium">章节字数目标</label>
+              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+            </div>
 
             <div className="bg-white rounded-lg shadow p-4">
               <div className="flex items-center justify-between mb-2"><h2 className="font-semibold">章节 Chapter（写作/编辑结果）</h2></div>
@@ -216,6 +233,10 @@ export default function DetectiveBuilderPage() {
               <div className="mt-2">
                 <QuickValidate projectId={projectId} chapter={chapter} draft={draft} />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium">章节字数目标</label>
+              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
 
             <div className="bg-white rounded-lg shadow p-4">
