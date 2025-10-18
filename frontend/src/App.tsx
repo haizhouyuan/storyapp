@@ -5,6 +5,7 @@ import { AudioPreferencesProvider } from './context/AudioPreferencesContext';
 
 // 导入页面组件
 import DetectiveBuilderPage from './pages/DetectiveBuilderPage';
+import TtsTestPage from './pages/TtsTestPage';
 
 // 导入类型
 import type { StorySession, StoryTreeSession } from '../../shared/types';
@@ -32,6 +33,9 @@ function App() {
           <Routes>
             {/* 新首页：侦探故事工作室 */}
             <Route path="/" element={<DetectiveBuilderPage />} />
+
+            {/* TTS 长文本朗读测试页面 */}
+            <Route path="/tts-test" element={<TtsTestPage />} />
           </Routes>
 
         </div>

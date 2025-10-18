@@ -11,7 +11,7 @@ export interface PlannerOptions extends PromptBuildOptions {
 }
 
 export async function planBlueprint(topic: string, options: PlannerOptions = {}) {
-  const maxRetries = options.maxRetries ?? 3;
+  const maxRetries = options.maxRetries ?? 5;
   const strict = options.strictSchema ?? true;
 
   for (let attempt = 1; attempt <= maxRetries; attempt += 1) {

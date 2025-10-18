@@ -19,12 +19,17 @@ function findAndLoadEnvFiles() {
   }
 
   const rootDir = path.resolve(__dirname, '..');
+  const envNameRaw = typeof process.env.NODE_ENV === 'string' ? process.env.NODE_ENV.trim() : '';
+  const envName = envNameRaw || 'development';
+  if (!envNameRaw) {
+    process.env.NODE_ENV = envName;
+  }
   
   // 环境文件优先级顺序
   const envFiles = [
     // 1. 特定环境文件（最高优先级）
-    `.env.${process.env.NODE_ENV}.local`,
-    `.env.${process.env.NODE_ENV}`,
+    `.env.${envName}.local`,
+    `.env.${envName}`,
     
     // 2. 通用本地文件
     '.env.local',
@@ -37,7 +42,7 @@ function findAndLoadEnvFiles() {
   const config = {};
   
   console.log('🔧 开始加载环境配置...');
-  console.log(`当前环境: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`当前环境: ${envName}`);
   console.log(`项目根目录: ${rootDir}`);
   
   for (const envFile of envFiles) {

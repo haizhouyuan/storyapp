@@ -7,5 +7,6 @@ export * from './types/detective';
 
 // Export constants  
 export * from './constants/story';
+export * from './constants/detectiveMechanisms';
 
 export * from './types/project';
