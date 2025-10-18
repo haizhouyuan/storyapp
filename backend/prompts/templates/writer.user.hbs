@@ -1,8 +1,16 @@
+请根据以下 StoryBlueprint 输出结构化章节草稿，仅返回 JSON：
+{ "chapters": [ { "title": "...", "summary": "...", "content": "...", "wordCount": 1200, "cluesEmbedded": [], "redHerringsEmbedded": [] } ] }
+
 大纲：
 {{outline}}
+
 写作要求：
-- 句长目标≤{{profile.writer.sentenceTarget}}；长句>{{profile.writer.longSentenceThreshold}} 拆分。
-- 第三章包含与嫌疑人的问答式对峙：{{profile.writer.includeInterrogationInFinal}}
-- Chapter 1 需显式标注至少 {{profile.writer.chapter1CluesMinCount}} 个 [CLUE: ...]
-- 设备可行性可观察钩子≥{{profile.writer.deviceHooksMinCount}}
-- 仅返回 JSON。
+1) 章节顺序遵循大纲，生成 3~4 章完整故事，每章字数目标：{{wordsTargetText}}。
+2) 线索必须通过自然描写呈现，禁止使用 [CLUE] 或其它符号标记；在揭晓前至少两次提及 mustForeshadow 线索。
+3) Chapter 1 自然呈现不少于 {{profile.writer.chapter1CluesMinCount}} 条关键线索，可借助证人对白或现场细节。
+4) 每章不少于 {{dialoguesTarget}} 轮问答式对白（使用中文引号“”，单句≤26字），并融入 ≥{{sensoryTarget}} 条感官细节。
+5) 如存在机关关键词，请在剧情中给出可观察迹象，并在结局解释机关运作；误导线索不得超过真实线索的 {{profile.writer.maxRedHerringRatio}} 倍。
+6) 第三章需包含对峙与复盘，逐条回收关键线索、揭示凶手动机与机关原理，并给出善后场景。
+7) 句长目标≤{{profile.writer.sentenceTarget}}，遇长句请拆分；保持适龄语气。
+{{themeAnchorsLine}}
+仅返回 JSON。

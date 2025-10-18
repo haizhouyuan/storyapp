@@ -40,6 +40,32 @@ function normalizeClueName(value?: string): string {
   return (value ?? '').replace(/\s+/g, '').toLowerCase();
 }
 
+function cleanChapterContent(text?: string): string {
+  return String(text || '')
+    .replace(/【\[CLUE:[^\]]+\]】.*$/gm, '')
+    .replace(/【\[CLUE:[^\]]+\]】/g, '')
+    .replace(/\[CLUE:[^\]]+\]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function buildPlainTextBook(title: string, draft: DetectiveStoryDraft): string {
+  const header = `# ${title || '侦探故事'}`;
+  const chapters = (draft?.chapters || []).map((ch, idx) => {
+    const chapterTitle = ch?.title ? String(ch.title) : `Chapter ${idx + 1}`;
+    const body = cleanChapterContent(ch?.content);
+    return [`## ${chapterTitle}`, body ? body : '（本章暂无正文）'];
+  });
+  const lines: string[] = [header, ''];
+  chapters.forEach((pair) => {
+    lines.push(pair[0]);
+    lines.push('');
+    lines.push(pair[1]);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
 function buildInteractivePack(outline: DetectiveOutline, draft: DetectiveStoryDraft) {
   const cast_cards = (outline?.characters || []).map((c: any, i: number) => ({ id: String(i + 1), name: c?.name, role: c?.role, bio: c?.motive || '' }));
   const timeline_view = (outline?.timeline || []).map((e: any) => ({ t: e?.time, event: e?.event }));
@@ -71,7 +97,12 @@ export async function compileToOutputs(params: {
   outline: DetectiveOutline;
   draft: DetectiveStoryDraft;
   baseDir?: string; // defaults to storage/exports
-}): Promise<{ outputDir: string; files: { html: string; interactive: string }; urls: { html: string; interactive: string } }> {
+}): Promise<{
+  outputDir: string;
+  files: { html: string; interactive: string; plain: string };
+  urls: { html: string; interactive: string; plain: string };
+  plainText: string;
+}> {
   const base = params.baseDir || path.resolve(process.cwd(), 'storage/exports');
   const folder = `${params.projectId}-${Date.now()}`;
   const outputDir = path.join(base, folder);
@@ -79,18 +110,23 @@ export async function compileToOutputs(params: {
 
   const html = buildHtmlBook(params.title, params.draft);
   const interactive = JSON.stringify({ interactive_pack: buildInteractivePack(params.outline, params.draft) }, null, 2);
+  const plainText = buildPlainTextBook(params.title, params.draft);
 
   const htmlPath = path.join(outputDir, 'book.html');
   const interactivePath = path.join(outputDir, 'interactive.json');
+  const plainPath = path.join(outputDir, 'story.txt');
   fs.writeFileSync(htmlPath, html, 'utf8');
   fs.writeFileSync(interactivePath, interactive, 'utf8');
+  fs.writeFileSync(plainPath, plainText, 'utf8');
 
   const htmlUrl = `/static/exports/${folder}/book.html`;
   const interactiveUrl = `/static/exports/${folder}/interactive.json`;
+  const plainUrl = `/static/exports/${folder}/story.txt`;
 
   return {
     outputDir,
-    files: { html: htmlPath, interactive: interactivePath },
-    urls: { html: htmlUrl, interactive: interactiveUrl },
+    files: { html: htmlPath, interactive: interactivePath, plain: plainPath },
+    urls: { html: htmlUrl, interactive: interactiveUrl, plain: plainUrl },
+    plainText,
   };
 }

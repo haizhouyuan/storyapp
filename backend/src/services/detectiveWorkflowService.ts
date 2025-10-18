@@ -15,6 +15,7 @@ import type {
   ListWorkflowsResponse,
   RollbackWorkflowRequest,
   TerminateWorkflowRequest,
+  DetectiveMechanismPreset,
 } from '@storyapp/shared';
 import {
   createWorkflowDocument,
@@ -33,6 +34,9 @@ import {
 } from '../agents/detective';
 import { runStage4Validation } from '../agents/detective/validators';
 import { enforceCluePolicy } from '../agents/detective/clueEnforcer';
+import { harmonizeOutlineWithDraft } from '../agents/detective/outlineSync';
+import { DETECTIVE_MECHANISM_PRESETS } from '@storyapp/shared';
+import type { PromptBuildOptions } from '../agents/detective/promptBuilder';
 
 const logger = createLogger('services:detectiveWorkflow');
 
@@ -58,6 +62,22 @@ function buildInitialStageStates(): WorkflowStageState[] {
     stage: stage.id,
     status: 'pending',
   }));
+}
+
+function resolveMechanismPreset(meta?: Record<string, unknown>): DetectiveMechanismPreset {
+  const preferredId =
+    meta &&
+    typeof meta === 'object' &&
+    meta !== null &&
+    typeof (meta as any).mechanismPreset?.id === 'string'
+      ? (meta as any).mechanismPreset.id
+      : undefined;
+  if (preferredId) {
+    const found = DETECTIVE_MECHANISM_PRESETS.find((preset) => preset.id === preferredId);
+    if (found) return found;
+  }
+  const index = Math.floor(Math.random() * DETECTIVE_MECHANISM_PRESETS.length);
+  return DETECTIVE_MECHANISM_PRESETS[index];
 }
 
 function updateStageState(
@@ -141,11 +161,31 @@ async function executeWorkflowPipeline(
   document: DetectiveWorkflowDocument,
   options: WorkflowExecutionOptions,
 ): Promise<DetectiveWorkflowDocument> {
-  let workingDoc = document;
+  const mechanismPreset = resolveMechanismPreset(document.meta as Record<string, unknown> | undefined);
+  const planningProfile = (process.env.DETECTIVE_PROMPT_PROFILE as 'strict' | 'balanced' | 'creative') || 'balanced';
+  const planningSeed = `${mechanismPreset.id}-${planningProfile}`;
+  const plannerPrompt: PromptBuildOptions = {
+    profile: planningProfile,
+    seed: planningSeed,
+    vars: {
+      readingLevel: 'middle_grade',
+      deviceKeywords: mechanismPreset.keywords,
+      targets: { wordsPerScene: 1200 },
+      cluePolicy: { ch1MinClues: 3, minExposures: 2 },
+    },
+  };
+
+  let workingDoc: DetectiveWorkflowDocument = {
+    ...document,
+    meta: {
+      ...(document.meta || {}),
+      mechanismPreset,
+    },
+  };
 
   // Stage 1
   workingDoc = await runStageWithUpdate(workingDoc, 'stage1_planning', async () => ({
-    outline: await runStage1Planning(workingDoc.topic),
+    outline: await runStage1Planning(workingDoc.topic, plannerPrompt),
   }));
 
   // Stage 2
@@ -154,8 +194,32 @@ async function executeWorkflowPipeline(
     if (!outline) {
       throw new Error('缺少 Stage1 输出，无法执行 Stage2');
     }
-    const storyDraft = await runStage2Writing(outline);
-    return { storyDraft };
+    const storyDraftStage2 = await runStage2Writing(outline, plannerPrompt);
+    const harmonizedStage2 = harmonizeOutlineWithDraft(outline, storyDraftStage2, {
+      ensureMechanismKeywords: true,
+      mechanismKeywords: mechanismPreset.keywords,
+    });
+    const enforced = enforceCluePolicy(harmonizedStage2.outline, storyDraftStage2, {
+      ch1MinClues: 3,
+      minExposures: 2,
+      ensureFinalRecovery: true,
+      adjustOutlineExpectedChapters: true,
+      maxRedHerringRatio: 0.3,
+      maxRedHerringPerChapter: 2,
+    });
+    const harmonizedFinal = harmonizeOutlineWithDraft(enforced.outline || harmonizedStage2.outline, enforced.draft, {
+      ensureMechanismKeywords: true,
+      mechanismKeywords: mechanismPreset.keywords,
+    });
+    logger.debug({
+      stage: 'stage2_writing',
+      clueMappings: harmonizedFinal.meta.clueMappings,
+      timelineAdded: harmonizedFinal.meta.timelineAdded,
+      timelineNormalized: harmonizedFinal.meta.timelineNormalized,
+      mechanismKeywords: harmonizedFinal.meta.mechanismKeywordsAppended,
+      generatedClues: harmonizedFinal.meta.generatedClues,
+    }, 'Stage2 Harmonize Outline');
+    return { storyDraft: enforced.draft, outline: harmonizedFinal.outline };
   });
 
   // Stage 3
@@ -165,7 +229,7 @@ async function executeWorkflowPipeline(
     if (!outline || !storyDraft) {
       throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage3');
     }
-    const review = await runStage3Review(outline, storyDraft);
+    const review = await runStage3Review(outline, storyDraft, plannerPrompt);
     return { review };
   });
 
@@ -173,29 +237,41 @@ async function executeWorkflowPipeline(
   workingDoc = await runStageWithUpdate(workingDoc, 'stage4_validation', async () => {
     const outline = workingDoc.outline as DetectiveOutline;
     let storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
+    let outlineForValidation = outline;
     if (!outline || !storyDraft) {
       throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage4');
     }
     const enableAutoFix = process.env.DETECTIVE_AUTO_FIX !== '0';
     if (enableAutoFix) {
       try {
-        const { draft: patchedDraft } = enforceCluePolicy(outline as any, storyDraft as any, {
+        const { draft: patchedDraft, outline: patchedOutline } = enforceCluePolicy(outline as any, storyDraft as any, {
           ch1MinClues: 3,
           minExposures: 2,
           ensureFinalRecovery: true,
           adjustOutlineExpectedChapters: true,
+          maxRedHerringRatio: 0.3,
+          maxRedHerringPerChapter: 2,
         });
         storyDraft = patchedDraft as any;
-        workingDoc = updateWorkflowDocument(workingDoc, { storyDraft });
+        outlineForValidation = (patchedOutline as DetectiveOutline) || outlineForValidation;
       } catch (e) {
         logger.warn({ err: e }, 'AutoFix 执行失败，继续进行校验');
       }
     }
-    const validation = runStage4Validation(outline, storyDraft, {
+    const harmonized = harmonizeOutlineWithDraft(outlineForValidation, storyDraft, {
+      ensureMechanismKeywords: true,
+      mechanismKeywords: mechanismPreset.keywords,
+    });
+    outlineForValidation = harmonized.outline;
+    workingDoc = updateWorkflowDocument(workingDoc, {
+      outline: outlineForValidation,
+      storyDraft,
+    });
+    const validation = runStage4Validation(outlineForValidation, storyDraft, {
       outlineId: workingDoc._id?.toHexString(),
       storyId: workingDoc._id?.toHexString(),
     });
-    return { validation };
+    return { validation, outline: outlineForValidation, storyDraft };
   });
 
   const revision = createWorkflowRevision({

@@ -16,6 +16,7 @@ import {
   buildStage3Prompt,
   buildStage3PromptProfile,
 } from './promptUtils';
+import { resolvePromptProfile } from './promptProfiles';
 import type { PromptBuildOptions } from './promptBuilder';
 import { buildWriterPrompt, buildEditorPrompt } from './promptBuilder';
 import { validateDetectiveOutline } from '../../utils/schemaValidator';
@@ -126,70 +127,298 @@ function extractJson(content: string): any {
   }
 }
 
+function calculateSentenceMetrics(text: string) {
+  const rawSentences = text.split(/[。！？!?]/).map((s) => s.trim()).filter(Boolean);
+  const sentences = rawSentences.length > 0 ? rawSentences : [text.trim()];
+  const lengths = sentences.map((s) => s.length);
+  const total = lengths.reduce((acc, len) => acc + len, 0);
+  const avg = sentences.length ? total / sentences.length : text.length;
+  const longRatio = sentences.length ? lengths.filter((len) => len > 26).length / sentences.length : 0;
+  return { avg, longRatio, count: sentences.length };
+}
+
+function estimateDialogueCountText(text: string): number {
+  if (!text) return 0;
+  const matches = text.match(/[「“"']/g);
+  if (!matches) return 0;
+  return Math.floor(matches.length / 2) || matches.length;
+}
+
+async function enforceDialoguesInDraft(
+  draft: DetectiveStoryDraft,
+  target: number,
+): Promise<DetectiveStoryDraft> {
+  if (!draft?.chapters || draft.chapters.length === 0 || target <= 0) {
+    return draft;
+  }
+
+  const chapters = [] as DetectiveStoryDraft['chapters'];
+  for (const chapter of draft.chapters) {
+    const current = estimateDialogueCountText(chapter.content || '');
+    if (current >= target) {
+      chapters.push(chapter);
+      continue;
+    }
+    try {
+      const sys = '你是儿童侦探小说对白润色师。保持剧情、线索与时间信息不变，将叙述改写成侦探与相关人物之间的问答对白，使用中文引号“”。仅返回 {"text":"..."} JSON。';
+      const usr = [
+        `当前对白轮次 ${current}，目标 ≥${target}。`,
+        '请将下文中的关键信息重新组织为问答对白，确保线索、时间及动机一字不漏。',
+        '原文如下：',
+        chapter.content || '',
+      ].join('\n');
+      const response = await callDeepseek({
+        model: DETECTIVE_CONFIG.reviewModel,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: usr },
+        ],
+        maxTokens: DETECTIVE_CONFIG.maxTokens,
+        temperature: DETECTIVE_CONFIG.reviewTemperature,
+      });
+      const revised = extractJson(response.content) as any;
+      const candidate = String(revised.text || revised.content || chapter.content || '');
+      const count = estimateDialogueCountText(candidate);
+      const finalText = count >= target ? candidate : (chapter.content || '');
+      const finalWordCount = finalText ? finalText.replace(/\s+/g, '').length : chapter.wordCount;
+      chapters.push({ ...chapter, content: finalText, wordCount: finalWordCount });
+    } catch (error) {
+      logger.warn({ err: error }, '对白自动增强失败，保留原文本');
+      chapters.push(chapter);
+    }
+  }
+
+  return { ...draft, chapters };
+}
+
+function ensureChineseNames(outline: DetectiveOutline): DetectiveOutline {
+  const pool = ['林澜', '顾星', '程翊', '苏瑾', '赵岚', '陆沉', '叶霖', '江岚', '闻笙', '唐溯', '白屿', '秦霁', '杭越', '莫黎', '夏禾'];
+  const replacements = new Map<string, string>();
+  const getReplacement = (name: string) => {
+    if (replacements.has(name)) return replacements.get(name)!;
+    const next = pool.shift() || `晓${Math.random().toString(36).slice(2, 4)}`;
+    replacements.set(name, next);
+    return next;
+  };
+
+  const chineseNameReg = /^[\u4e00-\u9fa5]{2,4}$/;
+  outline.characters = (outline.characters || []).map((character) => {
+    if (!character?.name) return character;
+    if (chineseNameReg.test(character.name)) return character;
+    const newName = getReplacement(character.name);
+    return { ...character, name: newName };
+  });
+
+  const replaceText = (text?: string | null): string => {
+    if (!text) return '';
+    let result = text;
+    replacements.forEach((newName, oldName) => {
+      const pattern = new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      result = result.replace(pattern, newName);
+    });
+    return result;
+  };
+
+  if (outline.caseSetup) {
+    outline.caseSetup = {
+      victim: replaceText(outline.caseSetup.victim),
+      crimeScene: replaceText(outline.caseSetup.crimeScene),
+      initialMystery: replaceText(outline.caseSetup.initialMystery),
+    };
+  }
+
+  if (outline.centralTrick) {
+    outline.centralTrick = {
+      summary: replaceText(outline.centralTrick.summary),
+      mechanism: replaceText(outline.centralTrick.mechanism),
+      fairnessNotes: (outline.centralTrick.fairnessNotes || []).map(replaceText),
+    };
+  }
+
+  outline.acts = (outline.acts || []).map((act) => ({
+    ...act,
+    focus: replaceText(act.focus),
+    beats: (act.beats || []).map((beat) => ({
+      ...beat,
+      summary: replaceText(beat.summary),
+      cluesRevealed: (beat.cluesRevealed || []).map(replaceText),
+      redHerring: replaceText(beat.redHerring),
+    })),
+  }));
+
+  outline.clueMatrix = (outline.clueMatrix || []).map((clue) => ({
+    ...clue,
+    surfaceMeaning: replaceText(clue.surfaceMeaning),
+    realMeaning: replaceText(clue.realMeaning),
+  }));
+
+  outline.logicChecklist = (outline.logicChecklist || []).map(replaceText);
+
+  outline.timeline = (outline.timeline || []).map((event) => {
+    const participants = (event.participants || []).map((p) => replacements.get(p) || p);
+    return {
+      ...event,
+      event: replaceText(event.event),
+      participants,
+    };
+  });
+
+  return outline;
+}
+
+function heuristicCadenceAdjust(text: string, maxLen: number): string {
+  if (!text) return text;
+  const segments = text.match(/[^。！？!?]+[。！？!?]?/g) || [text];
+  const rebuilt: string[] = [];
+  segments.forEach((segment) => {
+    const trimmed = segment.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (trimmed.length <= maxLen) {
+      rebuilt.push(trimmed);
+      return;
+    }
+    const endPunctMatch = trimmed.match(/[。！？!?]$/);
+    const endPunct = endPunctMatch ? endPunctMatch[0] : '。';
+    const core = endPunctMatch ? trimmed.slice(0, -1) : trimmed;
+    const pieces = core.split(/[，、；]/);
+    const sentences: string[] = [];
+    let buffer = '';
+    pieces.forEach((pieceRaw, idx) => {
+      const piece = pieceRaw.trim();
+      if (!piece) {
+        return;
+      }
+      const candidate = buffer ? `${buffer}，${piece}` : piece;
+      if (candidate.length > maxLen && buffer) {
+        sentences.push(`${buffer}。`);
+        buffer = piece;
+      } else {
+        buffer = candidate;
+      }
+      if (idx === pieces.length - 1 && buffer) {
+        sentences.push(`${buffer}${endPunct}`);
+        buffer = '';
+      }
+    });
+    if (buffer) {
+      sentences.push(`${buffer}${endPunct}`);
+    }
+    rebuilt.push(sentences.join(''));
+  });
+  return rebuilt.join('');
+}
+
 export async function runStage1Planning(topic: string, promptOpts?: PromptBuildOptions): Promise<DetectiveOutline> {
   logger.info({ topic }, 'Stage1 Planning 开始');
   const prompt = promptOpts ? buildStage1PromptProfile(topic, promptOpts) : buildStage1Prompt(topic);
 
-  const { content, usage } = await callDeepseek({
-    model: DETECTIVE_CONFIG.planningModel,
-    messages: [
-      {
-        role: 'system',
-        content: '你是一名推理小说结构策划专家，擅长设计本格侦探故事的诡计、线索与时间线。',
-      },
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-    maxTokens: DETECTIVE_CONFIG.maxTokens,
-    temperature: DETECTIVE_CONFIG.planningTemperature,
-  });
+  const RETRIES = 3;
+  for (let attempt = 0; attempt < RETRIES; attempt += 1) {
+    const { content, usage } = await callDeepseek({
+      model: DETECTIVE_CONFIG.planningModel,
+      messages: [
+        {
+          role: 'system',
+          content: '你是一名推理小说结构策划专家，擅长设计本格侦探故事的诡计、线索与时间线。',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      maxTokens: DETECTIVE_CONFIG.maxTokens,
+      temperature: DETECTIVE_CONFIG.planningTemperature,
+    });
 
-  logger.info({ usage }, 'Stage1 Planning 完成');
-  const outline = extractJson(content) as DetectiveOutline;
-  const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
-  try {
-    const res = validateDetectiveOutline(outline);
-    if (!res.valid) {
-      const details = (res.errors || []).map((e) => `${e.instancePath || '/'} ${e.message || ''}`).join('; ');
-      if (strict) {
-        const err = new Error(`蓝图Schema校验失败：${details}`);
-        (err as any).code = 'BLUEPRINT_SCHEMA_INVALID';
-        throw err;
-      } else {
-        logger.warn({ errors: res.errors }, '蓝图Schema校验未通过（非严格模式，继续）');
+    logger.info({ usage, attempt }, 'Stage1 Planning 完成');
+    try {
+      const outlineRaw = extractJson(content) as DetectiveOutline;
+      const outline = ensureChineseNames(outlineRaw);
+      const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
+      try {
+        const res = validateDetectiveOutline(outline);
+        if (!res.valid) {
+          const details = (res.errors || []).map((e) => `${e.instancePath || '/'} ${e.message || ''}`).join('; ');
+          if (strict) {
+            const err = new Error(`蓝图Schema校验失败：${details}`);
+            (err as any).code = 'BLUEPRINT_SCHEMA_INVALID';
+            throw err;
+          } else {
+            logger.warn({ errors: res.errors }, '蓝图Schema校验未通过（非严格模式，继续）');
+          }
+        }
+      } catch (e) {
+        if (strict) throw e;
+        logger.warn({ err: e }, '蓝图Schema校验异常（非严格模式，继续）');
       }
+      return outline;
+    } catch (err) {
+      if (attempt === RETRIES - 1) {
+        logger.error({ err }, 'Stage1 Planning JSON 解析失败');
+        throw err;
+      }
+      logger.warn({ attempt: attempt + 1, err }, 'Stage1 Planning 输出解析失败，准备重试');
     }
-  } catch (e) {
-    if (strict) throw e;
-    logger.warn({ err: e }, '蓝图Schema校验异常（非严格模式，继续）');
   }
-  return outline;
+  const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
+  throw new Error('Stage1 Planning 未能生成有效蓝图');
 }
 
 export async function runStage2Writing(outline: DetectiveOutline, promptOpts?: PromptBuildOptions): Promise<DetectiveStoryDraft> {
   logger.info('Stage2 Writing 开始');
   const prompt = promptOpts ? buildStage2PromptProfile(outline, promptOpts) : buildStage2Prompt(outline);
+  const RETRIES = 3;
+  for (let attempt = 0; attempt < RETRIES; attempt += 1) {
+    const { content, usage } = await callDeepseek({
+      model: DETECTIVE_CONFIG.writingModel,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            '你是一名推理小说作者，根据大纲写作约 4500-5500 字的长篇故事。',
+            '保持中文第三人称叙述，兼顾氛围、逻辑与节奏。',
+          ].join(' '),
+        },
+        { role: 'user', content: prompt },
+      ],
+      maxTokens: DETECTIVE_CONFIG.maxTokens,
+      temperature: DETECTIVE_CONFIG.writingTemperature,
+    });
 
-  const { content, usage } = await callDeepseek({
-    model: DETECTIVE_CONFIG.writingModel,
-    messages: [
-      {
-        role: 'system',
-        content: [
-          '你是一名推理小说作者，根据大纲写作约 4500-5500 字的长篇故事。',
-          '保持中文第三人称叙述，兼顾氛围、逻辑与节奏。',
-        ].join(' '),
-      },
-      { role: 'user', content: prompt },
-    ],
-    maxTokens: DETECTIVE_CONFIG.maxTokens,
-    temperature: DETECTIVE_CONFIG.writingTemperature,
-  });
-
-  logger.info({ usage }, 'Stage2 Writing 完成');
-  return extractJson(content) as DetectiveStoryDraft;
+    logger.info({ usage, attempt }, 'Stage2 Writing 完成');
+    try {
+      const storyDraftRaw = extractJson(content) as DetectiveStoryDraft;
+      const vars = (promptOpts?.vars || {}) as any;
+      const pick = (o: any, keys: string[]) => {
+        for (const k of keys) {
+          const seg = k.split('.');
+          let cur: any = o;
+          let ok = true;
+          for (const kk of seg) {
+            if (cur && kk in cur) cur = (cur as any)[kk]; else { ok = false; break; }
+          }
+          if (ok && cur !== undefined && cur !== null && cur !== '') return cur;
+        }
+        return undefined;
+      };
+      const profile = resolvePromptProfile(promptOpts?.profile ?? null);
+      const dialoguesRaw = pick(vars, ['writer.dialoguesMin', 'dialoguesMin']);
+      const dialoguesTarget = Number.isFinite(Number(dialoguesRaw))
+        ? Number(dialoguesRaw)
+        : (profile.writer.dialoguesMin ?? 4);
+      const storyDraft = await enforceDialoguesInDraft(storyDraftRaw, dialoguesTarget);
+      return storyDraft;
+    } catch (err) {
+      if (attempt === RETRIES - 1) {
+        logger.error({ err }, 'Stage2 Writing JSON 解析失败');
+        throw err;
+      }
+      logger.warn({ attempt: attempt + 1, err }, 'Stage2 Writing 输出解析失败，准备重试');
+    }
+  }
+  throw new Error('Stage2 Writing 未能生成有效草稿');
 }
 
 export async function runStage3Review(
@@ -289,6 +518,19 @@ export async function runSceneEditing(chapter: { title: string; content: string;
 
   const input = { scene_id: 'SCENE', title: chapter.title, words: chapter.wordCount || 0, text: chapter.content } as any;
 
+  const pick = (o: any, keys: string[]) => {
+    for (const k of keys) {
+      const seg = k.split('.');
+      let cur: any = o;
+      let ok = true;
+      for (const kk of seg) {
+        if (cur && kk in cur) cur = (cur as any)[kk]; else { ok = false; break; }
+      }
+      if (ok && cur !== undefined && cur !== null && cur !== '') return cur;
+    }
+    return undefined;
+  };
+
   const { content, usage } = await callDeepseek({
     model: DETECTIVE_CONFIG.reviewModel,
     messages: [
@@ -300,5 +542,176 @@ export async function runSceneEditing(chapter: { title: string; content: string;
   });
   logger.info({ usage }, 'Scene Editor 完成');
   const obj = extractJson(content) as any;
-  return { ...chapter, content: String(obj.text || obj.content || chapter.content) };
+  let editedText = String(obj.text || obj.content || chapter.content);
+
+  // 二段式长度控制：若未达到目标区间，则触发扩写/压缩并合并（最多重试2次）
+  try {
+    const vars = (promptOpts?.vars || {}) as any;
+    const wordsTargetRaw = pick(vars, ['targets.wordsPerScene','targetWords','words']);
+    const target = typeof wordsTargetRaw === 'string' ? parseInt(wordsTargetRaw,10) : (wordsTargetRaw as number|undefined);
+    if (target && Number.isFinite(target) && target>0) {
+      const min = Math.floor(target*0.85);
+      const max = Math.ceil(target*1.15);
+      let cur = editedText.length;
+
+      const expandOrCompress = async (mode: 'expand'|'compress', baseText: string): Promise<string> => {
+        const sys = '你是儿童向长篇小说扩写与压缩引擎。保持剧情不变与安全分级。只返回 {"text":"..."} JSON。';
+        const usr = [
+          `当前长度: ${baseText.length}，目标: ${target} (区间 ${min}–${max})，模式: ${mode}`,
+          '请在不改变事件顺序与信息量真实性的前提下，进行段落级重写：',
+          mode==='expand' ? '- 扩写场景描写、动作细节、心理刻画；' : '- 压缩冗余、合并重复表达、拆长句;',
+          '输出 JSON: {"text":"合并后的完整章节文本"}',
+          '原文如下：\n' + baseText
+        ].join('\n');
+        const r = await callDeepseek({
+          model: DETECTIVE_CONFIG.writingModel,
+          messages: [{ role:'system', content: sys }, { role:'user', content: usr }],
+          maxTokens: DETECTIVE_CONFIG.maxTokens,
+          temperature: DETECTIVE_CONFIG.writingTemperature,
+        });
+        const o = extractJson(r.content) as any;
+        return String(o.text || o.content || baseText);
+      };
+
+      let retries = 0;
+      while ((cur < min || cur > max) && retries < 2) {
+        const mode = cur < min ? 'expand' : 'compress';
+        editedText = await expandOrCompress(mode as any, editedText);
+        cur = editedText.length;
+        retries += 1;
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e instanceof Error ? e.message : String(e) }, '长度控制阶段忽略错误');
+  }
+
+  try {
+    const cadenceTargets = (() => {
+      const vars = (promptOpts?.vars || {}) as any;
+      const fallbackAvg = 22;
+      const fallbackRatio = 0.25;
+      const avgLimit = Number.isFinite(Number(vars?.language?.maxAvgSentenceLen))
+        ? Number(vars.language.maxAvgSentenceLen)
+        : fallbackAvg;
+      const ratioLimit = Number.isFinite(Number(vars?.language?.maxLongSentenceRatio))
+        ? Number(vars.language.maxLongSentenceRatio)
+        : fallbackRatio;
+      const maxRetries = Number.isFinite(Number(vars?.language?.maxCadenceRetries))
+        ? Number(vars.language.maxCadenceRetries)
+        : 3;
+      return { avgLimit, ratioLimit, maxRetries };
+    })();
+    let metrics = calculateSentenceMetrics(editedText);
+    if (metrics.avg > cadenceTargets.avgLimit || metrics.longRatio > cadenceTargets.ratioLimit) {
+      let attempts = 0;
+      while ((metrics.avg > cadenceTargets.avgLimit || metrics.longRatio > cadenceTargets.ratioLimit) && attempts < cadenceTargets.maxRetries) {
+        const sys = '你是儿童向文字节奏优化编辑，擅长拆分长句、平衡语速。请保持剧情不变、语义连贯、年龄适配。仅返回 {"text":"..."} JSON。';
+        const usr = [
+          `当前平均句长约 ${metrics.avg.toFixed(2)}，阈值 ${cadenceTargets.avgLimit}；长句占比 ${(metrics.longRatio * 100).toFixed(1)}%，阈值 ${(cadenceTargets.ratioLimit * 100).toFixed(1)}%。`,
+          '请在不更改信息的前提下，将长句拆分为 1-2 个短句；必要时对标点与语气作轻量调整。',
+          '禁止删掉关键线索或角色对白，可对情绪描写进行柔化处理。',
+          '输入章节如下：',
+          editedText,
+        ].join('\n');
+        const response = await callDeepseek({
+          model: DETECTIVE_CONFIG.reviewModel,
+          messages: [
+            { role: 'system', content: sys },
+            { role: 'user', content: usr },
+          ],
+          maxTokens: DETECTIVE_CONFIG.maxTokens,
+          temperature: DETECTIVE_CONFIG.reviewTemperature,
+        });
+        const revised = extractJson(response.content) as any;
+        const candidate = String(revised.text || revised.content || editedText);
+        const candidateMetrics = calculateSentenceMetrics(candidate);
+        if (
+          candidate &&
+          (candidateMetrics.avg < metrics.avg || candidateMetrics.longRatio < metrics.longRatio)
+        ) {
+          editedText = candidate;
+          metrics = candidateMetrics;
+        } else {
+          const fallbackSys = '你是一名少年读物文字编辑。保持剧情不变，将所有超过 28 字的句子拆成 2-3 个短句，必要时补充连接语。仅返回 {"text":"..."} JSON。';
+          const fallbackUsr = [
+            `当前句长 ${metrics.avg.toFixed(2)}（阈值 ${cadenceTargets.avgLimit}），长句比例 ${(metrics.longRatio * 100).toFixed(1)}%（阈值 ${(cadenceTargets.ratioLimit * 100).toFixed(1)}%）。`,
+            '请优先使用句号和问句结尾，控制每句 ≤ 28 字。',
+            editedText,
+          ].join('\n');
+          const fallbackResp = await callDeepseek({
+            model: DETECTIVE_CONFIG.reviewModel,
+            messages: [
+              { role: 'system', content: fallbackSys },
+              { role: 'user', content: fallbackUsr },
+            ],
+            maxTokens: DETECTIVE_CONFIG.maxTokens,
+            temperature: DETECTIVE_CONFIG.reviewTemperature,
+          });
+          const fallbackJson = extractJson(fallbackResp.content) as any;
+          const fallbackCandidate = String(fallbackJson.text || fallbackJson.content || editedText);
+          const fallbackMetrics = calculateSentenceMetrics(fallbackCandidate);
+          if (
+            fallbackCandidate &&
+            (fallbackMetrics.avg < metrics.avg || fallbackMetrics.longRatio < metrics.longRatio)
+          ) {
+            editedText = fallbackCandidate;
+            metrics = fallbackMetrics;
+          } else {
+            break;
+          }
+        }
+        attempts += 1;
+      }
+      if (metrics.avg > cadenceTargets.avgLimit || metrics.longRatio > cadenceTargets.ratioLimit) {
+        const heuristicText = heuristicCadenceAdjust(editedText, Math.max(18, cadenceTargets.avgLimit));
+        const heuristicMetrics = calculateSentenceMetrics(heuristicText);
+        if (
+          heuristicText &&
+          (heuristicMetrics.avg < metrics.avg || heuristicMetrics.longRatio < metrics.longRatio)
+        ) {
+          editedText = heuristicText;
+          metrics = heuristicMetrics;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, '节奏优化阶段忽略错误');
+  }
+
+  try {
+    const vars = (promptOpts?.vars || {}) as any;
+    const dialoguesRaw = pick(vars, ['writer.dialoguesMin', 'dialoguesMin']);
+    const dialoguesTarget = Number.isFinite(Number(dialoguesRaw))
+      ? Number(dialoguesRaw)
+      : (ctx?.profile.writer.dialoguesMin ?? 4);
+    const currentDialogues = estimateDialogueCountText(editedText);
+    if (dialoguesTarget > 0 && currentDialogues < dialoguesTarget) {
+      const sys = '你是儿童侦探故事对白润色师。保持故事情节和线索不变，增加侦探、嫌疑人或证人之间的问答对白，使用中文引号“”。仅返回 {"text":"..."} JSON。';
+      const usr = [
+        `当前对白轮次 ${currentDialogues}，目标 ≥${dialoguesTarget}。`,
+        '请把叙述性句子改写为问答式对白，确保线索和时间信息完整，不新增角色或改变结局。',
+        '原文如下：',
+        editedText,
+      ].join('\n');
+      const response = await callDeepseek({
+        model: DETECTIVE_CONFIG.reviewModel,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: usr },
+        ],
+        maxTokens: DETECTIVE_CONFIG.maxTokens,
+        temperature: DETECTIVE_CONFIG.reviewTemperature,
+      });
+      const revised = extractJson(response.content) as any;
+      const candidate = String(revised.text || revised.content || editedText);
+      if (candidate && estimateDialogueCountText(candidate) >= dialoguesTarget) {
+        editedText = candidate;
+      }
+    }
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, '对白补强阶段忽略错误');
+  }
+
+  const approxWordCount = editedText ? editedText.replace(/\s+/g, '').length : (chapter.wordCount ?? 0);
+  return { ...chapter, content: editedText, wordCount: approxWordCount };
 }

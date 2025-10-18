@@ -1,7 +1,53 @@
 import React from 'react';
+import { DETECTIVE_MECHANISM_PRESETS } from '@storyapp/shared';
 import { createProject, planProject, getBlueprint, writeScene, editScene, autoFix, compileProject } from '../utils/detectiveApi';
 
 type Profile = 'strict' | 'balanced' | 'creative';
+
+const PRESETS = [
+  {
+    label: '标准剧本',
+    values: {
+      avgSentenceLen: 22,
+      misdirectionCap: 0.3,
+      dialoguesMin: 6,
+      sensoryHooks: 2,
+      themeAnchors: '海雾,潮声,古塔,星光,秘密',
+      wordsPerScene: 1200,
+      ch1MinClues: 3,
+      minExposures: 2,
+    },
+  },
+  {
+    label: '情绪强化',
+    values: {
+      avgSentenceLen: 22,
+      misdirectionCap: 0.25,
+      dialoguesMin: 8,
+      sensoryHooks: 4,
+      themeAnchors: '心跳,雨声,微光,拥抱,勇气',
+      wordsPerScene: 1300,
+      ch1MinClues: 3,
+      minExposures: 2,
+    },
+  },
+  {
+    label: '推理焦点',
+    values: {
+      avgSentenceLen: 21,
+      misdirectionCap: 0.2,
+      dialoguesMin: 7,
+      sensoryHooks: 2,
+      themeAnchors: '证据,推理,时间线,真相,伏笔',
+      wordsPerScene: 1100,
+      ch1MinClues: 4,
+      minExposures: 3,
+    },
+  },
+];
+
+const CUSTOM_MECHANISM_ID = 'custom';
+const INITIAL_MECHANISM = DETECTIVE_MECHANISM_PRESETS[0];
 
 export default function DetectiveBuilderPage() {
   const [topic, setTopic] = React.useState('雾岚古堡的第八声');
@@ -11,11 +57,13 @@ export default function DetectiveBuilderPage() {
   const [blueprintId, setBlueprintId] = React.useState<string | null>(null);
   const [outline, setOutline] = React.useState<any>(null);
   const [sceneId, setSceneId] = React.useState('S3');
+  const [schemaMeta, setSchemaMeta] = React.useState<any>(null);
   const [chapter, setChapter] = React.useState<any>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<any>(null);
-  const [exportUrls, setExportUrls] = React.useState<{html:string;interactive:string}|null>(null);
+  const [compiledOutput, setCompiledOutput] = React.useState<{ plainText: string; urls: { html: string; interactive: string; plain: string } } | null>(null);
+  const [viewMode, setViewMode] = React.useState<'reader'|'debug'>('reader');
 
   const [readingLevel, setReadingLevel] = React.useState('middle_grade');
   const [avgSentenceLen, setAvgSentenceLen] = React.useState(22);
@@ -23,24 +71,103 @@ export default function DetectiveBuilderPage() {
   const [ch1MinClues, setCh1MinClues] = React.useState(2);
   const [minExposures, setMinExposures] = React.useState(2);
   const [misdirectionCap, setMisdirectionCap] = React.useState(0.3);
-  const [randomMechanism, setRandomMechanism] = React.useState<boolean>(true);
+  const [dialoguesMin, setDialoguesMin] = React.useState(6);
+  const [sensoryHooks, setSensoryHooks] = React.useState(2);
+  const [themeAnchors, setThemeAnchors] = React.useState('海雾,潮声,古塔,星光,秘密');
+  const [mechanismId, setMechanismId] = React.useState<string>(INITIAL_MECHANISM?.id ?? '');
+  const [customMechanismInput, setCustomMechanismInput] = React.useState('');
+  const [useReasoner, setUseReasoner] = React.useState<boolean>(true);
+  const [reasonerCandidates, setReasonerCandidates] = React.useState<number>(2);
+  const [reasonerEffort, setReasonerEffort] = React.useState<'low'|'medium'|'high'>('medium');
+
+  const selectedMechanism = React.useMemo(() => (
+    mechanismId === CUSTOM_MECHANISM_ID
+      ? null
+      : DETECTIVE_MECHANISM_PRESETS.find((item) => item.id === mechanismId) || null
+  ), [mechanismId]);
+
+  const cleanText = React.useCallback((text?: string) => {
+    return String(text || '')
+      .replace(/【\[CLUE:[^\]]+\]】.*$/gm, '')
+      .replace(/【\[CLUE:[^\]]+\]】/g, '')
+      .replace(/\[CLUE:[^\]]+\]/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }, []);
+
+  const draftPlainText = React.useMemo(() => {
+    if (!draft || !Array.isArray(draft.chapters)) return '';
+    const lines: string[] = [];
+    draft.chapters.forEach((ch: any, idx: number) => {
+      const title = ch?.title ? String(ch.title) : `Chapter ${idx + 1}`;
+      const body = cleanText(ch?.content);
+      lines.push(`第${idx + 1}章 ${title}`);
+      lines.push(body || '（本章暂无正文）');
+      lines.push('');
+    });
+    return lines.join('\n');
+  }, [draft, cleanText]);
+
+  const storyPreview = compiledOutput?.plainText || draftPlainText;
+
+  const applyPreset = (presetValues: (typeof PRESETS)[number]['values']) => {
+    setAvgSentenceLen(presetValues.avgSentenceLen);
+    setMisdirectionCap(presetValues.misdirectionCap);
+    setDialoguesMin(presetValues.dialoguesMin);
+    setSensoryHooks(presetValues.sensoryHooks);
+    setThemeAnchors(presetValues.themeAnchors);
+    setWordsPerScene(presetValues.wordsPerScene);
+    setCh1MinClues(presetValues.ch1MinClues);
+    setMinExposures(presetValues.minExposures);
+  };
 
   const optionsRef = React.useRef({
     readingLevel: 'middle_grade',
     targets: { avgSentenceLen: 22, wordsPerScene: 1200 },
     cluePolicy: { ch1MinClues: 2, minExposures: 2 },
     misdirectionCap: 0.3,
-    randomMechanism: true,
+    writer: { dialoguesMin: 6, sensoryHooks: 2, themeAnchors: ['海雾','潮声','古塔','星光','秘密'] },
+    deviceKeywords: INITIAL_MECHANISM ? INITIAL_MECHANISM.keywords : [],
+    mechanismId: INITIAL_MECHANISM?.id,
+    mechanismLabel: INITIAL_MECHANISM?.label,
+    useReasoner: true,
+    reasoner: { candidates: 2, effort: 'medium', judge: 'rules' },
   });
-  function syncOptions() {
+  React.useEffect(() => {
+    const anchors = themeAnchors.split(',').map((t) => t.trim()).filter(Boolean);
+    const preset = mechanismId === CUSTOM_MECHANISM_ID ? null : selectedMechanism;
+    const keywords = mechanismId === CUSTOM_MECHANISM_ID
+      ? customMechanismInput.split(/[,，、\s]+/).map((k) => k.trim()).filter(Boolean)
+      : (preset?.keywords ?? []);
     optionsRef.current = {
       readingLevel,
       targets: { avgSentenceLen, wordsPerScene },
       cluePolicy: { ch1MinClues, minExposures },
       misdirectionCap,
-      randomMechanism,
+      writer: { dialoguesMin, sensoryHooks, themeAnchors: anchors },
+      deviceKeywords: keywords,
+      mechanismId,
+      mechanismLabel: preset?.label ?? '自定义关键词',
+      useReasoner,
+      reasoner: { candidates: reasonerCandidates, effort: reasonerEffort, judge: 'rules' },
     };
-  }
+  }, [
+    readingLevel,
+    avgSentenceLen,
+    wordsPerScene,
+    ch1MinClues,
+    minExposures,
+    misdirectionCap,
+    dialoguesMin,
+    sensoryHooks,
+    themeAnchors,
+    mechanismId,
+    customMechanismInput,
+    selectedMechanism,
+    useReasoner,
+    reasonerCandidates,
+    reasonerEffort,
+  ]);
 
   async function handlePlan() {
     setError(null); setBusy(true);
@@ -58,6 +185,7 @@ export default function DetectiveBuilderPage() {
       const planned = await planProject(pid, { topic, profile, seed, options: optionsRef.current });
       setBlueprintId(planned?.blueprintId || null);
       setOutline(planned?.outline || null);
+      setSchemaMeta(planned?.schemaMeta || null);
     } catch (e: any) {
       setError(e?.message || '生成蓝图失败');
     } finally {
@@ -108,7 +236,10 @@ export default function DetectiveBuilderPage() {
       const payload: any = draft ? { draft, policy, updateOutlineExpected: true } : { chapter, policy, updateOutlineExpected: true };
       const data = await autoFix(projectId, payload);
       setDraft(data?.draft || null);
-      setExportUrls(null);
+      if (data?.outline) {
+        setOutline(data.outline);
+      }
+      setCompiledOutput(null);
     } catch (e: any) {
       setError(e?.message || '自动修订失败');
     } finally { setBusy(false); }
@@ -119,7 +250,8 @@ export default function DetectiveBuilderPage() {
     setBusy(true); setError(null);
     try {
       const data = await compileProject(projectId, draft, 'html+interactive');
-      setExportUrls(data?.urls || null);
+      setCompiledOutput(data || null);
+      setViewMode('reader');
     } catch (e:any) {
       setError(e?.message||'导出失败');
     } finally { setBusy(false); }
@@ -150,7 +282,7 @@ export default function DetectiveBuilderPage() {
             </div>
             <div>
               <label className="block text-sm font-medium">阅读级别</label>
-              <select value={readingLevel} onChange={e=>{ setReadingLevel(e.target.value); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2">
+              <select value={readingLevel} onChange={e=> setReadingLevel(e.target.value)} className="mt-1 w-full border rounded px-3 py-2">
                 <option value="middle_grade">middle_grade</option>
                 <option value="early">early</option>
                 <option value="ya">ya</option>
@@ -159,34 +291,105 @@ export default function DetectiveBuilderPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-sm font-medium">平均句长≤</label>
-                <input type="number" value={avgSentenceLen} onChange={e=>{ setAvgSentenceLen(parseInt(e.target.value||'22',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+                <input type="number" value={avgSentenceLen} onChange={e=> setAvgSentenceLen(parseInt(e.target.value||'22',10))} className="mt-1 w-full border rounded px-3 py-2" />
               </div>
               <div>
                 <label className="block text-sm font-medium">红鲱鱼上限</label>
-                <input type="number" step="0.05" min="0" max="0.6" value={misdirectionCap} onChange={e=>{ setMisdirectionCap(parseFloat(e.target.value||'0.3')); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+                <input type="number" step="0.05" min="0" max="0.6" value={misdirectionCap} onChange={e=> setMisdirectionCap(parseFloat(e.target.value||'0.3'))} className="mt-1 w-full border rounded px-3 py-2" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-medium">对白最少轮次</label>
+                <input type="number" min={0} value={dialoguesMin} onChange={e=> setDialoguesMin(Math.max(0, parseInt(e.target.value||'6',10)))} className="mt-1 w-full border rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium">感官描写≥</label>
+                <input type="number" min={0} value={sensoryHooks} onChange={e=> setSensoryHooks(Math.max(0, parseInt(e.target.value||'2',10)))} className="mt-1 w-full border rounded px-3 py-2" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium">主题锚点（逗号分隔）</label>
+              <input value={themeAnchors} onChange={e=> setThemeAnchors(e.target.value)} className="mt-1 w-full border rounded px-3 py-2" placeholder="例如：风,潮,钟声" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">参数预设</label>
+              <div className="flex flex-wrap gap-2">
+                {PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => applyPreset(preset.values)}
+                    className="px-3 py-1 rounded border border-slate-300 text-sm hover:bg-slate-100"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
               </div>
             </div>
             <div>
               <label className="block text-sm font-medium">章节字数目标</label>
-              <input type="number" value={wordsPerScene} onChange={e=>{ setWordsPerScene(parseInt(e.target.value||'1200',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+              <input type="number" value={wordsPerScene} onChange={e=> setWordsPerScene(parseInt(e.target.value||'1200',10))} className="mt-1 w-full border rounded px-3 py-2" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-sm font-medium">Ch1最少线索数</label>
-                <input type="number" value={ch1MinClues} onChange={e=>{ setCh1MinClues(parseInt(e.target.value||'2',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+                <input type="number" value={ch1MinClues} onChange={e=> setCh1MinClues(parseInt(e.target.value||'2',10))} className="mt-1 w-full border rounded px-3 py-2" />
               </div>
               <div>
                 <label className="block text-sm font-medium">线索曝光次数≥</label>
-                <input type="number" value={minExposures} onChange={e=>{ setMinExposures(parseInt(e.target.value||'2',10)); syncOptions(); }} className="mt-1 w-full border rounded px-3 py-2" />
+                <input type="number" value={minExposures} onChange={e=> setMinExposures(parseInt(e.target.value||'2',10))} className="mt-1 w-full border rounded px-3 py-2" />
               </div>
             </div>
             <div>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">随机机制</label>
+              <label className="block text-sm font-medium mb-1">机关预设</label>
+              <select
+                value={mechanismId || CUSTOM_MECHANISM_ID}
+                onChange={(e) => setMechanismId(e.target.value)}
+                className="mt-1 w-full border rounded px-3 py-2"
+              >
+                {DETECTIVE_MECHANISM_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+                <option value={CUSTOM_MECHANISM_ID}>自定义关键词</option>
+              </select>
+              {mechanismId === CUSTOM_MECHANISM_ID ? (
+                <textarea
+                  className="mt-2 w-full border rounded px-3 py-2 text-sm"
+                  rows={2}
+                  value={customMechanismInput}
+                  onChange={(e) => setCustomMechanismInput(e.target.value)}
+                  placeholder="例如：镜面,折射,光线（用逗号或空格分隔）"
+                />
+              ) : (
+                <p className="text-xs text-slate-500 mt-1">
+                  关键词：{selectedMechanism?.keywords.join('、') || '（无）'}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Reasoner（蓝图阶段）</label>
               <label className="inline-flex items-center mr-3 text-sm">
-                <input type="checkbox" className="mr-1" checked={randomMechanism} onChange={e=>{ setRandomMechanism(e.target.checked); setTimeout(syncOptions,0); }} /> 启用
+                <input type="checkbox" className="mr-1" checked={useReasoner} onChange={e=> setUseReasoner(e.target.checked)} /> 使用 Reasoner
               </label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <div>
+                  <label className="block text-xs text-slate-600">候选数(1-3)</label>
+                  <input type="number" min={1} max={3} value={reasonerCandidates} onChange={e=> setReasonerCandidates(Math.max(1,Math.min(3, parseInt(e.target.value||'2',10))))} className="mt-1 w-full border rounded px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-600">力度</label>
+                  <select value={reasonerEffort} onChange={e=> setReasonerEffort(e.target.value as any)} className="mt-1 w-full border rounded px-3 py-2">
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </div>
+              </div>
             </div>
             <div className="flex gap-2">
               <button onClick={handlePlan} disabled={busy} className="bg-blue-600 text-white rounded px-4 py-2 disabled:opacity-50">生成蓝图</button>
@@ -232,16 +435,37 @@ export default function DetectiveBuilderPage() {
             </div>
 
             <div className="bg-white rounded-lg shadow p-4">
-              <div className="flex items-center justify-between mb-2"><h2 className="font-semibold">整稿 Draft（自动修订产物）</h2></div>
-              <pre className="text-xs whitespace-pre-wrap overflow-auto max-h-96">{draft ? JSON.stringify(draft, null, 2) : '（未生成自动修订结果）'}</pre>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-semibold">整稿</h2>
+                <div className="inline-flex rounded-full border border-slate-200 overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('reader')}
+                    className={`px-3 py-1 ${viewMode === 'reader' ? 'bg-slate-800 text-white' : 'text-slate-600'}`}
+                  >阅读模式</button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('debug')}
+                    className={`px-3 py-1 ${viewMode === 'debug' ? 'bg-slate-800 text-white' : 'text-slate-600'}`}
+                  >调试模式</button>
+                </div>
+              </div>
+              {viewMode === 'reader' ? (
+                <div className="text-sm whitespace-pre-wrap leading-7 overflow-auto max-h-96 bg-slate-50 border border-slate-200 rounded p-3">
+                  {storyPreview ? storyPreview : '（暂无整稿，请先写作或导出）'}
+                </div>
+              ) : (
+                <pre className="text-xs whitespace-pre-wrap overflow-auto max-h-96">{draft ? JSON.stringify(draft, null, 2) : '（未生成自动修订结果）'}</pre>
+              )}
               <div className="mt-2">
                 <QuickValidate projectId={projectId} draft={draft} />
               </div>
-              {exportUrls && (
-                <div className="mt-2 text-sm">
+              {compiledOutput && (
+                <div className="mt-2 text-sm space-y-1">
                   <div>导出完成：</div>
-                  <div><a className="text-blue-600 underline" href={exportUrls.html} target="_blank" rel="noreferrer">预览 HTML</a></div>
-                  <div><a className="text-blue-600 underline" href={exportUrls.interactive} target="_blank" rel="noreferrer">下载互动包 JSON</a></div>
+                  <div><a className="text-blue-600 underline" href={compiledOutput.urls.plain} target="_blank" rel="noreferrer">下载纯文本</a></div>
+                  <div><a className="text-blue-600 underline" href={compiledOutput.urls.html} target="_blank" rel="noreferrer">预览 HTML</a></div>
+                  <div><a className="text-blue-600 underline" href={compiledOutput.urls.interactive} target="_blank" rel="noreferrer">下载互动包 JSON</a></div>
                 </div>
               )}
             </div>
@@ -261,6 +485,8 @@ function StatusChip({label}:{label:string}){
 function QuickValidate({ projectId, chapter, draft }:{ projectId: string|null, chapter?: any, draft?: any }){
   const [report, setReport] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(false);
+  const [fixing, setFixing] = React.useState(false);
+  const [fixedReport, setFixedReport] = React.useState<any>(null);
   async function run(){
     if(!projectId){ return; }
     setLoading(true);
@@ -274,9 +500,28 @@ function QuickValidate({ projectId, chapter, draft }:{ projectId: string|null, c
       alert(e?.message||'校验失败');
     }finally{ setLoading(false); }
   }
+  async function fix(){
+    if(!projectId){ return; }
+    setFixing(true);
+    try{
+      const body: any = draft ? { draft } : (chapter ? { chapter } : null);
+      if(!body){ alert('无可修订内容'); setFixing(false); return; }
+      body.policy = { ch1MinClues: 2, minExposures: 2 };
+      body.updateOutlineExpected = true;
+      const res = await fetch((process.env.REACT_APP_API_URL||'') + `/api/projects/${projectId}/autofix`,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const data = await res.json();
+      if(!res.ok) throw new Error(data?.error||res.statusText);
+      const res2 = await fetch((process.env.REACT_APP_API_URL||'') + `/api/projects/${projectId}/validate`,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ draft: data?.draft }) });
+      const data2 = await res2.json();
+      if(res2.ok){ setFixedReport(data2?.report || null); } else { setFixedReport(null); }
+    }catch(e:any){
+      alert(e?.message||'自动修订失败');
+    }finally{ setFixing(false); }
+  }
   return (
     <div>
-      <button disabled={!projectId||loading} onClick={run} className="bg-amber-600 text-white rounded px-3 py-2 disabled:opacity-50">快速校验</button>
+      <button disabled={!projectId||loading} onClick={run} className="bg-amber-600 text-white rounded px-3 py-2 disabled:opacity-50 mr-2">快速校验</button>
+      <button disabled={!projectId||fixing||(!draft && !chapter)} onClick={fix} className="bg-emerald-700 text-white rounded px-3 py-2 disabled:opacity-50">一键修复</button>
       {report && (
         <div className="mt-2">
           <div className="text-sm mb-1">结果：pass={report?.summary?.pass||0} warn={report?.summary?.warn||0} fail={report?.summary?.fail||0}</div>
@@ -292,6 +537,18 @@ function QuickValidate({ projectId, chapter, draft }:{ projectId: string|null, c
               </div>
             ))}
           </div>
+          {fixedReport && (
+            <div className="mt-3 border-t pt-2">
+              <div className="text-sm">修订后结果：pass={fixedReport?.summary?.pass||0} warn={fixedReport?.summary?.warn||0} fail={fixedReport?.summary?.fail||0}</div>
+              <div className="flex flex-wrap gap-1">
+                {(fixedReport.results||[]).map((r:any)=> (
+                  <div key={r.ruleId} className="border rounded px-2 py-1 text-xs">
+                    <b>{r.ruleId}</b> <StatusChip label={r.status} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

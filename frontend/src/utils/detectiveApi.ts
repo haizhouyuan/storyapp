@@ -81,7 +81,7 @@ export async function createProject(title: string, locale?: string, protagonist?
   });
 }
 
-export async function planProject(projectId: string, payload: { topic?: string; profile?: string; seed?: string; options?: any }): Promise<{ projectId: string; blueprintId: string; outline: any }> {
+export async function planProject(projectId: string, payload: { topic?: string; profile?: string; seed?: string; options?: any }): Promise<{ projectId: string; blueprintId: string; outline: any; schemaMeta?: any }> {
   return request(`/api/projects/${projectId}/plan`, {
     method: 'POST',
     body: JSON.stringify(payload || {}),
@@ -104,7 +104,7 @@ export async function editScene(projectId: string, sceneId?: string, chapter?: a
   });
 }
 
-export async function autoFix(projectId: string, payload: { draft?: any; chapter?: any; policy?: { ch1MinClues?: number; minExposures?: number }; updateOutlineExpected?: boolean }): Promise<{ draft: any; outlineUpdated: boolean; changes: any[] }> {
+export async function autoFix(projectId: string, payload: { draft?: any; chapter?: any; policy?: { ch1MinClues?: number; minExposures?: number }; updateOutlineExpected?: boolean }): Promise<{ draft: any; outlineUpdated: boolean; changes: any[]; outline?: any; harmonizeMeta?: any }> {
   return request(`/api/projects/${projectId}/autofix`, {
     method: 'POST',
     body: JSON.stringify(payload || {}),
@@ -112,7 +112,7 @@ export async function autoFix(projectId: string, payload: { draft?: any; chapter
 }
 
 export async function compileProject(projectId: string, draft: any, format: 'html+interactive' = 'html+interactive'):
-  Promise<{ urls: { html: string; interactive: string } }>
+  Promise<{ urls: { html: string; interactive: string; plain: string }; plainText: string }>
 {
   return request(`/api/projects/${projectId}/compile?format=${encodeURIComponent(format)}`, {
     method: 'POST',

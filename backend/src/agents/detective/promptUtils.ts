@@ -76,38 +76,36 @@ export function buildStage2Prompt(outline: DetectiveOutline): string {
 以下是侦探故事的大纲（JSON）：
 ${JSON.stringify(outline, null, 2)}
 
-时间线提示（必须严格遵守，且在叙事中以括号时间标注）：
+时间线提示（请在正文中自然呈现真实时间点）：
 ${timelineSummary(outline)}
 
-可使用的关键信息（请勿在正文中创造未列出的决定性证据）：
+关键信息（请勿凭空创造决定性证据）：
 - ${cluesSummary(outline)}
 
-请生成结构化 JSON：
+请输出结构化 JSON，示例如下：
 {
   "chapters": [
     {
-      "title": "...",
-      "summary": "...",
-      "wordCount": 1500,
-      "content": "分段正文，包含细节与场景描写",
-      "cluesEmbedded": ["..."],
-      "redHerringsEmbedded": ["..."]
+      "title": "章节标题",
+      "summary": "章节梗概",
+      "wordCount": 1200,
+      "content": "段落化正文，包含线索与情绪",
+      "cluesEmbedded": ["线索名称"],
+      "redHerringsEmbedded": ["误导线索名称"]
     }
   ],
   "overallWordCount": 0,
-  "narrativeStyle": "第三人称 / 温度略冷 / 逻辑精密",
-  "continuityNotes": ["..."]
+  "narrativeStyle": "第三人称 / 中等节奏 / 合理推理",
+  "continuityNotes": ["检查出的连续性提醒"]
 }
 
-请确保：
-1. 总字数在 4500-5500 字范围。
-2. 每章至少一次显式提及 outline.clueMatrix 中标记需要铺垫的线索（可用 [CLUE: ...] 标记，确保读者能注意到）。
-3. 凶手的准备动作必须在谋杀发生前的章节中详细呈现，并标注真实时间。
-4. 任何在结局揭示的证据应在前文至少出现一次暗示。
-5. 不要引入大纲未提及的决定性证据；如需补充，必须在Chapter 1或Chapter 2 先行铺垫并用 [CLUE: ...] 标记。
-6. 重复提及线索时保持地点与细节一致；关键事件请标注“（真实时间 XX:XX）/（钟表显示 XX:XX）”。
-7. Chapter 1 建议暗示钥匙管理或备用钥匙存在的可能性。
-8. 结局章节必须逐条回收 mustForeshadow 线索，并用大纲一致的名称。
+写作要求：
+1. 总字数约 4500-5500 字，每章按照大纲顺序展开完整事件弧。
+2. 线索必须通过自然描写或对白呈现，禁止使用 [CLUE] 等符号标签；在揭晓前至少两次提及 mustForeshadow 线索。
+3. 章节中如出现时间点，请在句子中说明（例如：“真实时间 20:05，灯塔再次响起。”）。
+4. 不得引入大纲外的决定性证据，如确需补充，必须在前章铺垫并写入 cluesEmbedded。
+5. 结局章节需逐条回收关键线索，解释机关运作与凶手动机，给出善后场景。
+6. 对话、感官描写与情绪应符合 middle_grade 阅读级别，避免过度暴力或恐怖细节。
 仅返回 JSON。`.trim();
 }
 
@@ -118,7 +116,7 @@ export function buildStage2PromptProfile(outline: DetectiveOutline, opts?: Promp
     '时间线提示：',
     timelineSummary(outline),
     '',
-    '关键信息：',
+    '关键信息（需在正文中自然呈现）：',
     '- ' + cluesSummary(outline),
   ].join('\n');
   return `${ctx.system}\n\n${ctx.user}\n${tail}`;

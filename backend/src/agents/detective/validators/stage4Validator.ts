@@ -7,7 +7,7 @@ import type {
   ValidationRuleStatus,
   ValidationRuleDetail,
 } from '@storyapp/shared';
-const VALID_CHAPTER_IDS = new Set(['Chapter 1', 'Chapter 2', 'Chapter 3']);
+import { DETECTIVE_MECHANISM_GROUPS } from '@storyapp/shared';
 interface Stage4ValidationOptions {
   outlineId?: string;
   storyId?: string;
@@ -22,6 +22,7 @@ export function runStage4Validation(
   options: Stage4ValidationOptions = {},
 ): ValidationReport {
   const ruleResults: ValidationRuleResult[] = [];
+  const chapters = storyDraft?.chapters ?? [];
   ruleResults.push(validateClueForeshadowing(outline, storyDraft));
   ruleResults.push(validateTimelineConsistency(outline));
   ruleResults.push(validateChekhovRecovery(outline, storyDraft));
@@ -33,6 +34,8 @@ export function runStage4Validation(
   ruleResults.push(validateDeviceFeasibility(outline, storyDraft));
   const languageResult = validateLanguageAdaptation(storyDraft);
   ruleResults.push(languageResult);
+  ruleResults.push(validateDialogueDensity(storyDraft));
+  ruleResults.push(validateFinalReveal(storyDraft));
   const summary = ruleResults.reduce(
     (acc, rule) => {
       if (rule.status === 'pass') acc.pass += 1;
@@ -51,6 +54,25 @@ export function runStage4Validation(
     if (typeof m.avgSentenceLen === 'number') metrics.avgSentenceLen = m.avgSentenceLen;
     if (typeof m.longSentenceRatio === 'number') metrics.longSentenceRatio = m.longSentenceRatio;
     if (typeof m.bannedWordCount === 'number') metrics.bannedWordCount = m.bannedWordCount;
+  }
+  if (chapters.length) {
+    const dialogueStats = chapters.map((chapter, index) => {
+      const dialogues = estimateDialogueCount(chapter.content || '');
+      const sensory = estimateSensoryCount(chapter.content || '');
+      const name = chapter.title || `Chapter ${index + 1}`;
+      return { chapter: name, dialogues, sensory };
+    });
+    const totalDialogues = dialogueStats.reduce((sum, item) => sum + item.dialogues, 0);
+    const totalSensory = dialogueStats.reduce((sum, item) => sum + item.sensory, 0);
+    metrics.totalDialogues = totalDialogues;
+    metrics.totalSensoryCues = totalSensory;
+    ruleResults.push({
+      ruleId: 'narrative-stats',
+      status: 'pass',
+      details: dialogueStats.map(({ chapter, dialogues, sensory }) => ({
+        message: `章节「${chapter}」对白 ${dialogues} 次，感官描写 ${sensory} 处`,
+      })),
+    });
   }
   return {
     generatedAt: new Date().toISOString(),
@@ -83,6 +105,7 @@ function validateClueForeshadowing(
     content: chapter.content ?? '',
     cluesEmbedded: (chapter.cluesEmbedded ?? []).map(normalizeClueName),
   }));
+  const validChapterIds = new Set(chapters.map((_, idx) => `Chapter ${idx + 1}`));
   const computation: RuleComputation = {
     status: 'pass',
     details: [],
@@ -95,7 +118,7 @@ function validateClueForeshadowing(
     const expectedChapters = Array.isArray(clue.explicitForeshadowChapters)
       ? clue.explicitForeshadowChapters
       : [];
-    const invalidChapters = expectedChapters.filter((chapterId) => !VALID_CHAPTER_IDS.has(chapterId));
+    const invalidChapters = expectedChapters.filter((chapterId) => !validChapterIds.has(chapterId));
     if (invalidChapters.length > 0) {
       updateRuleStatus(computation, 'warn', {
         message: `线索「${clue.clue}」声明了无效章节：${invalidChapters.join(', ')}`,
@@ -224,6 +247,39 @@ function validateChekhovRecovery(
     ],
   };
 }
+function validateFinalReveal(storyDraft: DetectiveStoryDraft): ValidationRuleResult {
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'final-reveal',
+      status: 'warn',
+      details: [{ message: '缺少章节数据，无法验证结局揭示' }],
+    };
+  }
+  const finalChapter = chapters[chapters.length - 1];
+  const text = String(finalChapter?.content || '').trim();
+  if (!text) {
+    return {
+      ruleId: 'final-reveal',
+      status: 'warn',
+      details: [{ message: '结局章节正文为空，建议补充真相揭示段落' }],
+    };
+  }
+  const normalized = text.replace(/\s+/g, '');
+  const hasReveal = /(真相|复盘|揭示|总结|破案|嫌疑人|凶手)/.test(normalized);
+  if (hasReveal) {
+    return {
+      ruleId: 'final-reveal',
+      status: 'pass',
+      details: [{ message: '结局章节包含真相揭示或复盘段落' }],
+    };
+  }
+  return {
+    ruleId: 'final-reveal',
+    status: 'warn',
+    details: [{ message: '结局章节缺少明确的真相揭示或复盘段落' }],
+  };
+}
 function validateRedHerringRatio(storyDraft: DetectiveStoryDraft): ValidationRuleResult {
   const chapters = storyDraft?.chapters ?? [];
   if (chapters.length === 0) {
@@ -350,13 +406,21 @@ function validateFairnessExposureMin(
   storyDraft: DetectiveStoryDraft,
 ): ValidationRuleResult {
   const chapters = storyDraft?.chapters ?? [];
-  const clues = outline?.clueMatrix ?? [];
-  if (clues.length === 0 || chapters.length === 0) {
-    return { ruleId: 'fairness-min-exposures', status: 'warn', details: [{ message: '缺少线索或章节，无法计算最小铺垫次数' }] };
+  const targetClues = (outline?.clueMatrix ?? []).filter(
+    (clue) => clue?.clue && clue.mustForeshadow !== false,
+  );
+  if (targetClues.length === 0 || chapters.length === 0) {
+    return {
+      ruleId: 'fairness-min-exposures',
+      status: 'pass',
+      details: [{ message: '未声明必须铺垫的线索，跳过曝光次数校验' }],
+    };
   }
   const minExposure = 2; // 默认阈值
   const exposure: Record<string, number> = {};
-  clues.forEach((c) => { if (c?.clue) exposure[normalizeClueName(c.clue)] = 0; });
+  targetClues.forEach((clue) => {
+    exposure[normalizeClueName(clue.clue!)] = 0;
+  });
   chapters.forEach((ch) => {
     const text = normalizeClueName(ch.content || '');
     Object.keys(exposure).forEach((k) => {
@@ -368,8 +432,18 @@ function validateFairnessExposureMin(
     });
   });
   const lacking = Object.entries(exposure).filter(([, n]) => n < minExposure).map(([k]) => k);
-  if (lacking.length === 0) return { ruleId: 'fairness-min-exposures', status: 'pass', details: [{ message: `所有线索铺垫次数≥${minExposure}` }] };
-  return { ruleId: 'fairness-min-exposures', status: 'warn', details: [{ message: `以下线索铺垫次数不足：${lacking.join('、')}`, meta: { exposure, minExposure } }] };
+  if (lacking.length === 0) {
+    return {
+      ruleId: 'fairness-min-exposures',
+      status: 'pass',
+      details: [{ message: `所有必需线索铺垫次数≥${minExposure}` }],
+    };
+  }
+  return {
+    ruleId: 'fairness-min-exposures',
+    status: 'warn',
+    details: [{ message: `以下线索铺垫次数不足：${lacking.join('、')}`, meta: { exposure, minExposure } }],
+  };
 }
 function validateTimelineFromText(
   outline: DetectiveOutline,
@@ -377,7 +451,7 @@ function validateTimelineFromText(
 ): ValidationRuleResult {
   const chapters = storyDraft?.chapters ?? [];
   if (chapters.length === 0) return { ruleId: 'timeline-from-text', status: 'warn', details: [{ message: '缺少章节，无法抽取时间' }] };
-  const timeRegex = /(|\D)([0-2]?\d):([0-5]\d)(|\D)/g;
+  const timeRegex = /(^|[^0-9])([0-2]?\d):([0-5]\d)(?=[^0-9]|$)/g;
   const found: string[] = [];
   chapters.forEach((ch) => {
     const text = ch.content || '';
@@ -396,18 +470,79 @@ function validateDeviceFeasibility(
   outline: DetectiveOutline,
   storyDraft: DetectiveStoryDraft,
 ): ValidationRuleResult {
-  const mech = (outline?.centralTrick?.mechanism || outline?.centralTrick?.summary || '').toLowerCase();
-  const required = ['滑轮','风道','潮', '共振'];
-  const missing = required.filter((k) => !mech.includes(k.toLowerCase()));
-  const textAll = (storyDraft?.chapters || []).map((c) => c.content || '').join('\n').toLowerCase();
-  const presentInText = required.filter((k) => textAll.includes(k.toLowerCase()));
-  if (missing.length > 2) {
-    return { ruleId: 'device-feasibility', status: 'warn', details: [{ message: '大纲机制描述过于模糊，缺少关键机械要素', meta: { missingRequired: missing } }] };
+  const mechanismText = (outline?.centralTrick?.mechanism || outline?.centralTrick?.summary || '').toLowerCase();
+  const storyText = (storyDraft?.chapters || []).map((c) => c.content || '').join('\n').toLowerCase();
+  const keywordGroups = Object.entries(DETECTIVE_MECHANISM_GROUPS).map(([id, cfg]) => ({
+    id,
+    triggers: cfg.triggers,
+    requires: cfg.requires,
+  }));
+  const includes = (source: string, token: string) => source.includes(token.toLowerCase());
+  const collectKeywords = (keywords: readonly string[]) =>
+    keywords.filter((keyword) => includes(mechanismText, keyword) || includes(storyText, keyword));
+  const scoredGroups = keywordGroups
+    .map((group) => {
+      const triggerHits = collectKeywords(group.triggers).length;
+      const requireHits = collectKeywords(group.requires).length;
+      return { group, triggerHits, requireHits };
+    })
+    .filter((entry) => entry.triggerHits > 0);
+  if (scoredGroups.length > 0) {
+    scoredGroups.sort((a, b) => {
+      if (b.triggerHits !== a.triggerHits) return b.triggerHits - a.triggerHits;
+      return b.requireHits - a.requireHits;
+    });
+    const top = scoredGroups[0];
+    const matched = collectKeywords(top.group.requires);
+    if (matched.length >= Math.min(2, top.group.requires.length)) {
+      return {
+        ruleId: 'device-feasibility',
+        status: 'pass',
+        details: [
+          {
+            message: '中心奇迹具备基本可行性的文本支撑',
+            meta: { scenario: top.group.id, matchedKeywords: matched },
+          },
+        ],
+      };
+    }
+    const missing = top.group.requires.filter((keyword) => !matched.includes(keyword));
+    return {
+      ruleId: 'device-feasibility',
+      status: 'warn',
+      details: [
+        {
+          message: '中心奇迹缺少关键可行性要素描述，建议补充具体装置或原理',
+          meta: { scenario: top.group.id, missing },
+        },
+      ],
+    };
   }
-  if (presentInText.length === 0) {
-    return { ruleId: 'device-feasibility', status: 'warn', details: [{ message: '正文未出现关键机械要素的可观察证据', meta: { required } }] };
+  const genericKeywords = ['装置', '机关', '结构', '设备', '实验', '工程'];
+  const genericMatched = collectKeywords(genericKeywords);
+  if (genericMatched.length >= 1) {
+    return {
+      ruleId: 'device-feasibility',
+      status: 'pass',
+      details: [
+        {
+          message: '中心奇迹包含基础装置或工程描述',
+          meta: { matchedKeywords: genericMatched },
+        },
+      ],
+    };
   }
-  return { ruleId: 'device-feasibility', status: 'pass', details: [{ message: '中心奇迹具备基本可行性的文本支撑', meta: { presentInText } }] };
+
+  return {
+    ruleId: 'device-feasibility',
+    status: 'warn',
+    details: [
+      {
+        message: '中心奇迹描述偏抽象，建议补充关键装置或科学原理以证明可行性',
+        meta: { mechanismSample: outline?.centralTrick?.mechanism },
+      },
+    ],
+  };
 }
 function validateLanguageAdaptation(
   storyDraft: DetectiveStoryDraft,
@@ -424,5 +559,53 @@ function validateLanguageAdaptation(
   if (avg > 26 || longRatio > 0.3 || bannedCount > 0) status = 'warn';
   if (avg > 32 || longRatio > 0.5 || bannedCount > 1) status = 'fail';
   return { ruleId: 'language-adaptation', status, details: [{ message: '语言适配指标', meta: { avgSentenceLen: +avg.toFixed(2), longSentenceRatio: +longRatio.toFixed(3), bannedWordCount: bannedCount } }] };
+}
+
+function estimateDialogueCount(content: string): number {
+  if (!content) return 0;
+  const matches = content.match(/[「“"']/g);
+  if (!matches) return 0;
+  // 两个引号对应一轮对白，取整
+  return Math.floor(matches.length / 2) || matches.length;
+}
+
+function estimateSensoryCount(content: string): number {
+  if (!content) return 0;
+  const matches = content.match(/声|响|音|风|潮|水|湿|冷|热|光|亮|暗|味|香|腥|咸|触|震|暖|凉|沙/g);
+  return matches ? matches.length : 0;
+}
+
+function validateDialogueDensity(storyDraft: DetectiveStoryDraft): ValidationRuleResult {
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'dialogue-density',
+      status: 'warn',
+      details: [{ message: '缺少章节数据，无法统计对白' }],
+    };
+  }
+  const minDialogues = 4;
+  const insufficient: Array<{ chapter: string; dialogues: number }> = [];
+  chapters.forEach((chapter, index) => {
+    const count = estimateDialogueCount(chapter.content || '');
+    if (count < minDialogues) {
+      insufficient.push({ chapter: chapter.title || `Chapter ${index + 1}`, dialogues: count });
+    }
+  });
+  if (insufficient.length === 0) {
+    return {
+      ruleId: 'dialogue-density',
+      status: 'pass',
+      details: [{ message: `所有章节对白轮次均≥${minDialogues}` }],
+    };
+  }
+  return {
+    ruleId: 'dialogue-density',
+    status: 'warn',
+    details: insufficient.map((item) => ({
+      message: `章节「${item.chapter}」对白轮次仅 ${item.dialogues}，建议增加问答互动`,
+      meta: item,
+    })),
+  };
 }
 export type { Stage4ValidationOptions };

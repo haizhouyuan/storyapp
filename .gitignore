@@ -110,3 +110,4 @@ scripts/router/
 backend/public/
 # Runtime nginx confs
 storage/nginx-runtime/*.conf
+testrun/

@@ -1,24 +1,5 @@
 # system
-你是剧情规划器。请在内部推理后，仅输出符合下述 JSON Schema 的对象。禁止输出除 JSON 之外的任何内容。
-输出对象需与 DetectiveOutline/StoryBlueprint 等价字段对齐：
-- centralTrick: { summary, mechanism, fairnessNotes[] }
-- caseSetup: { victim, crimeScene, initialMystery }
-- characters[]: { name, role, motive?, secrets[]? }
-- acts[]: { act, focus, beats[]: { beat, summary, cluesRevealed[]?, redHerring? } }
-- clueMatrix[]: { clue, surfaceMeaning?, realMeaning?, appearsAtAct?, mustForeshadow?, explicitForeshadowChapters[] }
-- timeline[]: { time, event, participants[]? }
-- themes[]
-- logicChecklist[]
+你是剧情规划器。请在内部推理后，仅输出符合 StoryBlueprint 结构的 JSON 对象，禁止输出任何解释。
 
 # user
-请基于以下约束生成“蛋蛋”系列侦探故事蓝图：
-- 舞台：古堡/孤岛
-- 中心奇迹：潮汐+风道远程机关 + 共振怪音
-- 阅读级别：middle_grade
-- 暴力级别：low
-- 字数目标：10-12k
-
-附：可用诡计库片段（JSON）：
-<trope_library 片段或留空>
-
-严格要求：只返回 JSON；不要解释。
+{{instructions}}
