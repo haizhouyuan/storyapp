@@ -4,6 +4,37 @@ import { requestStorySpeech, fetchTtsVoices } from '../utils/api';
 
 export type TtsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+// 批量合成接口类型
+export interface StoryTtsBatchRequest {
+  storyId: string;
+  fullText: string;
+  chapterMarkers?: string[];
+  voiceId?: string;
+  speed?: number;
+  sessionId?: string;
+}
+
+export interface AudioSegment {
+  segmentIndex: number;
+  audioUrl: string;
+  duration: number;
+  startOffset: number;
+  endOffset: number;
+  chapterTitle?: string;
+  cached?: boolean;
+  error?: string;
+}
+
+export interface StoryTtsBatchResponse {
+  success: boolean;
+  storyId: string;
+  totalSegments: number;
+  successCount: number;
+  totalDuration: number;
+  segments: AudioSegment[];
+  error?: string;
+}
+
 interface UseStoryTtsOptions {
   sessionId?: string;
   defaultVoiceId?: string;
@@ -21,6 +52,7 @@ interface UseStoryTtsResult {
   audioMeta?: TtsSynthesisResponse;
   error?: string;
   synthesize: (payload: TtsSynthesisRequest) => Promise<TtsSynthesisResponse>;
+  synthesizeStory: (payload: StoryTtsBatchRequest) => Promise<StoryTtsBatchResponse>;
   getCachedResult: (payload: TtsSynthesisRequest) => TtsSynthesisResponse | undefined;
   listVoices: () => Promise<TtsVoicesResponse>;
   lastRequestKey?: string;
@@ -114,15 +146,50 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
     }
   }, []);
 
+  const synthesizeStory = useCallback(async (payload: StoryTtsBatchRequest) => {
+    try {
+      setStatus('loading');
+      setError(undefined);
+
+      const response = await fetch('/api/tts/synthesize-story', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...payload,
+          sessionId: payload.sessionId || options.sessionId,
+          voiceId: payload.voiceId || options.defaultVoiceId,
+          speed: payload.speed || options.defaultSpeed,
+        }),
+      });
+
+      const data: StoryTtsBatchResponse = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '故事合成失败');
+      }
+
+      setStatus('ready');
+      return data;
+    } catch (err: any) {
+      setStatus('error');
+      const message = err?.message || '故事合成失败';
+      setError(message);
+      throw err;
+    }
+  }, [options.sessionId, options.defaultVoiceId, options.defaultSpeed]);
+
   return useMemo(() => ({
     status,
     audioMeta,
     error,
     synthesize,
+    synthesizeStory,
     getCachedResult,
     listVoices,
     lastRequestKey,
-  }), [audioMeta, error, getCachedResult, lastRequestKey, listVoices, status, synthesize]);
+  }), [audioMeta, error, getCachedResult, lastRequestKey, listVoices, status, synthesize, synthesizeStory]);
 }
 
 export default useStoryTts;
