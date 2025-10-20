@@ -262,21 +262,29 @@ router.post('/synthesize-story', async (req: Request, res: Response) => {
       totalDuration,
     }, undefined, sessionId);
 
-    return res.json({
+    const responsePayload = {
       success: true,
       storyId,
       totalSegments: audioSegments.length,
       successCount,
       totalDuration,
       segments: audioSegments,
-    });
+    } as const;
+
     if (typeof storyId === 'string' && storyId.trim()) {
       const status = successCount === audioSegments.length ? 'success' : 'error';
-      createTtsEvent(storyId, status, status === 'success' ? '整篇朗读已生成' : '整篇朗读部分失败', {
-        successCount,
-        totalSegments: audioSegments.length,
-      });
+      createTtsEvent(
+        storyId,
+        status,
+        status === 'success' ? '整篇朗读已生成' : '整篇朗读部分失败',
+        {
+          successCount,
+          totalSegments: audioSegments.length,
+        },
+      );
     }
+
+    return res.json(responsePayload);
   } catch (error: any) {
     logError(EventType.TTS_ERROR, '故事合成失败', error, { storyId }, sessionId);
     if (typeof storyId === 'string' && storyId.trim()) {

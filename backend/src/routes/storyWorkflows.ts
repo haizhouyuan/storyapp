@@ -174,7 +174,12 @@ router.get('/:id/stream', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=120, max=1000');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
+
+  // 立即写入一条注释可触发代理和客户端建立事件流
+  res.write(': connected\n\n');
 
   const unregister = registerWorkflowStream(id, res);
 
