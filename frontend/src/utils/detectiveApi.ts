@@ -119,3 +119,10 @@ export async function compileProject(projectId: string, draft: any, format: 'htm
     body: JSON.stringify({ draft }),
   });
 }
+
+export async function compileWorkflow(workflowId: string): Promise<{ urls: { html: string; interactive: string; plain: string }; plainText: string }> {
+  return request(`/api/story-workflows/${workflowId}/compile`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}

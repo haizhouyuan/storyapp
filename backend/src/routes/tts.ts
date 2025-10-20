@@ -6,6 +6,8 @@ import type { TtsManager } from '../services/tts/ttsManager';
 import { StoryTextSegmenter } from '../services/tts/textSegmenter';
 import path from 'path';
 import fs from 'fs';
+import { listTasks, findTask, getProviderSummary, TaskStatus, findLatestTaskByStoryId } from '../services/tts/taskRegistry';
+import { createTtsEvent } from '../services/workflowEventBus';
 
 const router = Router();
 let manager: TtsManager | undefined;
@@ -116,6 +118,71 @@ router.post('/', async (req: Request<unknown, unknown, TtsSynthesisRequest>, res
   }
 });
 
+router.get('/tasks', (req: Request, res: Response) => {
+  const { provider, status, limit } = req.query;
+  const parsedStatus = typeof status === 'string' && ['pending', 'success', 'error'].includes(status)
+    ? (status as TaskStatus)
+    : undefined;
+  const parsedLimit = typeof limit === 'string' ? Number.parseInt(limit, 10) : undefined;
+
+  const tasks = listTasks({
+    provider: typeof provider === 'string' ? provider : undefined,
+    status: parsedStatus,
+    limit: Number.isNaN(parsedLimit) ? undefined : parsedLimit,
+  });
+
+  const summary = typeof provider === 'string'
+    ? getProviderSummary(provider)
+    : undefined;
+
+  res.json({
+    success: true,
+    data: {
+      tasks,
+      summary,
+    },
+  });
+});
+
+router.get('/tasks/:storyId/latest', (req: Request, res: Response) => {
+  const { storyId } = req.params;
+  if (!storyId) {
+    return res.status(400).json({
+      success: false,
+      error: 'MISSING_STORY_ID',
+      message: '缺少故事 ID',
+    });
+  }
+
+  const provider = typeof req.query.provider === 'string' ? req.query.provider : undefined;
+  const task = findLatestTaskByStoryId(storyId, provider);
+  if (!task) {
+    return res.status(404).json({
+      success: false,
+      error: 'TASK_NOT_FOUND',
+      message: '未找到对应的朗读任务',
+    });
+  }
+
+  res.json({
+    success: true,
+    data: task,
+  });
+});
+
+router.get('/tasks/:identifier', (req: Request, res: Response) => {
+  const { identifier } = req.params;
+  const task = findTask(identifier);
+  if (!task) {
+    return res.status(404).json({
+      success: false,
+      error: 'TASK_NOT_FOUND',
+      message: '未找到对应的 TTS 任务',
+    });
+  }
+  res.json({ success: true, data: task });
+});
+
 /**
  * 批量合成接口 - 长文本分段合成
  * POST /api/tts/synthesize-story
@@ -203,8 +270,20 @@ router.post('/synthesize-story', async (req: Request, res: Response) => {
       totalDuration,
       segments: audioSegments,
     });
+    if (typeof storyId === 'string' && storyId.trim()) {
+      const status = successCount === audioSegments.length ? 'success' : 'error';
+      createTtsEvent(storyId, status, status === 'success' ? '整篇朗读已生成' : '整篇朗读部分失败', {
+        successCount,
+        totalSegments: audioSegments.length,
+      });
+    }
   } catch (error: any) {
     logError(EventType.TTS_ERROR, '故事合成失败', error, { storyId }, sessionId);
+    if (typeof storyId === 'string' && storyId.trim()) {
+      createTtsEvent(storyId, 'error', '整篇朗读生成失败', {
+        error: error?.message,
+      });
+    }
 
     return res.status(500).json({
       success: false,

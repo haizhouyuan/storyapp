@@ -35,8 +35,10 @@ import {
 import { runStage4Validation } from '../agents/detective/validators';
 import { enforceCluePolicy } from '../agents/detective/clueEnforcer';
 import { harmonizeOutlineWithDraft } from '../agents/detective/outlineSync';
+import { compileToOutputs } from './compileExporter';
 import { DETECTIVE_MECHANISM_PRESETS } from '@storyapp/shared';
 import type { PromptBuildOptions } from '../agents/detective/promptBuilder';
+import { createStageEvent, createInfoEvent } from './workflowEventBus';
 
 const logger = createLogger('services:detectiveWorkflow');
 
@@ -115,6 +117,93 @@ async function persistWorkflow(document: DetectiveWorkflowDocument): Promise<voi
     .replaceOne({ _id: document._id }, document, { upsert: false });
 }
 
+const getStageLabel = (stageId: StageId): string => {
+  return STAGE_DEFINITIONS.find((stage) => stage.id === stageId)?.label ?? stageId;
+};
+
+const emitStageEvent = (
+  document: DetectiveWorkflowDocument,
+  stageId: StageId,
+  status: WorkflowStageStatus,
+  message: string,
+  meta?: Record<string, unknown>,
+) => {
+  if (!document._id) return;
+  createStageEvent(document._id.toHexString(), stageId, status, message, meta);
+};
+
+const scheduleWorkflowExecution = (
+  document: DetectiveWorkflowDocument,
+  options: WorkflowExecutionOptions,
+) => {
+  if (!document._id) return;
+  const workflowId = document._id;
+  void (async () => {
+    try {
+      const completedDoc = await executeWorkflowPipeline(document, options);
+      createInfoEvent(workflowId.toHexString(), '工作流生成完成', {
+        topic: completedDoc.topic,
+        revisionType: options.revisionType,
+      });
+    } catch (error: any) {
+      logger.error(
+        { err: error, workflowId: workflowId.toHexString() },
+        'Workflow execution failed',
+      );
+      await markWorkflowFailed(workflowId, error);
+    }
+  })();
+};
+
+async function markWorkflowFailed(workflowId: ObjectId, error: any) {
+  const db = getDatabase();
+  const collection = db.collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS);
+  const existing = await collection.findOne(
+    { _id: workflowId },
+    { projection: { stageStates: 1 } },
+  );
+  const nowIso = new Date().toISOString();
+  const stageStatesSource = existing?.stageStates?.length
+    ? existing.stageStates
+    : buildInitialStageStates();
+  let failureRecorded = false;
+  const stageStates = stageStatesSource.map((state) => {
+    if (state.status === 'completed') {
+      return state;
+    }
+    if (!failureRecorded) {
+      failureRecorded = true;
+      return {
+        ...state,
+        status: 'failed' as WorkflowStageStatus,
+        finishedAt: nowIso,
+        errorMessage: state.errorMessage ?? (error?.message || 'workflow_failed'),
+      };
+    }
+    return {
+      ...state,
+      status: 'pending' as WorkflowStageStatus,
+      finishedAt: state.finishedAt,
+      errorMessage: state.errorMessage,
+    };
+  });
+
+  await collection.updateOne(
+    { _id: workflowId },
+    {
+      $set: {
+        stageStates,
+        status: 'failed',
+        updatedAt: new Date(),
+      },
+    },
+  );
+
+  createInfoEvent(workflowId.toHexString(), '工作流生成失败', {
+    error: error?.message || String(error),
+  });
+}
+
 async function runStageWithUpdate(
   document: DetectiveWorkflowDocument,
   stageId: StageId,
@@ -130,6 +219,12 @@ async function runStageWithUpdate(
     }),
   });
   await persistWorkflow(updatedDoc);
+  emitStageEvent(
+    updatedDoc,
+    stageId,
+    'running',
+    `${getStageLabel(stageId)} 开始`,
+  );
 
   try {
     const outputs = await runner();
@@ -142,6 +237,15 @@ async function runStageWithUpdate(
       }),
     });
     await persistWorkflow(updatedDoc);
+    emitStageEvent(
+      updatedDoc,
+      stageId,
+      'completed',
+      `${getStageLabel(stageId)} 完成`,
+      {
+        durationMs: finishedAt.getTime() - startTime.getTime(),
+      },
+    );
     return updatedDoc;
   } catch (error: any) {
     const finishedAt = new Date();
@@ -153,6 +257,16 @@ async function runStageWithUpdate(
       }),
     });
     await persistWorkflow(updatedDoc);
+    emitStageEvent(
+      updatedDoc,
+      stageId,
+      'failed',
+      `${getStageLabel(stageId)} 失败`,
+      {
+        durationMs: finishedAt.getTime() - startTime.getTime(),
+        error: error?.message,
+      },
+    );
     throw error;
   }
 }
@@ -170,6 +284,7 @@ async function executeWorkflowPipeline(
     vars: {
       readingLevel: 'middle_grade',
       deviceKeywords: mechanismPreset.keywords,
+      deviceRealismHint: mechanismPreset.realismHint,
       targets: { wordsPerScene: 1200 },
       cluePolicy: { ch1MinClues: 3, minExposures: 2 },
     },
@@ -182,6 +297,12 @@ async function executeWorkflowPipeline(
       mechanismPreset,
     },
   };
+  if (workingDoc._id) {
+    createInfoEvent(workingDoc._id.toHexString(), '已选定创作机制', {
+      mechanismPreset: mechanismPreset.id,
+      revisionType: options.revisionType,
+    });
+  }
 
   // Stage 1
   workingDoc = await runStageWithUpdate(workingDoc, 'stage1_planning', async () => ({
@@ -326,9 +447,14 @@ export async function createDetectiveWorkflow(params: { topic: string; locale?: 
     ...initialDocument,
     _id: insertResult.insertedId,
   };
+  createInfoEvent(insertResult.insertedId.toHexString(), '工作流已创建', {
+    topic: params.topic,
+    locale: params.locale,
+  });
 
-  document = await executeWorkflowPipeline(document, { revisionType: 'initial' });
-  return workflowDocumentToRecord(document);
+  scheduleWorkflowExecution(document, { revisionType: 'initial' });
+  const record = workflowDocumentToRecord(document);
+  return { ...record, workflowId: record._id } as DetectiveWorkflowRecord;
 }
 
 export async function listWorkflows(options: { page?: number; limit?: number }): Promise<ListWorkflowsResponse> {
@@ -386,11 +512,32 @@ export async function retryWorkflow(workflowId: string): Promise<DetectiveWorkfl
     terminationReason: undefined,
   });
   await persistWorkflow(workingDoc);
+  createInfoEvent(workflowId, '工作流已重置，准备重新生成', {
+    topic: workingDoc.topic,
+  });
 
-  workingDoc = await executeWorkflowPipeline(workingDoc, { revisionType: 'retry' });
-  return workflowDocumentToRecord(workingDoc);
+  scheduleWorkflowExecution(workingDoc, { revisionType: 'retry' });
+  const record = workflowDocumentToRecord(workingDoc);
+  return { ...record, workflowId: record._id } as DetectiveWorkflowRecord;
 }
 
+
+export async function compileWorkflow(workflowId: string) {
+  const workflow = await getWorkflowById(workflowId);
+  if (!workflow) {
+    throw new Error('Workflow not found');
+  }
+  if (!workflow.storyDraft || !workflow.outline) {
+    throw new Error('Workflow missing story draft or outline');
+  }
+  const outputs = await compileToOutputs({
+    projectId: workflowId,
+    title: workflow.topic,
+    outline: workflow.outline,
+    draft: workflow.storyDraft,
+  });
+  return outputs;
+}
 export async function terminateWorkflow(workflowId: string, payload: TerminateWorkflowRequest): Promise<DetectiveWorkflowRecord> {
   const db = getDatabase();
   const collection = db.collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS);

@@ -64,6 +64,20 @@ app.use(metricsMiddleware);
 // 3. Security middleware
 app.use(securityMiddleware);
 
+// Normalize security headers for development environments
+app.use((_, res, next) => {
+  res.removeHeader('Strict-Transport-Security');
+  const csp = res.getHeader('Content-Security-Policy');
+  if (typeof csp === 'string' && /upgrade-insecure-requests/i.test(csp)) {
+    const sanitized = csp
+      .split(';')
+      .map((directive) => directive.trim())
+      .filter((directive) => directive.length > 0 && directive.toLowerCase() !== 'upgrade-insecure-requests');
+    res.setHeader('Content-Security-Policy', sanitized.join('; '));
+  }
+  next();
+});
+
 // 4. CORS configuration
 app.use(cors({
   origin: [...securityConfig.corsOrigins, FRONTEND_URL],
@@ -93,8 +107,17 @@ app.use((req, _res, next) => {
 });
 
 
-// 8. General rate limiting
-app.use(generalRateLimit);
+// 8. General rate limiting（SSE 路径放行，避免频繁断线触发 429）
+app.use((req, res, next) => {
+  if (
+    req.path.startsWith('/api/story-workflows/') &&
+    req.method === 'GET' &&
+    (req.path.endsWith('/stream') || req.path.endsWith('/events'))
+  ) {
+    return next();
+  }
+  return generalRateLimit(req, res, next);
+});
 
 // 9. Route-specific middleware and endpoints
 
@@ -116,7 +139,16 @@ app.use('/api/health', healthRoutes);
 // Main API routes
 app.use('/api/admin', adminRoutes);
 app.use('/api/tts', ttsRateLimit, ttsRoutes);
-app.use('/api/story-workflows', validationRateLimit, storyWorkflowRoutes);
+app.use(
+  '/api/story-workflows',
+  (req, res, next) => {
+    if (req.method === 'POST') {
+      return validationRateLimit(req, res, next);
+    }
+    return next();
+  },
+  storyWorkflowRoutes,
+);
 app.use('/api/projects', createProjectRateLimit, projectRoutes);
 app.use('/api/blueprints', validationRateLimit, blueprintRoutes);
 app.use('/api', storyRoutes);
@@ -171,7 +203,7 @@ if (shouldServeStatic) {
     etag: true,
     maxAge: '1y',
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith('/service-worker.js')) {
+      if (filePath.endsWith('/service-worker.js') || filePath.endsWith('/index.html')) {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');

@@ -87,10 +87,20 @@ router.get('/logs', async (req: Request, res: Response) => {
       .limit(limitNum)
       .toArray();
 
+    const decoratedLogs = logs.map((log: any) => ({
+      ...log,
+      workflowId:
+        log.workflowId ??
+        log?.data?.workflowId ??
+        log?.data?.workflow_id ??
+        log?.context?.workflowId ??
+        log?.meta?.workflowId,
+    }));
+
     res.json({
       success: true,
       data: {
-        logs,
+        logs: decoratedLogs,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -147,11 +157,21 @@ router.get('/logs/:sessionId', async (req: Request, res: Response) => {
       mode: startLog?.data?.mode
     };
 
+    const decoratedLogs = logs.map((log: any) => ({
+      ...log,
+      workflowId:
+        log.workflowId ??
+        log?.data?.workflowId ??
+        log?.data?.workflow_id ??
+        log?.context?.workflowId ??
+        log?.meta?.workflowId,
+    }));
+
     res.json({
       success: true,
       data: {
         sessionStats,
-        logs
+        logs: decoratedLogs
       }
     });
   } catch (error: any) {

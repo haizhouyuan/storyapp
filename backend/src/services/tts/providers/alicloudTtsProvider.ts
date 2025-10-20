@@ -38,6 +38,10 @@ export class AlicloudTtsProvider implements TtsProvider {
       ...baseResult,
       provider: this.id,
       requestId: `${this.id}-${randomUUID()}`,
+      metadata: {
+        ...baseResult.metadata,
+        mode: 'alicloud-mock',
+      },
     };
   }
 }

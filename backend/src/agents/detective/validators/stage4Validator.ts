@@ -35,6 +35,8 @@ export function runStage4Validation(
   const languageResult = validateLanguageAdaptation(storyDraft);
   ruleResults.push(languageResult);
   ruleResults.push(validateDialogueDensity(storyDraft));
+  ruleResults.push(validateMotiveForeshadowing(outline, storyDraft));
+  ruleResults.push(validateChapterTimeTags(outline, storyDraft));
   ruleResults.push(validateFinalReveal(storyDraft));
   const summary = ruleResults.reduce(
     (acc, rule) => {
@@ -278,6 +280,128 @@ function validateFinalReveal(storyDraft: DetectiveStoryDraft): ValidationRuleRes
     ruleId: 'final-reveal',
     status: 'warn',
     details: [{ message: '结局章节缺少明确的真相揭示或复盘段落' }],
+  };
+}
+
+function extractMotiveTokens(text?: string): string[] {
+  if (!text) return [];
+  const pieces = text
+    .split(/[，。,.;；：:!?！？\s]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length >= 2);
+  return Array.from(new Set(pieces));
+}
+function validateMotiveForeshadowing(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'motive-foreshadowing',
+      status: 'pass',
+      details: [{ message: '缺少章节，跳过动机铺垫检查' }],
+    };
+  }
+  const solution: any = (outline as any)?.solution ?? {};
+  const motiveTexts: string[] = [];
+  if (typeof solution.motiveCore === 'string') motiveTexts.push(solution.motiveCore);
+  if (Array.isArray(solution.keyReveals)) motiveTexts.push(...(solution.keyReveals as string[]));
+  const motiveTokens = extractMotiveTokens(motiveTexts.join(' '));
+  if (motiveTokens.length === 0) {
+    return {
+      ruleId: 'motive-foreshadowing',
+      status: 'pass',
+      details: [{ message: '未定义明确动机关键词，跳过检查' }],
+    };
+  }
+  const earlyChapters = chapters.slice(0, Math.max(1, chapters.length - 1));
+  const earlyText = earlyChapters
+    .map((chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`)
+    .join('\n');
+  const hits = motiveTokens.filter((token) => token && earlyText.includes(token));
+  if (hits.length > 0) {
+    return {
+      ruleId: 'motive-foreshadowing',
+      status: 'pass',
+      details: [{ message: `动机关键词已在前文出现：${hits.slice(0, 5).join('、')}` }],
+    };
+  }
+  return {
+    ruleId: 'motive-foreshadowing',
+    status: 'warn',
+    details: [{ message: `未在前文发现动机相关提示，可考虑在前两章埋入：${motiveTokens.slice(0, 5).join('、')}` }],
+  };
+}
+function normalizeTimelineTime(value?: string): string | null {
+  if (!value) return null;
+  const match = value.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hour = match[1].padStart(2, '0');
+  const minute = match[2];
+  return `${hour}:${minute}`;
+}
+function validateChapterTimeTags(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'chapter-time-tags',
+      status: 'pass',
+      details: [{ message: '缺少章节数据，跳过时间提示检查' }],
+    };
+  }
+  const timeline = outline?.timeline ?? [];
+  const timesByChapter = new Map<number, Set<string>>();
+  timeline.forEach((event) => {
+    const hhmm = normalizeTimelineTime(event?.time);
+    if (!hhmm) return;
+    const participants = Array.isArray(event?.participants) ? event.participants : [];
+    participants.forEach((participant) => {
+      const match = participant?.toString().match(/Chapter\s*(\d+)/i);
+      if (!match) return;
+      const index = Number.parseInt(match[1], 10) - 1;
+      if (Number.isNaN(index) || index < 0) return;
+      if (!timesByChapter.has(index)) {
+        timesByChapter.set(index, new Set());
+      }
+      timesByChapter.get(index)!.add(hhmm);
+    });
+  });
+  if (timesByChapter.size === 0) {
+    return {
+      ruleId: 'chapter-time-tags',
+      status: 'pass',
+      details: [{ message: '时间线未指向具体章节，跳过检查' }],
+    };
+  }
+  const missing: { chapter: string; times: string[] }[] = [];
+  timesByChapter.forEach((times, index) => {
+    const chapter = chapters[index];
+    if (!chapter) return;
+    const combinedText = `${chapter.title || ''}
+${chapter.summary || ''}
+${chapter.content || ''}`;
+    const found = Array.from(times).some((time) => combinedText.includes(time));
+    if (!found) {
+      missing.push({ chapter: chapter.title || `Chapter ${index + 1}`, times: Array.from(times) });
+    }
+  });
+  if (missing.length === 0) {
+    return {
+      ruleId: 'chapter-time-tags',
+      status: 'pass',
+      details: [{ message: '章节时间提示与时间线基本一致' }],
+    };
+  }
+  return {
+    ruleId: 'chapter-time-tags',
+    status: 'warn',
+    details: missing.map((item) => ({
+      message: `章节「${item.chapter}」缺少时间提示：${item.times.join('、')}`,
+    })),
   };
 }
 function validateRedHerringRatio(storyDraft: DetectiveStoryDraft): ValidationRuleResult {

@@ -34,6 +34,7 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
 
   const vars = (options?.vars || {}) as Record<string, unknown>;
   let deviceKeywords: string[] = [];
+  const deviceRealismHint = typeof vars.deviceRealismHint === 'string' ? String(vars.deviceRealismHint).trim() : undefined;
   const rawDevice = vars.deviceKeywords ?? vars.deviceVariant;
   if (Array.isArray(rawDevice)) {
     deviceKeywords = rawDevice.map((item) => String(item).trim()).filter(Boolean);
@@ -81,6 +82,9 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
     instructionLines.push(`中心奇迹请围绕以下关键词设计变体，但允许合理扩展：${deviceKeywords.join('、')}`);
   } else {
     instructionLines.push('中心奇迹请设计一套可行的机关或诡计，可选择机械、电磁、光影、心理等不同思路，避免重复使用单一套路（如潮汐/风道）。');
+  }
+  if (deviceRealismHint) {
+    instructionLines.push(`机关现实提示：${deviceRealismHint}`);
   }
   instructionLines.push('centralTrick.summary 与 centralTrick.mechanism 必须写成完整句子，严禁留空或使用“待定”等占位描述。');
 
@@ -171,6 +175,8 @@ export function buildWriterPrompt(outline: any, options?: PromptBuildOptions): {
   const themeAnchorsLine = themeAnchors.length
     ? `重复呼应主题锚点（每章≥1次）：${themeAnchors.join(' / ')}。`
     : '';
+  const mechanismHintRaw = pick(vars, ['mechanismRealismHint', 'deviceRealismHint']);
+  const mechanismRealismLine = mechanismHintRaw ? `现实说明提示：${mechanismHintRaw}` : '';
 
   const userBase = userTpl || [
     '请根据以下 StoryBlueprint 输出结构化的章节草稿，仅返回 JSON：',
@@ -198,6 +204,7 @@ export function buildWriterPrompt(outline: any, options?: PromptBuildOptions): {
     wordsTargetText,
     dialoguesTarget,
     sensoryTarget,
+    mechanismRealismLine,
     themeAnchorsLine,
     ...(vars),
   };

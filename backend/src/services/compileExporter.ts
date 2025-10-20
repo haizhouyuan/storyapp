@@ -13,12 +13,24 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function buildHtmlBook(title: string, draft: DetectiveStoryDraft): string {
-  const chapters = (draft?.chapters || []).map((ch, idx) => {
+function buildHtmlBook(title: string, draft: DetectiveStoryDraft, outline: DetectiveOutline): string {
+  const chapterSections = (draft?.chapters || []).map((ch, idx) => {
     const safeTitle = escapeHtml(ch.title || `Chapter ${idx + 1}`);
     const safeText = escapeHtml(ch.content || '').replace(/\n\s*/g, '<br/>');
-    return `\n<section>\n  <h2>${safeTitle}</h2>\n  <article>${safeText}</article>\n</section>`;
+    return `
+<section>
+  <h2>${safeTitle}</h2>
+  <article>${safeText}</article>
+</section>`;
   }).join('\n');
+  const epilogue = buildTrickEpilogue(outline);
+  const epilogueSection = epilogue
+    ? `
+<section>
+  <h2>侦探独白</h2>
+  <article>${escapeHtml(epilogue).replace(/\n\s*/g, '<br/>')}</article>
+</section>`
+    : '';
 
   return [
     '<!doctype html>',
@@ -30,7 +42,8 @@ function buildHtmlBook(title: string, draft: DetectiveStoryDraft): string {
     '</head>',
     '<body>',
     `  <h1>${escapeHtml(title || '侦探故事')}</h1>`,
-    chapters,
+    chapterSections,
+    epilogueSection,
     '</body>',
     '</html>'
   ].join('\n');
@@ -49,7 +62,21 @@ function cleanChapterContent(text?: string): string {
     .trim();
 }
 
-function buildPlainTextBook(title: string, draft: DetectiveStoryDraft): string {
+function buildTrickEpilogue(outline: DetectiveOutline): string | null {
+  const summary = (outline?.centralTrick?.summary || '').trim();
+  const mechanism = (outline?.centralTrick?.mechanism || '').trim();
+  const fairness = Array.isArray(outline?.centralTrick?.fairnessNotes)
+    ? (outline.centralTrick.fairnessNotes as unknown[]).map((note) => String(note || '').trim()).filter(Boolean)
+    : [];
+  const segments: string[] = [];
+  if (summary) segments.push(summary);
+  if (mechanism) segments.push(mechanism);
+  if (fairness.length) segments.push(`公平线索：${fairness.join('；')}`);
+  if (segments.length === 0) return null;
+  return segments.join(' ').trim();
+}
+
+function buildPlainTextBook(title: string, draft: DetectiveStoryDraft, outline: DetectiveOutline): string {
   const header = `# ${title || '侦探故事'}`;
   const chapters = (draft?.chapters || []).map((ch, idx) => {
     const chapterTitle = ch?.title ? String(ch.title) : `Chapter ${idx + 1}`;
@@ -63,6 +90,13 @@ function buildPlainTextBook(title: string, draft: DetectiveStoryDraft): string {
     lines.push(pair[1]);
     lines.push('');
   });
+  const epilogue = buildTrickEpilogue(outline);
+  if (epilogue) {
+    lines.push('## 侦探独白');
+    lines.push('');
+    lines.push(epilogue);
+    lines.push('');
+  }
   return lines.join('\n');
 }
 
@@ -108,9 +142,9 @@ export async function compileToOutputs(params: {
   const outputDir = path.join(base, folder);
   ensureDir(outputDir);
 
-  const html = buildHtmlBook(params.title, params.draft);
+  const html = buildHtmlBook(params.title, params.draft, params.outline);
   const interactive = JSON.stringify({ interactive_pack: buildInteractivePack(params.outline, params.draft) }, null, 2);
-  const plainText = buildPlainTextBook(params.title, params.draft);
+  const plainText = buildPlainTextBook(params.title, params.draft, params.outline);
 
   const htmlPath = path.join(outputDir, 'book.html');
   const interactivePath = path.join(outputDir, 'interactive.json');

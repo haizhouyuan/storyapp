@@ -26,6 +26,7 @@ export interface TtsSynthesisResult {
   checksum?: string;
   warnings?: string[];
   cached?: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TtsProviderMetadata {

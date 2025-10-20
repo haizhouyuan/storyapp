@@ -73,6 +73,11 @@ export class MockTtsProvider implements TtsProvider {
       format: params.format || 'mp3',
       durationMs: DEFAULT_DURATION_MS,
       warnings: params.text.length > 2000 ? ['文本较长，Mock 音频长度未完全匹配实际语速'] : undefined,
+      metadata: {
+        mode: 'mock',
+        textLength: params.text.length,
+        voiceId: params.voiceId ?? this.capabilities.defaultVoice,
+      },
     };
   }
 }

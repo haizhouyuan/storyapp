@@ -14,6 +14,7 @@ import type {
   WorkflowRevision,
 } from '@storyapp/shared';
 import Button from '../components/Button';
+import { resolveWorkflowId } from '../hooks/useDetectiveWorkflow';
 
 interface WorkflowListProps {
   workflows: WorkflowListItem[];
@@ -181,11 +182,14 @@ const MysteryWorkflowPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const result = await createWorkflow(topic.trim());
-      toast.success('已生成侦探故事工作流');
+      toast.success('已创建工作流任务，正在生成');
       setTopic('');
-      const workflow = await getWorkflow(result.workflowId);
-      setSelectedId(workflow._id);
-      setSelectedWorkflow(workflow);
+      const newWorkflowId = resolveWorkflowId(result as any);
+      if (newWorkflowId) {
+        const workflow = await getWorkflow(newWorkflowId);
+        setSelectedId(workflow._id);
+        setSelectedWorkflow(workflow);
+      }
       await refreshList();
     } catch (error: any) {
       toast.error(error?.message || '生成工作流失败');

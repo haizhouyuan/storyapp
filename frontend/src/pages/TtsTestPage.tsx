@@ -3,10 +3,18 @@
  * 用于测试故事朗读功能
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StoryAudioPlayer } from '../components/StoryAudioPlayer';
 import { useStoryTts } from '../hooks/useStoryTts';
 import type { AudioSegment } from '../hooks/useStoryTts';
+import {
+  fetchIflytekHealth,
+  fetchTtsTasks,
+  type TtsHealthResponse,
+  type TtsTaskRecord,
+  type TtsTaskStatus,
+  type TtsTaskSummary,
+} from '../utils/api';
 
 const SAMPLE_STORY = `## 第一章 神秘的邀请函
 
@@ -32,8 +40,47 @@ const SAMPLE_STORY = `## 第一章 神秘的邀请函
 
 主人对小明竖起了大拇指："你真是一位出色的侦探！"`;
 
+const statusStyleMap: Record<TtsTaskStatus, string> = {
+  success: 'bg-green-100 text-green-700',
+  pending: 'bg-amber-100 text-amber-700',
+  error: 'bg-red-100 text-red-700',
+};
+
+const TaskCard: React.FC<{ task: TtsTaskRecord }> = ({ task }) => {
+  const statusStyle = statusStyleMap[task.status] ?? 'bg-gray-100 text-gray-600';
+  const durationLabel =
+    typeof task.durationMs === 'number' ? `${Math.round(task.durationMs)} ms` : '—';
+  const updatedAt = new Date(task.updatedAt).toLocaleString();
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-600">
+      <>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-semibold text-gray-700">
+            {task.requestId || task.id}
+          </span>
+          <span className={`px-2 py-0.5 rounded-full font-semibold capitalize ${statusStyle}`}>
+            {task.status}
+          </span>
+        </div>
+        <p>{`耗时：${durationLabel} · 缓存：${task.cached ? '是' : '否'}`}</p>
+        {task.providerMetadata?.taskId && (
+          <p>{`taskId：${String(task.providerMetadata.taskId)}`}</p>
+        )}
+        {task.providerMetadata?.sid && (
+          <p>{`sid：${String(task.providerMetadata.sid)}`}</p>
+        )}
+        <p>{`更新时间：${updatedAt}`}</p>
+        {task.error && (
+          <p className="text-red-600">{`错误：${task.error}`}</p>
+        )}
+      </>
+    </div>
+  );
+};
+
 export const TtsTestPage: React.FC = () => {
-  const { synthesizeStory, status, error } = useStoryTts();
+  const { synthesizeStory, error } = useStoryTts();
   const [audioData, setAudioData] = useState<{
     storyId: string;
     totalDuration: number;
@@ -42,6 +89,34 @@ export const TtsTestPage: React.FC = () => {
 
   const [customText, setCustomText] = useState(SAMPLE_STORY);
   const [isLoading, setIsLoading] = useState(false);
+  const [healthInfo, setHealthInfo] = useState<TtsHealthResponse | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<TtsTaskRecord[]>([]);
+  const [taskSummary, setTaskSummary] = useState<TtsTaskSummary | null>(null);
+  const [isDiagnosticsLoading, setIsDiagnosticsLoading] = useState(false);
+
+  const refreshDiagnostics = useCallback(async () => {
+    setIsDiagnosticsLoading(true);
+    try {
+      const [health, taskResult] = await Promise.all([
+        fetchIflytekHealth(),
+        fetchTtsTasks({ provider: 'iflytek', limit: 5 }),
+      ]);
+      setHealthInfo(health);
+      setHealthError(null);
+      setTasks(taskResult.tasks);
+      setTaskSummary(taskResult.summary ?? null);
+    } catch (err: any) {
+      const message = err?.message || '获取 TTS 状态失败';
+      setHealthError(message);
+    } finally {
+      setIsDiagnosticsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshDiagnostics();
+  }, [refreshDiagnostics]);
 
   const handleSynthesize = async () => {
     try {
@@ -49,7 +124,7 @@ export const TtsTestPage: React.FC = () => {
       const result = await synthesizeStory({
         storyId: 'test-story-' + Date.now(),
         fullText: customText,
-        voiceId: 'xiaoyan',
+        voiceId: healthInfo?.capabilities?.defaultVoice || 'iflytek_doudou',
         speed: 1.0,
       });
 
@@ -58,6 +133,7 @@ export const TtsTestPage: React.FC = () => {
         totalDuration: result.totalDuration,
         segments: result.segments,
       });
+      refreshDiagnostics();
     } catch (err) {
       console.error('合成失败:', err);
     } finally {
@@ -71,6 +147,118 @@ export const TtsTestPage: React.FC = () => {
         <h1 className="text-3xl font-bold text-gray-800 mb-8 text-center">
           🎙️ TTS 长文本朗读测试
         </h1>
+
+        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+              🛡️ 朗读引擎状态
+            </h2>
+            <button
+              onClick={refreshDiagnostics}
+              disabled={isDiagnosticsLoading}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                isDiagnosticsLoading
+                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'
+              }`}
+            >
+              {isDiagnosticsLoading ? '刷新中…' : '刷新状态'}
+            </button>
+          </div>
+
+          {healthError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-600 text-sm">
+              ❌ {healthError}
+            </div>
+          )}
+
+          {healthInfo && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${
+                    healthInfo.status === 'ok'
+                      ? 'bg-green-100 text-green-700'
+                      : healthInfo.status === 'degraded'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-700'
+                  }`}
+                >
+                  {`状态：${healthInfo.status === 'ok' ? '正常' : healthInfo.status === 'degraded' ? '降级' : '凭证缺失'}`}
+                </span>
+                <span className="text-sm text-gray-600">
+                  当前 provider：<strong>{healthInfo.provider}</strong>
+                </span>
+                {healthInfo.capabilities?.defaultVoice && (
+                  <span className="text-sm text-gray-600">
+                    默认音色：{healthInfo.capabilities.defaultVoice}
+                  </span>
+                )}
+                <span className="text-xs text-gray-400">
+                  更新时间：{new Date(healthInfo.timestamp).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
+                  <p className="text-sm font-semibold text-gray-700 mb-2">凭证配置</p>
+                  <ul className="space-y-1 text-xs text-gray-600">
+                    <li>{`APP_ID：${healthInfo.credentials.appId ? '✅' : '⚠️ 未配置'}`}</li>
+                    <li>{`API_KEY：${healthInfo.credentials.apiKey ? '✅' : '⚠️ 未配置'}`}</li>
+                    <li>{`API_SECRET：${healthInfo.credentials.apiSecret ? '✅' : '⚠️ 未配置'}`}</li>
+                  </ul>
+                </div>
+                <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
+                  <p className="text-sm font-semibold text-gray-700 mb-2">任务统计（近 1 小时）</p>
+                  <div className="flex gap-4 text-xs text-gray-600">
+                    <div>
+                      <p className="font-semibold text-gray-700 text-sm">{taskSummary?.total ?? 0}</p>
+                      <p>总任务</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-green-600 text-sm">{taskSummary?.success ?? 0}</p>
+                      <p>成功</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-amber-600 text-sm">{taskSummary?.pending ?? 0}</p>
+                      <p>进行中</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-red-600 text-sm">{taskSummary?.error ?? 0}</p>
+                      <p>失败</p>
+                    </div>
+                  </div>
+                  {taskSummary?.lastError && (
+                    <p className="mt-3 text-xs text-red-600">
+                      最近失败（{new Date(taskSummary.lastError.updatedAt).toLocaleTimeString()}）：{taskSummary.lastError.error || '未知错误'}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {healthInfo.warnings && healthInfo.warnings.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+                  {healthInfo.warnings.map((warning) => (
+                    <p key={warning}>{`⚠️ ${warning}`}</p>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-2">最新任务</p>
+                {tasks.length === 0 ? (
+                  <p className="text-xs text-gray-500">暂无任务数据，可尝试生成一次朗读。</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {tasks.map((task) => (
+                      <TaskCard key={task.id} task={task} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* 文本输入区 */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">

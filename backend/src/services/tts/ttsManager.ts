@@ -11,6 +11,7 @@ import type {
   TtsSynthesisResult
 } from './types';
 import { logError, logInfo, LogLevel, EventType } from '../../utils/logger';
+import { startTask, completeTask, failTask } from './taskRegistry';
 
 export class TtsManager {
   private readonly provider: TtsProvider;
@@ -77,6 +78,25 @@ export class TtsManager {
 
     const cacheKey = getCacheKey(safeParams);
     const sessionId = context?.sessionId;
+    const rawMetadata = params.metadata as Record<string, unknown> | undefined;
+    const storyIdValue = rawMetadata?.['storyId'];
+    const storyId = typeof storyIdValue === 'string' ? storyIdValue : undefined;
+    const segmentIndexValue = rawMetadata?.['segmentIndex'];
+    const segmentIndex = typeof segmentIndexValue === 'number'
+      ? Number(segmentIndexValue)
+      : undefined;
+
+    const taskRecord = startTask({
+      cacheKey,
+      provider: this.provider.id,
+      sessionId,
+      storyId,
+      voiceId: safeParams.voiceId,
+      segmentIndex,
+      textLength: safeParams.text.length,
+      metadata: rawMetadata,
+    });
+    const taskId = taskRecord.id;
 
     logInfo(EventType.TTS_REQUEST_RECEIVED, '收到 TTS 合成请求', {
       provider: this.provider.id,
@@ -95,6 +115,13 @@ export class TtsManager {
         requestId: cachedEntry.result.requestId,
       }, undefined, sessionId);
       recordCacheMetrics(this.metrics, this.provider.id, true);
+      completeTask(taskId, {
+        requestId: cachedEntry.result.requestId,
+        cached: true,
+        audioUrl: cachedEntry.result.audioUrl,
+        durationMs: cachedEntry.result.durationMs,
+        providerMetadata: cachedEntry.result.metadata,
+      });
       return {
         ...cachedEntry.result,
         cached: true,
@@ -136,6 +163,14 @@ export class TtsManager {
 
       await this.cacheDriver.set({ key: cacheKey, result: persistedResult }, this.cacheTtlMs);
 
+      completeTask(taskId, {
+        requestId: persistedResult.requestId,
+        cached: false,
+        audioUrl: persistedResult.audioUrl,
+        durationMs: persistedResult.durationMs ?? duration,
+        providerMetadata: persistedResult.metadata,
+      });
+
       return {
         ...persistedResult,
         cached: false,
@@ -147,6 +182,9 @@ export class TtsManager {
         provider: this.provider.id,
         cacheKey,
       }, sessionId);
+      failTask(taskId, error, error?.details ?? {
+        provider: this.provider.id,
+      });
       throw error;
     }
   }

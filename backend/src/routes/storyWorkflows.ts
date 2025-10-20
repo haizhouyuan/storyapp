@@ -8,15 +8,23 @@ import {
   retryWorkflow,
   terminateWorkflow,
   rollbackWorkflow,
+  compileWorkflow,
 } from '../services/detectiveWorkflowService';
 import type {
   CreateWorkflowRequest,
   RollbackWorkflowRequest,
   TerminateWorkflowRequest,
 } from '@storyapp/shared';
+import {
+  registerWorkflowStream,
+  getWorkflowEventHistory,
+  publishWorkflowEvent,
+} from '../services/workflowEventBus';
 
 const router = Router();
 const workflowLogger = createLogger('routes:storyWorkflows');
+const enableTestEndpoints =
+  process.env.ENABLE_WORKFLOW_TEST_ENDPOINTS === '1' || process.env.NODE_ENV !== 'production';
 
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -101,6 +109,20 @@ router.post('/:id/retry', async (req: Request, res: Response) => {
   }
 });
 
+
+router.post('/:id/compile', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  workflowLogger.info({ id }, '导出侦探故事工作流');
+  try {
+    const outputs = await compileWorkflow(id);
+    res.json({ success: true, data: outputs });
+  } catch (error: any) {
+    const status = error?.message === 'Workflow not found' ? 404 : 400;
+    workflowLogger.error({ err: error, id }, '导出工作流失败');
+    res.status(status).json({ success: false, error: status === 404 ? 'WORKFLOW_NOT_FOUND' : 'COMPILE_FAILED', message: error?.message });
+  }
+});
+
 router.post('/:id/terminate', async (req: Request, res: Response) => {
   const { id } = req.params;
   const body = req.body as TerminateWorkflowRequest;
@@ -135,5 +157,58 @@ router.post('/:id/rollback', async (req: Request, res: Response) => {
     res.status(status).json({ success: false, error: code, message: error?.message });
   }
 });
+
+router.get('/:id/events', (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const events = getWorkflowEventHistory(id);
+    res.json({ success: true, data: events });
+  } catch (error: any) {
+    workflowLogger.error({ err: error, id }, '获取工作流事件失败');
+    res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: error?.message ?? 'unexpected_error' });
+  }
+});
+
+router.get('/:id/stream', (req: Request, res: Response) => {
+  const { id } = req.params;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const unregister = registerWorkflowStream(id, res);
+
+  req.on('close', () => {
+    unregister();
+  });
+});
+
+if (enableTestEndpoints) {
+  router.post('/:id/test-events', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { category = 'info', stageId, status, message, meta } = req.body ?? {};
+
+    if (typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_MESSAGE',
+        message: '测试事件需要有效的 message 字段',
+      });
+    }
+
+    publishWorkflowEvent({
+      workflowId: id,
+      category,
+      stageId,
+      status,
+      message,
+      meta: typeof meta === 'object' ? meta : undefined,
+    });
+
+    const events = getWorkflowEventHistory(id);
+    const event = events[events.length - 1];
+    res.json({ success: true, data: event });
+  });
+}
 
 export default router;

@@ -71,6 +71,14 @@ const DEFAULT_FORMAT: TtsAudioFormat = 'mp3';
 
 const SUPPORTED_VOICES: IflytekVoiceConfig[] = [
   {
+    id: 'iflytek_yeting',
+    name: '讯飞-希涵',
+    language: 'zh-CN',
+    gender: 'female',
+    description: '柔和女性旁白，适合睡前故事',
+    vcn: 'x4_yeting',
+  },
+  {
     id: 'iflytek_qianxue',
     name: '讯飞-千雪',
     language: 'zh-CN',
@@ -188,10 +196,31 @@ export class IflytekTtsProvider implements TtsProvider {
       );
     }
 
-    const pollResponse = await this.pollTask(createResponse.header.task_id, requestLabel, sessionId);
+    const taskId = createResponse.header.task_id;
+    const sid = createResponse.header.sid;
+
+    logInfo(EventType.AI_API_RESPONSE, '讯飞语音任务创建成功', {
+      provider: this.id,
+      requestId: requestLabel,
+      taskId,
+      sid,
+    }, undefined, sessionId);
+
+    const pollResponse = await this.pollTask(taskId, requestLabel, sessionId);
     const audioUrl = this.extractAudioUrl(pollResponse);
     const resolvedFormat = this.resolveFormat(format, pollResponse.payload?.audio?.encoding);
     const warnings = this.collectWarnings(pollResponse);
+    const finalSid = pollResponse.header?.sid || sid;
+    const taskStatus = pollResponse.header?.task_status;
+
+    logInfo(EventType.AI_API_RESPONSE, '讯飞语音任务完成', {
+      provider: this.id,
+      requestId: requestLabel,
+      taskId,
+      sid: finalSid,
+      taskStatus,
+    }, undefined, sessionId);
+
     return {
       provider: this.id,
       requestId: requestLabel,
@@ -199,6 +228,12 @@ export class IflytekTtsProvider implements TtsProvider {
       expiresAt: Date.now() + REMOTE_AUDIO_TTL_MS,
       format: resolvedFormat,
       warnings: warnings.length > 0 ? warnings : undefined,
+      metadata: {
+        provider: this.id,
+        taskId,
+        sid: finalSid,
+        taskStatus,
+      },
     };
   }
 

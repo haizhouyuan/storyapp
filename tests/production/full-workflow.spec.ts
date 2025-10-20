@@ -89,6 +89,13 @@ test.describe('Detective workflow end-to-end', () => {
 
       const workflow = await waitForWorkflow(request, workflowId);
 
+      const validation = workflow.history?.at(-1)?.validation ?? workflow.validation;
+      expect(validation).toBeTruthy();
+      const ruleStatuses = new Map((validation?.results || []).map((item: any) => [item.ruleId, item.status]));
+      expect(ruleStatuses.get('motive-foreshadowing')).toBe('pass');
+      expect(ruleStatuses.get('chapter-time-tags')).toBe('pass');
+      expect(validation?.summary?.fail ?? 0).toBe(0);
+
       const storyDoc = formatStoryDocument(workflow);
       const summary = workflow.history?.at(-1)?.validation?.summary ?? workflow.validation?.summary;
       if (summary) {

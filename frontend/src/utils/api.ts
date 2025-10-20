@@ -196,3 +196,123 @@ export async function fetchTtsVoices(): Promise<TtsVoicesResponse> {
     throw error;
   }
 }
+
+export type TtsTaskStatus = 'pending' | 'success' | 'error';
+
+export interface TtsTaskRecord {
+  id: string;
+  cacheKey: string;
+  provider: string;
+  status: TtsTaskStatus;
+  sessionId?: string;
+  storyId?: string;
+  voiceId?: string;
+  segmentIndex?: number;
+  textLength?: number;
+  metadata?: Record<string, unknown>;
+  requestId?: string;
+  providerMetadata?: Record<string, unknown>;
+  audioUrl?: string;
+  durationMs?: number;
+  cached?: boolean;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TtsTaskSummary {
+  total: number;
+  success: number;
+  error: number;
+  pending: number;
+  lastError?: {
+    id: string;
+    requestId?: string;
+    error?: string;
+    updatedAt: number;
+  };
+}
+
+export interface TtsHealthResponse {
+  success: boolean;
+  status: 'ok' | 'degraded' | 'missing_credentials';
+  provider: string;
+  credentials: {
+    configured: boolean;
+    appId: boolean;
+    apiKey: boolean;
+    apiSecret: boolean;
+  };
+  capabilities?: {
+    voices: Array<{
+      id: string;
+      name: string;
+      language: string;
+      gender?: string;
+      description?: string;
+    }>;
+    speedRange: [number, number];
+    pitchRange: [number, number];
+    formats: string[];
+    defaultVoice: string;
+  };
+  metadata?: Record<string, unknown>;
+  summary?: TtsTaskSummary;
+  recentTasks?: TtsTaskRecord[];
+  warnings?: string[];
+  timestamp: string;
+}
+
+export interface TtsTasksResponse {
+  tasks: TtsTaskRecord[];
+  summary?: TtsTaskSummary;
+}
+
+export async function fetchIflytekHealth(): Promise<TtsHealthResponse> {
+  try {
+    const response = await apiClient.get('/health/tts/iflytek');
+    return response.data;
+  } catch (error) {
+    console.error('获取讯飞健康状态失败:', error);
+    throw error;
+  }
+}
+
+export async function fetchTtsTasks(params: {
+  provider?: string;
+  status?: TtsTaskStatus;
+  limit?: number;
+} = {}): Promise<TtsTasksResponse> {
+  try {
+    const response = await apiClient.get('/tts/tasks', {
+      params,
+    });
+    return response.data?.data ?? { tasks: [], summary: undefined };
+  } catch (error) {
+    console.error('获取 TTS 任务列表失败:', error);
+    throw error;
+  }
+}
+
+export async function fetchLatestTtsTask(
+  storyId: string,
+  options: { provider?: string } = {},
+): Promise<TtsTaskRecord | null> {
+  if (!storyId) {
+    return null;
+  }
+
+  try {
+    const response = await apiClient.get(`/tts/tasks/${encodeURIComponent(storyId)}/latest`, {
+      params: options.provider ? { provider: options.provider } : undefined,
+    });
+    return response.data?.data ?? null;
+  } catch (error: any) {
+    const status = error?.status || error?.response?.status;
+    if (status === 404) {
+      return null;
+    }
+    console.error('获取 TTS 最新任务失败:', error);
+    throw error;
+  }
+}

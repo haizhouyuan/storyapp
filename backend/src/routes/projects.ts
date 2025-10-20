@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database';
 import { createLogger } from '../config/logger';
 import { COLLECTIONS } from '../config/mongodb';
-import type { StoryProjectType as StoryProject } from '@storyapp/shared';
+import { DETECTIVE_MECHANISM_PRESETS, type StoryProjectType as StoryProject } from '@storyapp/shared';
 import { projectDocToRecord, StoryProjectDocument, StoryBlueprintDocument } from '../models/StoryProject';
 import { validateSceneChapter } from '../utils/schemaValidator';
 import { planBlueprint } from '../engines/planner_llm';
@@ -75,7 +75,14 @@ router.post('/:projectId/plan', async (req, res) => {
 
     const effectiveTopic = typeof topic === 'string' && topic.trim().length > 0 ? topic.trim() : (proj.title || '侦探故事');
     const mechanismKeywords = normalizeMechanismKeywords(options);
-    const plannerVars = { ...(options || {}), deviceKeywords: mechanismKeywords };
+    const mechanismPreset = typeof options?.mechanismId === 'string'
+      ? DETECTIVE_MECHANISM_PRESETS.find((preset) => preset.id === options.mechanismId)
+      : undefined;
+    const deviceRealismHint =
+      typeof options?.deviceRealismHint === 'string' && options.deviceRealismHint.trim()
+        ? options.deviceRealismHint
+        : mechanismPreset?.realismHint;
+    const plannerVars = { ...(options || {}), deviceKeywords: mechanismKeywords, deviceRealismHint };
 
     let outline: any;
     const fast = process.env.DETECTIVE_PLAN_FAST === '1' || process.env.DETECTIVE_USE_MOCK === '1' || (options && options.fastMock === true);

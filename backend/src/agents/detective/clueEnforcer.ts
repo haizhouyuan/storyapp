@@ -181,6 +181,26 @@ export function enforceCluePolicy(
       ensureFinalRecovery(finalCh, c.name);
       changes.push({ type: 'final_recovery', clue: c.name, chapterIndex: lastIdx });
     }
+    const optionalClues = (outline?.clueMatrix || []).filter((c) => c?.clue && !c.mustForeshadow);
+    if (optionalClues.length > 0) {
+      optionalClues.forEach((c) => {
+        const clueName = c.clue!;
+        const key = normalizeClue(clueName);
+        const finalNorm = normalizeClue(finalCh.content || '');
+        if (finalNorm.includes(key)) {
+          return;
+        }
+        const meaning = (c.realMeaning && c.realMeaning.trim()) || '只是凶手布置的误导';
+        const optionalLine = `
+侦探补充道：“${clueName} ${meaning}。”`;
+        finalCh.content = `${(finalCh.content || '').trimEnd()}${optionalLine}`.trim();
+        const embedSet = new Set([...(finalCh.cluesEmbedded || [])].map(normalizeClue));
+        if (!embedSet.has(key)) {
+          finalCh.cluesEmbedded = [...(finalCh.cluesEmbedded || []), clueName];
+        }
+        changes.push({ type: 'optional_clue_note', clue: clueName, chapterIndex: lastIdx });
+      });
+    }
     const summaryMarker = '侦探总结本案：';
     if (must.length > 0 && !((finalCh.content || '').includes(summaryMarker))) {
       const summaryLines = must.map((c) => {

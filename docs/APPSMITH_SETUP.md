@@ -188,6 +188,12 @@
       "computedValue": "{{moment(currentRow.timestamp).format('MM-DD HH:mm:ss')}}"
     },
     {
+      "id": "workflowId",
+      "label": "Workflow",
+      "columnType": "text",
+      "computedValue": "{{currentRow.workflowId || currentRow.data?.workflowId || '-'}}"
+    },
+    {
       "id": "logLevel",
       "label": "级别",
       "columnType": "text",
@@ -223,6 +229,8 @@
   "enableFilter": false
 }
 ```
+
+> **提示**：结合 `workflowId` 字段与新增的 `/api/story-workflows/:id/events`、`/api/tts/tasks/:storyId/latest` 接口，可以在 Appsmith 中打造“创作流程监控”面板，实时还原抽屉中的阶段与朗读事件。开发环境可使用 `/api/story-workflows/:id/test-events` 便捷注入测试数据。
 
 ### 3. 会话详情页面 (SessionDetail)
 

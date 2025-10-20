@@ -1,0 +1,122 @@
+{
+  "interactive_pack": {
+    "cast_cards": [
+      {
+        "id": "1",
+        "name": "林老师",
+        "role": "victim",
+        "bio": "无"
+      },
+      {
+        "id": "2",
+        "name": "张探",
+        "role": "detective",
+        "bio": "破案"
+      },
+      {
+        "id": "3",
+        "name": "王明",
+        "role": "suspect",
+        "bio": "怨恨林老师的严格教学"
+      },
+      {
+        "id": "4",
+        "name": "李华",
+        "role": "suspect",
+        "bio": "嫉妒林老师的音乐才华"
+      },
+      {
+        "id": "5",
+        "name": "赵丽",
+        "role": "witness",
+        "bio": "无"
+      },
+      {
+        "id": "6",
+        "name": "刘强",
+        "role": "suspect",
+        "bio": "维修工，可能被利用"
+      }
+    ],
+    "clue_matrix": [
+      {
+        "clue_id": "蒸汽痕迹",
+        "scenes": [
+          "Chapter 1",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      },
+      {
+        "clue_id": "阀门手册",
+        "scenes": [
+          "Chapter 1",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      },
+      {
+        "clue_id": "管道布局",
+        "scenes": [
+          "Chapter 1",
+          "Chapter 2",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      },
+      {
+        "clue_id": "压力定时设置",
+        "scenes": [
+          "Chapter 1",
+          "Chapter 2",
+          "Chapter 3"
+        ],
+        "status": "shown"
+      }
+    ],
+    "timeline_view": [
+      {
+        "t": "Day1 10:00",
+        "event": "张探检查锅炉房发现线索"
+      },
+      {
+        "t": "Day1 14:00",
+        "event": "张探询问刘强关于管道安装"
+      },
+      {
+        "t": "Day1 18:00",
+        "event": "王明在锅炉房设置蒸汽机关"
+      },
+      {
+        "t": "Day1 19:00",
+        "event": "林老师开始练琴"
+      },
+      {
+        "t": "Day1 20:00",
+        "event": "机关触发，林老师死亡"
+      },
+      {
+        "t": "Day1 20:30",
+        "event": "赵丽发现尸体并报警"
+      },
+      {
+        "t": "Day1 21:00",
+        "event": "张探到达现场开始调查"
+      }
+    ],
+    "quiz": [
+      {
+        "id": "Q1",
+        "question": "第八声的最合理来源？",
+        "options": [
+          "超自然",
+          "共振",
+          "风",
+          "机关"
+        ],
+        "answer": "共振",
+        "explain_scene": "Chapter 3"
+      }
+    ]
+  }
+}

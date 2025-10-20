@@ -1,6 +1,7 @@
 import React from 'react';
 import { DETECTIVE_MECHANISM_PRESETS } from '@storyapp/shared';
 import { createProject, planProject, getBlueprint, writeScene, editScene, autoFix, compileProject } from '../utils/detectiveApi';
+import { draftToPlainText } from '../utils/storyFormatting';
 
 type Profile = 'strict' | 'balanced' | 'creative';
 
@@ -57,7 +58,6 @@ export default function DetectiveBuilderPage() {
   const [blueprintId, setBlueprintId] = React.useState<string | null>(null);
   const [outline, setOutline] = React.useState<any>(null);
   const [sceneId, setSceneId] = React.useState('S3');
-  const [schemaMeta, setSchemaMeta] = React.useState<any>(null);
   const [chapter, setChapter] = React.useState<any>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -86,27 +86,7 @@ export default function DetectiveBuilderPage() {
       : DETECTIVE_MECHANISM_PRESETS.find((item) => item.id === mechanismId) || null
   ), [mechanismId]);
 
-  const cleanText = React.useCallback((text?: string) => {
-    return String(text || '')
-      .replace(/【\[CLUE:[^\]]+\]】.*$/gm, '')
-      .replace(/【\[CLUE:[^\]]+\]】/g, '')
-      .replace(/\[CLUE:[^\]]+\]/g, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }, []);
-
-  const draftPlainText = React.useMemo(() => {
-    if (!draft || !Array.isArray(draft.chapters)) return '';
-    const lines: string[] = [];
-    draft.chapters.forEach((ch: any, idx: number) => {
-      const title = ch?.title ? String(ch.title) : `Chapter ${idx + 1}`;
-      const body = cleanText(ch?.content);
-      lines.push(`第${idx + 1}章 ${title}`);
-      lines.push(body || '（本章暂无正文）');
-      lines.push('');
-    });
-    return lines.join('\n');
-  }, [draft, cleanText]);
+  const draftPlainText = React.useMemo(() => draftToPlainText(draft), [draft]);
 
   const storyPreview = compiledOutput?.plainText || draftPlainText;
 
@@ -128,6 +108,7 @@ export default function DetectiveBuilderPage() {
     misdirectionCap: 0.3,
     writer: { dialoguesMin: 6, sensoryHooks: 2, themeAnchors: ['海雾','潮声','古塔','星光','秘密'] },
     deviceKeywords: INITIAL_MECHANISM ? INITIAL_MECHANISM.keywords : [],
+    deviceRealismHint: INITIAL_MECHANISM?.realismHint ?? '请描述该机关的现实原理（动力来源、材料或可以参考的装置）。',
     mechanismId: INITIAL_MECHANISM?.id,
     mechanismLabel: INITIAL_MECHANISM?.label,
     useReasoner: true,
@@ -139,6 +120,9 @@ export default function DetectiveBuilderPage() {
     const keywords = mechanismId === CUSTOM_MECHANISM_ID
       ? customMechanismInput.split(/[,，、\s]+/).map((k) => k.trim()).filter(Boolean)
       : (preset?.keywords ?? []);
+    const realismHint = mechanismId === CUSTOM_MECHANISM_ID
+      ? '请描述该机关的现实原理（动力来源、材料或可以参考的装置）。'
+      : (preset?.realismHint ?? '');
     optionsRef.current = {
       readingLevel,
       targets: { avgSentenceLen, wordsPerScene },
@@ -146,6 +130,7 @@ export default function DetectiveBuilderPage() {
       misdirectionCap,
       writer: { dialoguesMin, sensoryHooks, themeAnchors: anchors },
       deviceKeywords: keywords,
+      deviceRealismHint: realismHint,
       mechanismId,
       mechanismLabel: preset?.label ?? '自定义关键词',
       useReasoner,
@@ -185,7 +170,6 @@ export default function DetectiveBuilderPage() {
       const planned = await planProject(pid, { topic, profile, seed, options: optionsRef.current });
       setBlueprintId(planned?.blueprintId || null);
       setOutline(planned?.outline || null);
-      setSchemaMeta(planned?.schemaMeta || null);
     } catch (e: any) {
       setError(e?.message || '生成蓝图失败');
     } finally {
@@ -455,7 +439,15 @@ export default function DetectiveBuilderPage() {
                   {storyPreview ? storyPreview : '（暂无整稿，请先写作或导出）'}
                 </div>
               ) : (
-                <pre className="text-xs whitespace-pre-wrap overflow-auto max-h-96">{draft ? JSON.stringify(draft, null, 2) : '（未生成自动修订结果）'}</pre>
+                <>
+                  <div className="text-xs text-slate-500 mb-2">
+                    <div>机关预设：{optionsRef.current.mechanismLabel || '未指定'}</div>
+                    {optionsRef.current.deviceRealismHint && (
+                      <div>现实说明：{optionsRef.current.deviceRealismHint}</div>
+                    )}
+                  </div>
+                  <pre className="text-xs whitespace-pre-wrap overflow-auto max-h-96">{draft ? JSON.stringify(draft, null, 2) : '（未生成自动修订结果）'}</pre>
+                </>
               )}
               <div className="mt-2">
                 <QuickValidate projectId={projectId} draft={draft} />

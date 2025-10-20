@@ -199,3 +199,16 @@ export interface RollbackWorkflowRequest {
 export interface TerminateWorkflowRequest {
   reason?: string;
 }
+
+export type WorkflowEventCategory = 'stage' | 'info' | 'tts';
+
+export interface WorkflowEvent {
+  eventId: string;
+  workflowId: string;
+  category: WorkflowEventCategory;
+  stageId?: string;
+  status?: WorkflowStageStatus | 'success' | 'error';
+  message: string;
+  timestamp: string;
+  meta?: Record<string, unknown>;
+}

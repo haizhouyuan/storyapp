@@ -116,6 +116,12 @@ export const ttsErrorCounter = new client.Counter({
   labelNames: ['provider', 'reason'],
 });
 
+export const ttsProviderUp = new client.Gauge({
+  name: 'storyapp_tts_provider_up',
+  help: 'Indicates whether a TTS provider is available (1) or degraded (0)',
+  labelNames: ['provider'],
+});
+
 // Register all custom metrics
 register.registerMetric(httpRequestDuration);
 register.registerMetric(httpRequestTotal);
@@ -132,6 +138,7 @@ register.registerMetric(errorCounter);
 register.registerMetric(ttsRequestCounter);
 register.registerMetric(ttsLatencyHistogram);
 register.registerMetric(ttsErrorCounter);
+register.registerMetric(ttsProviderUp);
 
 // Helper function to update memory usage metrics
 export const updateMemoryMetrics = () => {

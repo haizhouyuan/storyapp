@@ -379,7 +379,7 @@ async function run(): Promise<void> {
   const storyDir = path.join(outDir, `${safeName}_${stamp}`);
   ensureDir(storyDir);
 
-  const finalStoryLines: string[] = [`# ${topic}`, '', `> 机关预设：${mechanism.label}`, ''];
+  const finalStoryLines: string[] = [`# ${topic}`, ''];
   editedDraft.chapters.forEach((chapter: any, idx: number) => {
     const chapterTitle = chapter?.title ? String(chapter.title) : `Chapter ${idx + 1}`;
     finalStoryLines.push(`## 第${idx + 1}章 ${chapterTitle}`);

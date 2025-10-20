@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { checkDatabaseHealth } from '../config/database';
 import { checkDeepseekHealth } from '../config/deepseek';
 import { createLogger } from '../config/logger';
+import { createTtsManager } from '../services/tts';
+import { getProviderSummary, listTasks } from '../services/tts/taskRegistry';
 
 const router = Router();
 const healthLogger = createLogger('routes:health');
@@ -83,6 +85,53 @@ router.get('/', async (req: Request, res: Response) => {
       error: process.env.NODE_ENV !== 'production' ? String(error) : undefined
     });
   }
+});
+
+router.get('/tts/iflytek', (_req: Request, res: Response) => {
+  const credentials = {
+    appId: Boolean(process.env.IFLYTEK_TTS_APP_ID),
+    apiKey: Boolean(process.env.IFLYTEK_TTS_API_KEY),
+    apiSecret: Boolean(process.env.IFLYTEK_TTS_API_SECRET),
+  };
+
+  const manager = createTtsManager();
+  const providerId = manager.getProviderId();
+  const capabilities = manager.getCapabilities();
+  const metadata = manager.getMetadata();
+  const summary = getProviderSummary('iflytek');
+  const recentTasks = listTasks({ provider: 'iflytek', limit: 5 });
+
+  const credentialsReady = credentials.appId && credentials.apiKey && credentials.apiSecret;
+  let status: 'ok' | 'degraded' | 'missing_credentials' = 'ok';
+  const warnings: string[] = [];
+
+  if (!credentialsReady) {
+    status = 'missing_credentials';
+    warnings.push('缺少讯飞 TTS 凭证，当前使用 Mock provider。');
+  } else if (providerId !== 'iflytek') {
+    status = 'degraded';
+    warnings.push(`当前启用的 TTS provider 为 ${providerId}，并非 iflytek。`);
+  }
+
+  const httpStatus = status === 'ok' ? 200 : status === 'degraded' ? 200 : 503;
+
+  res.status(httpStatus).json({
+    success: status === 'ok',
+    status,
+    provider: providerId,
+    credentials: {
+      configured: credentialsReady,
+      appId: credentials.appId,
+      apiKey: credentials.apiKey,
+      apiSecret: credentials.apiSecret,
+    },
+    capabilities,
+    metadata,
+    summary,
+    recentTasks,
+    warnings,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 export default router;
