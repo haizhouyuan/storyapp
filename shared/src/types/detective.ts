@@ -107,6 +107,63 @@ export interface WorkflowStageState {
   errorMessage?: string;
 }
 
+export type WorkflowStageCommandStatus = 'pending' | 'running' | 'success' | 'error';
+
+export interface WorkflowStageCommand {
+  id: string;
+  label: string;
+  command?: string;
+  status: WorkflowStageCommandStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  resultSummary?: string;
+  errorMessage?: string;
+  meta?: Record<string, unknown>;
+}
+
+export type WorkflowStageLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface WorkflowStageLogEntry {
+  id: string;
+  timestamp: string;
+  level: WorkflowStageLogLevel;
+  message: string;
+  commandId?: string;
+  meta?: Record<string, unknown>;
+}
+
+export type WorkflowStageArtifactType = 'text' | 'json' | 'audio' | 'file' | 'image';
+
+export interface WorkflowStageArtifact {
+  id: string;
+  label: string;
+  type: WorkflowStageArtifactType;
+  createdAt: string;
+  commandId?: string;
+  url?: string;
+  preview?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface WorkflowStageExecution {
+  workflowId: string;
+  stageId: string;
+  label: string;
+  status: WorkflowStageStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  currentCommandId?: string;
+  commands: WorkflowStageCommand[];
+  logs: WorkflowStageLogEntry[];
+  artifacts: WorkflowStageArtifact[];
+  updatedAt: string;
+}
+
+export interface WorkflowStageExecutionSummary {
+  stages: WorkflowStageExecution[];
+  generatedAt: string;
+}
+
 export type WorkflowRevisionType = 'initial' | 'retry' | 'rollback';
 
 export interface WorkflowRevisionMeta {

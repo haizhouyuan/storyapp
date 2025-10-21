@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { StoryAudioPlayer } from '../components/StoryAudioPlayer';
 import { useStoryTts } from '../hooks/useStoryTts';
-import type { AudioSegment } from '../hooks/useStoryTts';
+import type { StoryTtsSegment } from '../../../shared/types';
 import {
   fetchIflytekHealth,
   fetchTtsTasks,
@@ -84,7 +84,7 @@ export const TtsTestPage: React.FC = () => {
   const [audioData, setAudioData] = useState<{
     storyId: string;
     totalDuration: number;
-    segments: AudioSegment[];
+    segments: StoryTtsSegment[];
   } | null>(null);
 
   const [customText, setCustomText] = useState(SAMPLE_STORY);

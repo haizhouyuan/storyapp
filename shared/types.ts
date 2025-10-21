@@ -178,3 +178,37 @@ export interface TtsVoicesResponse {
   defaultVoice: string;
   metadata?: Record<string, unknown>;
 }
+
+export interface StoryTtsSegment {
+  segmentIndex: number;
+  audioUrl?: string;
+  duration: number;
+  startOffset: number;
+  endOffset: number;
+  chapterTitle?: string;
+  cached?: boolean;
+  error?: string;
+}
+
+export interface StoryTtsBatchResponse {
+  success: boolean;
+  status?: 'ready';
+  storyId: string;
+  totalSegments: number;
+  successCount: number;
+  totalDuration: number;
+  segments: StoryTtsSegment[];
+  error?: string;
+}
+
+export interface StoryTtsBatchStatusResponse {
+  success: boolean;
+  status: 'pending' | 'ready' | 'error';
+  storyId: string;
+  totalSegments: number;
+  successCount: number;
+  totalDuration: number;
+  segments: StoryTtsSegment[];
+  error?: string;
+  nextPollInMs?: number;
+}

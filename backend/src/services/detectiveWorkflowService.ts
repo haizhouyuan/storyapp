@@ -1,5 +1,5 @@
 
-import { ObjectId } from 'mongodb';
+import { ObjectId, Filter } from 'mongodb';
 import { getDatabase, COLLECTIONS } from '../config/database';
 import { createLogger } from '../config/logger';
 import type {
@@ -31,6 +31,7 @@ import {
   runStage1Planning,
   runStage2Writing,
   runStage3Review,
+  type StageTelemetry,
 } from '../agents/detective';
 import { runStage4Validation } from '../agents/detective/validators';
 import { enforceCluePolicy } from '../agents/detective/clueEnforcer';
@@ -39,6 +40,16 @@ import { compileToOutputs } from './compileExporter';
 import { DETECTIVE_MECHANISM_PRESETS } from '@storyapp/shared';
 import type { PromptBuildOptions } from '../agents/detective/promptBuilder';
 import { createStageEvent, createInfoEvent } from './workflowEventBus';
+import {
+  beginStageExecution,
+  finalizeStageExecution,
+  beginCommand as monitorBeginCommand,
+  completeCommand as monitorCompleteCommand,
+  failCommand as monitorFailCommand,
+  appendLog as monitorAppendLog,
+  registerArtifact as monitorRegisterArtifact,
+  getStageExecutionSummary,
+} from './stageActivityMonitor';
 
 const logger = createLogger('services:detectiveWorkflow');
 
@@ -132,6 +143,66 @@ const emitStageEvent = (
   createStageEvent(document._id.toHexString(), stageId, status, message, meta);
 };
 
+const createStageTelemetry = (
+  workflowId: string | undefined,
+  stageId: StageId,
+  label: string,
+): StageTelemetry | undefined => {
+  if (!workflowId) return undefined;
+  return {
+    beginCommand: (input) =>
+      monitorBeginCommand({
+        workflowId,
+        stageId,
+        label: input.label,
+        command: input.command,
+        meta: input.meta,
+      }),
+    completeCommand: (commandId, input) => {
+      if (!commandId) return;
+      monitorCompleteCommand({
+        workflowId,
+        stageId,
+        commandId,
+        resultSummary: input?.resultSummary,
+        meta: input?.meta,
+      });
+    },
+    failCommand: (commandId, input) => {
+      if (!commandId) return;
+      monitorFailCommand({
+        workflowId,
+        stageId,
+        commandId,
+        errorMessage: input.errorMessage,
+        meta: input.meta,
+      });
+    },
+    log: (level, message, options) => {
+      monitorAppendLog({
+        workflowId,
+        stageId,
+        level,
+        message,
+        commandId: options?.commandId,
+        meta: options?.meta,
+      });
+    },
+    registerArtifact: (input) => {
+      monitorRegisterArtifact({
+        workflowId,
+        stageId,
+        label: input.label,
+        type: input.type,
+        commandId: input.commandId,
+        url: input.url,
+        preview: input.preview,
+        meta: input.meta,
+      });
+    },
+  };
+};
+
 const scheduleWorkflowExecution = (
   document: DetectiveWorkflowDocument,
   options: WorkflowExecutionOptions,
@@ -207,9 +278,11 @@ async function markWorkflowFailed(workflowId: ObjectId, error: any) {
 async function runStageWithUpdate(
   document: DetectiveWorkflowDocument,
   stageId: StageId,
-  runner: () => Promise<StageRunnerOutput>,
+  runner: (telemetry?: StageTelemetry) => Promise<StageRunnerOutput>,
 ): Promise<DetectiveWorkflowDocument> {
   const startTime = new Date();
+  const workflowIdString = document._id?.toHexString();
+  const stageLabel = getStageLabel(stageId);
   let updatedDoc = updateWorkflowDocument(document, {
     stageStates: updateStageState(document.stageStates, stageId, {
       status: 'running',
@@ -226,8 +299,13 @@ async function runStageWithUpdate(
     `${getStageLabel(stageId)} 开始`,
   );
 
+  if (workflowIdString) {
+    beginStageExecution(workflowIdString, stageId, stageLabel, startTime.toISOString());
+  }
+  const telemetry = createStageTelemetry(workflowIdString, stageId, stageLabel);
+
   try {
-    const outputs = await runner();
+    const outputs = await runner(telemetry);
     const finishedAt = new Date();
     updatedDoc = updateWorkflowDocument(updatedDoc, {
       ...outputs,
@@ -246,6 +324,9 @@ async function runStageWithUpdate(
         durationMs: finishedAt.getTime() - startTime.getTime(),
       },
     );
+    if (workflowIdString) {
+      finalizeStageExecution(workflowIdString, stageId, 'completed', finishedAt.toISOString());
+    }
     return updatedDoc;
   } catch (error: any) {
     const finishedAt = new Date();
@@ -267,6 +348,15 @@ async function runStageWithUpdate(
         error: error?.message,
       },
     );
+    if (workflowIdString) {
+      finalizeStageExecution(
+        workflowIdString,
+        stageId,
+        'failed',
+        finishedAt.toISOString(),
+        error?.message,
+      );
+    }
     throw error;
   }
 }
@@ -305,20 +395,38 @@ async function executeWorkflowPipeline(
   }
 
   // Stage 1
-  workingDoc = await runStageWithUpdate(workingDoc, 'stage1_planning', async () => ({
-    outline: await runStage1Planning(workingDoc.topic, plannerPrompt),
+  workingDoc = await runStageWithUpdate(workingDoc, 'stage1_planning', async (telemetry) => ({
+    outline: await runStage1Planning(workingDoc.topic, plannerPrompt, telemetry),
   }));
 
   // Stage 2
-  workingDoc = await runStageWithUpdate(workingDoc, 'stage2_writing', async () => {
+  workingDoc = await runStageWithUpdate(workingDoc, 'stage2_writing', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
     if (!outline) {
       throw new Error('缺少 Stage1 输出，无法执行 Stage2');
     }
-    const storyDraftStage2 = await runStage2Writing(outline, plannerPrompt);
+    const storyDraftStage2 = await runStage2Writing(outline, plannerPrompt, telemetry);
+    const initialHarmonizeCommand = telemetry?.beginCommand?.({
+      label: '同步大纲与写作草稿',
+      command: 'harmonizeOutlineWithDraft',
+      meta: { phase: 'initial' },
+    });
     const harmonizedStage2 = harmonizeOutlineWithDraft(outline, storyDraftStage2, {
       ensureMechanismKeywords: true,
       mechanismKeywords: mechanismPreset.keywords,
+    });
+    if (initialHarmonizeCommand) {
+      telemetry?.completeCommand?.(initialHarmonizeCommand, {
+        resultSummary: '完成初步同步',
+      });
+    }
+    const enforceCommand = telemetry?.beginCommand?.({
+      label: '执行线索公平性校验',
+      command: 'enforceCluePolicy',
+      meta: {
+        ch1MinClues: 3,
+        minExposures: 2,
+      },
     });
     const enforced = enforceCluePolicy(harmonizedStage2.outline, storyDraftStage2, {
       ch1MinClues: 3,
@@ -328,9 +436,26 @@ async function executeWorkflowPipeline(
       maxRedHerringRatio: 0.3,
       maxRedHerringPerChapter: 2,
     });
+    if (enforceCommand) {
+      telemetry?.completeCommand?.(enforceCommand, {
+        resultSummary: '公平性校验完成，已应用修正',
+      });
+    }
     const harmonizedFinal = harmonizeOutlineWithDraft(enforced.outline || harmonizedStage2.outline, enforced.draft, {
       ensureMechanismKeywords: true,
       mechanismKeywords: mechanismPreset.keywords,
+    });
+    telemetry?.registerArtifact?.({
+      label: '阶段二增强后大纲',
+      type: 'json',
+      preview: JSON.stringify(
+        {
+          chapters: harmonizedFinal.outline?.acts?.length ?? 0,
+          clueMappings: harmonizedFinal.meta.clueMappings ?? [],
+        },
+        null,
+        2,
+      ),
     });
     logger.debug({
       stage: 'stage2_writing',
@@ -344,18 +469,18 @@ async function executeWorkflowPipeline(
   });
 
   // Stage 3
-  workingDoc = await runStageWithUpdate(workingDoc, 'stage3_review', async () => {
+  workingDoc = await runStageWithUpdate(workingDoc, 'stage3_review', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
     const storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
     if (!outline || !storyDraft) {
       throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage3');
     }
-    const review = await runStage3Review(outline, storyDraft, plannerPrompt);
+    const review = await runStage3Review(outline, storyDraft, plannerPrompt, telemetry);
     return { review };
   });
 
   // Stage 4
-  workingDoc = await runStageWithUpdate(workingDoc, 'stage4_validation', async () => {
+  workingDoc = await runStageWithUpdate(workingDoc, 'stage4_validation', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
     let storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
     let outlineForValidation = outline;
@@ -365,6 +490,11 @@ async function executeWorkflowPipeline(
     const enableAutoFix = process.env.DETECTIVE_AUTO_FIX !== '0';
     if (enableAutoFix) {
       try {
+        const autofixCommand = telemetry?.beginCommand?.({
+          label: '执行自动线索修复',
+          command: 'enforceCluePolicy',
+          meta: { mode: 'autofix' },
+        });
         const { draft: patchedDraft, outline: patchedOutline } = enforceCluePolicy(outline as any, storyDraft as any, {
           ch1MinClues: 3,
           minExposures: 2,
@@ -375,22 +505,54 @@ async function executeWorkflowPipeline(
         });
         storyDraft = patchedDraft as any;
         outlineForValidation = (patchedOutline as DetectiveOutline) || outlineForValidation;
+        if (autofixCommand) {
+          telemetry?.completeCommand?.(autofixCommand, {
+            resultSummary: '自动修复完成',
+          });
+        }
       } catch (e) {
         logger.warn({ err: e }, 'AutoFix 执行失败，继续进行校验');
+        telemetry?.log?.('warn', '自动修复失败，继续进行校验', {
+          meta: { error: (e as Error)?.message },
+        });
       }
     }
+    const harmonizeCommand = telemetry?.beginCommand?.({
+      label: '校验前同步大纲与草稿',
+      command: 'harmonizeOutlineWithDraft',
+      meta: { stage: 'validation' },
+    });
     const harmonized = harmonizeOutlineWithDraft(outlineForValidation, storyDraft, {
       ensureMechanismKeywords: true,
       mechanismKeywords: mechanismPreset.keywords,
     });
     outlineForValidation = harmonized.outline;
+    if (harmonizeCommand) {
+      telemetry?.completeCommand?.(harmonizeCommand, {
+        resultSummary: '同步完成，准备校验',
+      });
+    }
     workingDoc = updateWorkflowDocument(workingDoc, {
       outline: outlineForValidation,
       storyDraft,
     });
+    const validationCommand = telemetry?.beginCommand?.({
+      label: '执行阶段四一致性校验',
+      command: 'runStage4Validation',
+    });
     const validation = runStage4Validation(outlineForValidation, storyDraft, {
       outlineId: workingDoc._id?.toHexString(),
       storyId: workingDoc._id?.toHexString(),
+    });
+    if (validationCommand) {
+      telemetry?.completeCommand?.(validationCommand, {
+        resultSummary: '校验完成',
+      });
+    }
+    telemetry?.registerArtifact?.({
+      label: '阶段四校验结果',
+      type: 'json',
+      preview: JSON.stringify(validation, null, 2).slice(0, 2000),
     });
     return { validation, outline: outlineForValidation, storyDraft };
   });
@@ -422,6 +584,10 @@ function computeListItem(document: DetectiveWorkflowDocument): WorkflowListItem 
     latestRevisionType: latestRevision?.type,
     latestRevisionAt: latestRevision?.createdAt,
   };
+}
+
+export function getWorkflowStageActivity(workflowId: string) {
+  return getStageExecutionSummary(workflowId);
 }
 
 export async function createDetectiveWorkflow(params: { topic: string; locale?: string }): Promise<DetectiveWorkflowRecord> {
@@ -457,7 +623,7 @@ export async function createDetectiveWorkflow(params: { topic: string; locale?: 
   return { ...record, workflowId: record._id } as DetectiveWorkflowRecord;
 }
 
-export async function listWorkflows(options: { page?: number; limit?: number }): Promise<ListWorkflowsResponse> {
+export async function listWorkflows(options: { page?: number; limit?: number; status?: WorkflowStageStatus }): Promise<ListWorkflowsResponse> {
   const page = Math.max(1, options.page ?? 1);
   const limit = Math.min(50, Math.max(1, options.limit ?? 10));
   const skip = (page - 1) * limit;
@@ -465,9 +631,14 @@ export async function listWorkflows(options: { page?: number; limit?: number }):
   const db = getDatabase();
   const collection = db.collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS);
 
+  const filter: Filter<DetectiveWorkflowDocument> = {};
+  if (options.status) {
+    filter.status = options.status;
+  }
+
   const [items, total] = await Promise.all([
-    collection.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
-    collection.countDocuments({}),
+    collection.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    collection.countDocuments(filter),
   ]);
 
   return {

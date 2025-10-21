@@ -5,6 +5,7 @@ import type {
   RetryWorkflowResponse,
   RollbackWorkflowRequest,
   TerminateWorkflowRequest,
+  WorkflowStageStatus,
 } from '@storyapp/shared';
 
 const RAW_BASE = process.env.REACT_APP_API_URL ? process.env.REACT_APP_API_URL.replace(/\/$/, '') : '';
@@ -33,13 +34,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data?.data ?? data;
 }
 
-export async function listWorkflows(params: { page?: number; limit?: number } = {}): Promise<{
+export async function listWorkflows(params: { page?: number; limit?: number; status?: WorkflowStageStatus } = {}): Promise<{
   items: WorkflowListItem[];
   pagination: { page: number; limit: number; total: number; pages: number };
 }> {
   const query = new URLSearchParams();
   if (params.page) query.set('page', String(params.page));
   if (params.limit) query.set('limit', String(params.limit));
+  if (params.status) query.set('status', params.status);
   return request(`/api/story-workflows${query.toString() ? `?${query}` : ''}`);
 }
 

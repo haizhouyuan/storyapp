@@ -7,6 +7,8 @@ import { createLogger } from '../../config/logger';
 import type {
   DetectiveOutline,
   DetectiveStoryDraft,
+  WorkflowStageArtifactType,
+  WorkflowStageLogLevel,
 } from '@storyapp/shared';
 import {
   buildStage1Prompt,
@@ -33,6 +35,28 @@ const DETECTIVE_CONFIG = {
   writingTemperature: Number.parseFloat(process.env.DETECTIVE_WRITING_TEMPERATURE || '0.6'),
   reviewTemperature: Number.parseFloat(process.env.DETECTIVE_REVIEW_TEMPERATURE || '0.2'),
 };
+
+export interface StageTelemetry {
+  beginCommand?: (input: { label: string; command?: string; meta?: Record<string, unknown> }) => string | undefined;
+  completeCommand?: (commandId: string, input?: { resultSummary?: string; meta?: Record<string, unknown> }) => void;
+  failCommand?: (
+    commandId: string,
+    input: { errorMessage: string; meta?: Record<string, unknown> },
+  ) => void;
+  log?: (
+    level: WorkflowStageLogLevel,
+    message: string,
+    options?: { commandId?: string; meta?: Record<string, unknown> },
+  ) => void;
+  registerArtifact?: (input: {
+    label: string;
+    type: WorkflowStageArtifactType;
+    commandId?: string;
+    url?: string;
+    preview?: string;
+    meta?: Record<string, unknown>;
+  }) => void;
+}
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -310,86 +334,284 @@ function heuristicCadenceAdjust(text: string, maxLen: number): string {
   return rebuilt.join('');
 }
 
-export async function runStage1Planning(topic: string, promptOpts?: PromptBuildOptions): Promise<DetectiveOutline> {
+export async function runStage1Planning(
+  topic: string,
+  promptOpts?: PromptBuildOptions,
+  telemetry?: StageTelemetry,
+): Promise<DetectiveOutline> {
   logger.info({ topic }, 'Stage1 Planning 开始');
-  const prompt = promptOpts ? buildStage1PromptProfile(topic, promptOpts) : buildStage1Prompt(topic);
+  telemetry?.log?.('info', '阶段一：准备蓝图策划', { meta: { topic } });
 
+  const promptCommand = telemetry?.beginCommand?.({
+    label: '构建阶段一提示词',
+    command: promptOpts ? 'buildStage1PromptProfile' : 'buildStage1Prompt',
+    meta: { hasCustomProfile: Boolean(promptOpts) },
+  });
+  const prompt = promptOpts ? buildStage1PromptProfile(topic, promptOpts) : buildStage1Prompt(topic);
+  if (promptCommand) {
+    telemetry?.completeCommand?.(promptCommand, {
+      resultSummary: `提示词长度 ${prompt.length} 字符`,
+    });
+  }
+
+  const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
   const RETRIES = 3;
   for (let attempt = 0; attempt < RETRIES; attempt += 1) {
-    const { content, usage } = await callDeepseek({
-      model: DETECTIVE_CONFIG.planningModel,
-      messages: [
-        {
-          role: 'system',
-          content: '你是一名推理小说结构策划专家，擅长设计本格侦探故事的诡计、线索与时间线。',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      maxTokens: DETECTIVE_CONFIG.maxTokens,
-      temperature: DETECTIVE_CONFIG.planningTemperature,
+    const callCommand = telemetry?.beginCommand?.({
+      label: `调用 DeepSeek 规划模型（尝试 ${attempt + 1}）`,
+      command: 'POST /chat/completions',
+      meta: {
+        model: DETECTIVE_CONFIG.planningModel,
+        temperature: DETECTIVE_CONFIG.planningTemperature,
+        attempt: attempt + 1,
+      },
     });
-
-    logger.info({ usage, attempt }, 'Stage1 Planning 完成');
     try {
-      const outlineRaw = extractJson(content) as DetectiveOutline;
-      const outline = ensureChineseNames(outlineRaw);
-      const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
+      const { content, usage } = await callDeepseek({
+        model: DETECTIVE_CONFIG.planningModel,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一名推理小说结构策划专家，擅长设计本格侦探故事的诡计、线索与时间线。',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        maxTokens: DETECTIVE_CONFIG.maxTokens,
+        temperature: DETECTIVE_CONFIG.planningTemperature,
+      });
+
+      logger.info({ usage, attempt }, 'Stage1 Planning 完成 DeepSeek 请求');
+      if (callCommand) {
+        telemetry?.completeCommand?.(callCommand, {
+          resultSummary: `获得响应 ${content.length} 字符`,
+          meta: { usage },
+        });
+      }
+
+      const parseCommand = telemetry?.beginCommand?.({
+        label: '解析模型输出为 JSON',
+        command: 'extractJson',
+        meta: { attempt: attempt + 1 },
+      });
       try {
-        const res = validateDetectiveOutline(outline);
-        if (!res.valid) {
-          const details = (res.errors || []).map((e) => `${e.instancePath || '/'} ${e.message || ''}`).join('; ');
-          if (strict) {
-            const err = new Error(`蓝图Schema校验失败：${details}`);
-            (err as any).code = 'BLUEPRINT_SCHEMA_INVALID';
-            throw err;
-          } else {
-            logger.warn({ errors: res.errors }, '蓝图Schema校验未通过（非严格模式，继续）');
-          }
+        const outlineRaw = extractJson(content) as DetectiveOutline;
+        if (parseCommand) {
+          telemetry?.completeCommand?.(parseCommand, {
+            resultSummary: '解析成功',
+          });
         }
-      } catch (e) {
-        if (strict) throw e;
-        logger.warn({ err: e }, '蓝图Schema校验异常（非严格模式，继续）');
+
+        const normalizeCommand = telemetry?.beginCommand?.({
+          label: '统一角色命名为中文',
+          command: 'ensureChineseNames',
+        });
+        const outline = ensureChineseNames(outlineRaw);
+        if (normalizeCommand) {
+          telemetry?.completeCommand?.(normalizeCommand, {
+            resultSummary: `角色 ${outline.characters?.length ?? 0} 人`,
+          });
+        }
+
+        const validateCommand = telemetry?.beginCommand?.({
+          label: '校验蓝图结构',
+          command: 'validateDetectiveOutline',
+          meta: { strict },
+        });
+        try {
+          const res = validateDetectiveOutline(outline);
+          if (!res.valid) {
+            const details = (res.errors || [])
+              .map((e) => `${e.instancePath || '/'} ${e.message || ''}`)
+              .join('; ');
+            if (strict) {
+              const err = new Error(`蓝图Schema校验失败：${details}`);
+              (err as any).code = 'BLUEPRINT_SCHEMA_INVALID';
+              if (validateCommand) {
+                telemetry?.failCommand?.(validateCommand, {
+                  errorMessage: err.message,
+                  meta: { details },
+                });
+              }
+              throw err;
+            } else {
+              logger.warn({ errors: res.errors }, '蓝图Schema校验未通过（非严格模式，继续）');
+              telemetry?.log?.('warn', '蓝图 Schema 校验未通过（非严格模式）', {
+                commandId: validateCommand,
+                meta: { details, errors: res.errors },
+              });
+            }
+          }
+          if (validateCommand) {
+            telemetry?.completeCommand?.(validateCommand, {
+              resultSummary: res.valid ? '校验通过' : '存在警告（非严格模式）',
+            });
+          }
+        } catch (validationError: any) {
+          if (validateCommand && strict) {
+            telemetry?.failCommand?.(validateCommand, {
+              errorMessage: validationError?.message || '校验失败',
+              meta: { code: validationError?.code },
+            });
+          }
+          if (strict) {
+            throw validationError;
+          }
+          logger.warn({ err: validationError }, '蓝图Schema校验异常（非严格模式，继续）');
+          telemetry?.log?.('warn', '蓝图 Schema 校验发生异常（非严格模式继续）', {
+            commandId: validateCommand,
+            meta: { error: validationError?.message },
+          });
+        }
+
+        telemetry?.registerArtifact?.({
+          label: '阶段一蓝图草案',
+          type: 'json',
+          preview: JSON.stringify(
+            {
+              acts: outline.acts?.length ?? 0,
+              characters: outline.characters?.length ?? 0,
+              themes: outline.themes ?? [],
+            },
+            null,
+            2,
+          ),
+          meta: {
+            topic,
+            strictMode: strict,
+          },
+        });
+
+        return outline;
+      } catch (parseError: any) {
+        if (parseCommand) {
+          telemetry?.failCommand?.(parseCommand, {
+            errorMessage: parseError?.message || '解析失败',
+            meta: { preview: content.slice(0, 180) },
+          });
+        }
+        if (attempt === RETRIES - 1) {
+          logger.error({ err: parseError }, 'Stage1 Planning JSON 解析失败');
+          throw parseError;
+        }
+        logger.warn({ attempt: attempt + 1, err: parseError }, 'Stage1 Planning 输出解析失败，准备重试');
+        telemetry?.log?.('warn', 'Stage1 输出解析失败，准备重试', {
+          commandId: parseCommand,
+          meta: { attempt: attempt + 1 },
+        });
       }
-      return outline;
-    } catch (err) {
+    } catch (deepseekError: any) {
+      if (callCommand) {
+        telemetry?.failCommand?.(callCommand, {
+          errorMessage: deepseekError?.message || 'DeepSeek 调用失败',
+          meta: { code: deepseekError?.code },
+        });
+      }
       if (attempt === RETRIES - 1) {
-        logger.error({ err }, 'Stage1 Planning JSON 解析失败');
-        throw err;
+        throw deepseekError;
       }
-      logger.warn({ attempt: attempt + 1, err }, 'Stage1 Planning 输出解析失败，准备重试');
+      telemetry?.log?.('warn', 'DeepSeek 调用失败，准备重试', {
+        commandId: callCommand,
+        meta: { attempt: attempt + 1 },
+      });
     }
   }
-  const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
+
   throw new Error('Stage1 Planning 未能生成有效蓝图');
 }
 
-export async function runStage2Writing(outline: DetectiveOutline, promptOpts?: PromptBuildOptions): Promise<DetectiveStoryDraft> {
+export async function runStage2Writing(
+  outline: DetectiveOutline,
+  promptOpts?: PromptBuildOptions,
+  telemetry?: StageTelemetry,
+): Promise<DetectiveStoryDraft> {
   logger.info('Stage2 Writing 开始');
+  telemetry?.log?.('info', '阶段二：准备写作草稿', {
+    meta: {
+      acts: outline.acts?.length ?? 0,
+      characters: outline.characters?.length ?? 0,
+    },
+  });
+  const promptCommand = telemetry?.beginCommand?.({
+    label: '构建阶段二提示词',
+    command: promptOpts ? 'buildStage2PromptProfile' : 'buildStage2Prompt',
+    meta: { hasCustomProfile: Boolean(promptOpts) },
+  });
   const prompt = promptOpts ? buildStage2PromptProfile(outline, promptOpts) : buildStage2Prompt(outline);
+  if (promptCommand) {
+    telemetry?.completeCommand?.(promptCommand, {
+      resultSummary: `提示词长度 ${prompt.length} 字符`,
+    });
+  }
+
   const RETRIES = 3;
   for (let attempt = 0; attempt < RETRIES; attempt += 1) {
-    const { content, usage } = await callDeepseek({
-      model: DETECTIVE_CONFIG.writingModel,
-      messages: [
-        {
-          role: 'system',
-          content: [
-            '你是一名推理小说作者，根据大纲写作约 4500-5500 字的长篇故事。',
-            '保持中文第三人称叙述，兼顾氛围、逻辑与节奏。',
-          ].join(' '),
-        },
-        { role: 'user', content: prompt },
-      ],
-      maxTokens: DETECTIVE_CONFIG.maxTokens,
-      temperature: DETECTIVE_CONFIG.writingTemperature,
+    const callCommand = telemetry?.beginCommand?.({
+      label: `调用 DeepSeek 写作模型（尝试 ${attempt + 1}）`,
+      command: 'POST /chat/completions',
+      meta: {
+        model: DETECTIVE_CONFIG.writingModel,
+        temperature: DETECTIVE_CONFIG.writingTemperature,
+        attempt: attempt + 1,
+      },
     });
-
-    logger.info({ usage, attempt }, 'Stage2 Writing 完成');
+    let content: string | undefined;
     try {
-      const storyDraftRaw = extractJson(content) as DetectiveStoryDraft;
+      const response = await callDeepseek({
+        model: DETECTIVE_CONFIG.writingModel,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              '你是一名推理小说作者，根据大纲写作约 4500-5500 字的长篇故事。',
+              '保持中文第三人称叙述，兼顾氛围、逻辑与节奏。',
+            ].join(' '),
+          },
+          { role: 'user', content: prompt },
+        ],
+        maxTokens: DETECTIVE_CONFIG.maxTokens,
+        temperature: DETECTIVE_CONFIG.writingTemperature,
+      });
+      content = response.content;
+      logger.info({ usage: response.usage, attempt }, 'Stage2 Writing 完成 DeepSeek 请求');
+      if (callCommand) {
+        telemetry?.completeCommand?.(callCommand, {
+          resultSummary: `获得响应 ${content.length} 字符`,
+          meta: { usage: response.usage },
+        });
+      }
+    } catch (deepseekError: any) {
+      if (callCommand) {
+        telemetry?.failCommand?.(callCommand, {
+          errorMessage: deepseekError?.message || 'DeepSeek 调用失败',
+          meta: { code: deepseekError?.code },
+        });
+      }
+      if (attempt === RETRIES - 1) {
+        throw deepseekError;
+      }
+      telemetry?.log?.('warn', 'DeepSeek 写作模型调用失败，准备重试', {
+        commandId: callCommand,
+        meta: { attempt: attempt + 1 },
+      });
+      continue;
+    }
+
+    try {
+      const parseCommand = telemetry?.beginCommand?.({
+        label: '解析写作输出',
+        command: 'extractJson',
+        meta: { attempt: attempt + 1 },
+      });
+      const storyDraftRaw = extractJson(content!) as DetectiveStoryDraft;
+      if (parseCommand) {
+        telemetry?.completeCommand?.(parseCommand, {
+          resultSummary: `解析成功，章节 ${storyDraftRaw.chapters?.length ?? 0} 章`,
+        });
+      }
+
       const vars = (promptOpts?.vars || {}) as any;
       const pick = (o: any, keys: string[]) => {
         for (const k of keys) {
@@ -408,9 +630,36 @@ export async function runStage2Writing(outline: DetectiveOutline, promptOpts?: P
       const dialoguesTarget = Number.isFinite(Number(dialoguesRaw))
         ? Number(dialoguesRaw)
         : (profile.writer.dialoguesMin ?? 4);
+      const enforceCommand = telemetry?.beginCommand?.({
+        label: '增强对话密度',
+        command: 'enforceDialoguesInDraft',
+        meta: { dialoguesTarget },
+      });
       const storyDraft = await enforceDialoguesInDraft(storyDraftRaw, dialoguesTarget);
+      if (enforceCommand) {
+        telemetry?.completeCommand?.(enforceCommand, {
+          resultSummary: `完成增强，对话目标 ${dialoguesTarget}`,
+        });
+      }
+
+      telemetry?.registerArtifact?.({
+        label: '阶段二写作草稿',
+        type: 'json',
+        preview: JSON.stringify(
+          {
+            chapters: storyDraft.chapters.length,
+            totalWords: storyDraft.overallWordCount ?? null,
+          },
+          null,
+          2,
+        ),
+      });
+
       return storyDraft;
-    } catch (err) {
+    } catch (err: any) {
+      telemetry?.log?.('warn', '写作输出解析失败', {
+        meta: { error: err?.message, attempt: attempt + 1 },
+      });
       if (attempt === RETRIES - 1) {
         logger.error({ err }, 'Stage2 Writing JSON 解析失败');
         throw err;
@@ -425,9 +674,31 @@ export async function runStage3Review(
   outline: DetectiveOutline,
   storyDraft: DetectiveStoryDraft,
   promptOpts?: PromptBuildOptions,
+  telemetry?: StageTelemetry,
 ): Promise<Record<string, unknown>> {
   logger.info('Stage3 Review 开始');
+  telemetry?.log?.('info', '阶段三：执行审稿校验', {
+    meta: { chapters: storyDraft.chapters.length },
+  });
+  const promptCommand = telemetry?.beginCommand?.({
+    label: '构建阶段三提示词',
+    command: promptOpts ? 'buildStage3PromptProfile' : 'buildStage3Prompt',
+  });
   const prompt = promptOpts ? buildStage3PromptProfile(outline, storyDraft, promptOpts) : buildStage3Prompt(outline, storyDraft);
+  if (promptCommand) {
+    telemetry?.completeCommand?.(promptCommand, {
+      resultSummary: `提示词长度 ${prompt.length} 字符`,
+    });
+  }
+
+  const callCommand = telemetry?.beginCommand?.({
+    label: '调用 DeepSeek 审稿模型',
+    command: 'POST /chat/completions',
+    meta: {
+      model: DETECTIVE_CONFIG.reviewModel,
+      temperature: DETECTIVE_CONFIG.reviewTemperature,
+    },
+  });
 
   const { content, usage } = await callDeepseek({
     model: DETECTIVE_CONFIG.reviewModel,
@@ -442,8 +713,21 @@ export async function runStage3Review(
     temperature: DETECTIVE_CONFIG.reviewTemperature,
   });
 
+  if (callCommand) {
+    telemetry?.completeCommand?.(callCommand, {
+      resultSummary: `获取审稿结果 ${content.length} 字符`,
+      meta: { usage },
+    });
+  }
+
   logger.info({ usage }, 'Stage3 Review 完成');
-  return extractJson(content) as Record<string, unknown>;
+  const review = extractJson(content) as Record<string, unknown>;
+  telemetry?.registerArtifact?.({
+    label: '阶段三审稿结果',
+    type: 'json',
+    preview: JSON.stringify(review, null, 2).slice(0, 2000),
+  });
+  return review;
 }
 
 function readPromptHint(name: string): string | null {

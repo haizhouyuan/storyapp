@@ -74,7 +74,7 @@ export const registerWorkflowStream = (workflowId: string, res: Response) => {
     } catch {
       // ignore write errors; close handler will clean up
     }
-  }, Number(process.env.WORKFLOW_STREAM_HEARTBEAT_MS || 25000));
+  }, Number(process.env.WORKFLOW_STREAM_HEARTBEAT_MS || 10000));
 
   return () => {
     clearInterval(heartbeat);

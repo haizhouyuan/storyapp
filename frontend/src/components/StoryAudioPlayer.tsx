@@ -6,21 +6,11 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-
-interface AudioSegment {
-  segmentIndex: number;
-  audioUrl: string;
-  duration: number;
-  startOffset: number;
-  endOffset: number;
-  chapterTitle?: string;
-  cached?: boolean;
-  error?: string;
-}
+import type { StoryTtsSegment } from '../../../shared/types';
 
 interface StoryAudioPlayerProps {
   storyId: string;
-  segments: AudioSegment[];
+  segments: StoryTtsSegment[];
   totalDuration: number;
 }
 
@@ -127,6 +117,11 @@ export const StoryAudioPlayer: React.FC<StoryAudioPlayerProps> = ({
     const audio = audioRef.current;
     if (!audio) return;
 
+    if (!currentSegment?.audioUrl) {
+      console.warn('当前分段没有可播放的音频');
+      return;
+    }
+
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
@@ -163,7 +158,7 @@ export const StoryAudioPlayer: React.FC<StoryAudioPlayerProps> = ({
       {/* 隐藏的音频元素 */}
       <audio
         ref={audioRef}
-        src={currentSegment?.audioUrl}
+        src={currentSegment?.audioUrl ?? ''}
         onEnded={handleSegmentEnd}
         preload="auto"
       />

@@ -80,7 +80,14 @@ app.use((_, res, next) => {
 
 // 4. CORS configuration
 app.use(cors({
-  origin: [...securityConfig.corsOrigins, FRONTEND_URL],
+  origin: [
+    ...securityConfig.corsOrigins, 
+    FRONTEND_URL,
+    'http://fnos.dandanbaba.xyz:8701',
+    'https://fnos.dandanbaba.xyz:8701',
+    'http://fnos.dandanbaba.xyz',
+    'https://fnos.dandanbaba.xyz'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Correlation-ID']

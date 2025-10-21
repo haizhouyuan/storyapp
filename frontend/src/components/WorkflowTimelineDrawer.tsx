@@ -1,6 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { WorkflowEvent, WorkflowStageStatus } from '@storyapp/shared';
+import type {
+  WorkflowEvent,
+  WorkflowStageStatus,
+  WorkflowStageCommandStatus,
+  WorkflowStageExecution,
+} from '@storyapp/shared';
 import { ArrowDownTrayIcon, SpeakerWaveIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import Button from './Button';
 import { useWorkflowStream } from '../hooks/useWorkflowStream';
@@ -19,6 +24,20 @@ const statusColors: Record<WorkflowStageStatus | 'idle', string> = {
   running: 'bg-blue-100 text-blue-600',
   completed: 'bg-emerald-100 text-emerald-600',
   failed: 'bg-rose-100 text-rose-600',
+};
+
+const commandStatusColors: Record<WorkflowStageCommandStatus, string> = {
+  pending: 'bg-slate-100 text-slate-500',
+  running: 'bg-blue-100 text-blue-600',
+  success: 'bg-emerald-100 text-emerald-600',
+  error: 'bg-rose-100 text-rose-600',
+};
+
+const commandStatusLabels: Record<WorkflowStageCommandStatus, string> = {
+  pending: '待开始',
+  running: '执行中',
+  success: '已完成',
+  error: '失败',
 };
 
 const ttsStatusColors: Record<'success' | 'error' | 'running', string> = {
@@ -48,7 +67,12 @@ const StageEventList: React.FC<{
   events: WorkflowEvent[];
   onEventAction?: (event: WorkflowEvent) => void;
 }> = ({ events, onEventAction }) => {
-  if (!events.length) {
+  const visibleEvents = events.filter((event) => {
+    const meta = (event.meta ?? {}) as Record<string, any>;
+    return !meta.detailType;
+  });
+
+  if (!visibleEvents.length) {
     return <p className="text-xs text-slate-500">暂无事件</p>;
   }
 
@@ -63,7 +87,7 @@ const StageEventList: React.FC<{
   return (
     <ul className="space-y-2">
       <AnimatePresence initial={false}>
-        {events.map((event) => {
+        {visibleEvents.map((event) => {
           const actionable = Boolean(onEventAction) && hasAction(event);
           return (
             <motion.li
@@ -146,7 +170,7 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
   const [latestTtsError, setLatestTtsError] = useState<string | null>(null);
   const [loadingLatestTts, setLoadingLatestTts] = useState(false);
 
-  const { events, stageStatus, ttsEvents, infoEvents, overallStatus, isConnected, error, refresh } =
+  const { events, stageStatus, ttsEvents, infoEvents, overallStatus, isConnected, error, refresh, stageActivity } =
     useWorkflowStream(workflowId);
 
   const groupedStageEvents = useMemo<Record<string, WorkflowEvent[]>>(() => {
@@ -176,6 +200,15 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
   useEffect(() => {
     onOpenChange?.(isOpen);
   }, [isOpen, onOpenChange]);
+
+  const lastOverallStatusRef = useRef<WorkflowStageStatus | 'idle' | null>(null);
+
+  useEffect(() => {
+    if (overallStatus === 'completed' && lastOverallStatusRef.current !== 'completed') {
+      onManualRefresh?.();
+    }
+    lastOverallStatusRef.current = overallStatus;
+  }, [overallStatus, onManualRefresh]);
 
   const loadLatestTtsTask = useCallback(async () => {
     if (!workflowId) {
@@ -355,6 +388,15 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
                     stageEvents.length > 0 ? stageEvents[stageEvents.length - 1].meta ?? {} : {};
                   const durationMs =
                     typeof latestStageMeta.durationMs === 'number' ? latestStageMeta.durationMs : undefined;
+                  const activity = stageActivity[stageId] as WorkflowStageExecution | undefined;
+                  const commands = activity?.commands ?? [];
+                  const currentCommand = activity?.currentCommandId
+                    ? commands.find((cmd) => cmd.id === activity.currentCommandId)
+                    : undefined;
+                  const recentLogs = activity?.logs ? activity.logs.slice(-5) : [];
+                  const artifacts = activity?.artifacts ?? [];
+                  const hasDetails =
+                    Boolean(currentCommand) || commands.length > 0 || recentLogs.length > 0 || artifacts.length > 0;
 
                   return (
                     <motion.section
@@ -382,6 +424,131 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
                       <div className="mt-3">
                         <StageEventList events={stageEvents} onEventAction={handleEventAction} />
                       </div>
+                      {hasDetails && (
+                        <div className="mt-4 space-y-4 text-xs text-slate-600">
+                          {currentCommand && (
+                            <div className="rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2">
+                              <p className="text-[11px] font-medium text-blue-700">当前执行</p>
+                              <p className="mt-1 font-semibold text-slate-800">{currentCommand.label}</p>
+                              {currentCommand.command && (
+                                <p className="mt-1 text-[11px] text-slate-500 break-words">{currentCommand.command}</p>
+                              )}
+                              <div className="mt-2 flex items-center gap-2 text-[11px]">
+                                <span
+                                  className={`rounded-full px-2 py-0.5 ${commandStatusColors[currentCommand.status]}`}
+                                >
+                                  {commandStatusLabels[currentCommand.status]}
+                                </span>
+                                {currentCommand.startedAt && (
+                                  <span className="text-slate-400">
+                                    开始于 {formatTime(currentCommand.startedAt)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          {commands.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-medium text-slate-500">执行记录</p>
+                              <ul className="mt-2 space-y-2">
+                                {commands
+                                  .slice()
+                                  .reverse()
+                                  .map((command) => (
+                                    <li
+                                      key={command.id}
+                                      className="rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2 shadow-sm"
+                                    >
+                                      <div className="flex items-start justify-between gap-2">
+                                        <span className="text-sm font-semibold text-slate-800">{command.label}</span>
+                                        <span
+                                          className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${commandStatusColors[command.status]}`}
+                                        >
+                                          {commandStatusLabels[command.status]}
+                                        </span>
+                                      </div>
+                                      {command.command && (
+                                        <p className="mt-1 text-[11px] text-slate-500 break-words">{command.command}</p>
+                                      )}
+                                      {command.resultSummary && (
+                                        <p className="mt-1 text-[11px] text-slate-500">{command.resultSummary}</p>
+                                      )}
+                                      {command.errorMessage && (
+                                        <p className="mt-1 text-[11px] text-rose-600">{command.errorMessage}</p>
+                                      )}
+                                      <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-400">
+                                        {command.startedAt && <span>开始 {formatTime(command.startedAt)}</span>}
+                                        {command.finishedAt && <span>结束 {formatTime(command.finishedAt)}</span>}
+                                      </div>
+                                    </li>
+                                  ))}
+                              </ul>
+                            </div>
+                          )}
+                          {recentLogs.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-medium text-slate-500">实时日志</p>
+                              <ul className="mt-2 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-white/80 px-3 py-2">
+                                {recentLogs.map((log) => {
+                                  const level = log.level ?? 'info';
+                                  const levelColor =
+                                    level === 'error'
+                                      ? 'text-rose-600'
+                                      : level === 'warn'
+                                        ? 'text-amber-600'
+                                        : level === 'debug'
+                                          ? 'text-slate-400'
+                                          : 'text-slate-600';
+                                  return (
+                                    <li key={log.id} className={`text-[11px] leading-5 ${levelColor}`}>
+                                      <span className="mr-2 text-[10px] text-slate-400">{formatTime(log.timestamp)}</span>
+                                      {log.message}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                          {artifacts.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-medium text-slate-500">阶段产物</p>
+                              <ul className="mt-2 space-y-2">
+                                {artifacts.map((artifact) => (
+                                  <li
+                                    key={artifact.id}
+                                    className="rounded-lg border border-emerald-100 bg-emerald-50/50 px-3 py-2 text-[11px] text-emerald-700"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-semibold text-emerald-800">{artifact.label}</span>
+                                      <span className="rounded px-2 py-0.5 text-[10px] uppercase text-emerald-600">
+                                        {artifact.type}
+                                      </span>
+                                    </div>
+                                    {artifact.preview && (
+                                      <pre className="mt-1 max-h-32 whitespace-pre-wrap text-[10px] text-emerald-700/80 overflow-hidden">
+                                        {artifact.preview}
+                                      </pre>
+                                    )}
+                                    {artifact.url && (
+                                      <a
+                                        href={artifact.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-2 inline-block text-[11px] text-emerald-700 underline"
+                                      >
+                                        查看详情
+                                      </a>
+                                    )}
+                                    <div className="mt-1 text-[10px] text-emerald-400">
+                                      {formatTime(artifact.createdAt)}
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </motion.section>
                   );
                 })}

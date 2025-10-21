@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { TtsSynthesisRequest, TtsSynthesisResponse, TtsVoicesResponse } from '../../../shared/types';
+import type {
+  StoryTtsBatchResponse,
+  StoryTtsBatchStatusResponse,
+  StoryTtsSegment,
+  TtsSynthesisRequest,
+  TtsSynthesisResponse,
+  TtsVoicesResponse,
+} from '../../../shared/types';
+export type { StoryTtsBatchResponse } from '../../../shared/types';
 import { requestStorySpeech, fetchTtsVoices } from '../utils/api';
 
 export type TtsStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -12,27 +20,6 @@ export interface StoryTtsBatchRequest {
   voiceId?: string;
   speed?: number;
   sessionId?: string;
-}
-
-export interface AudioSegment {
-  segmentIndex: number;
-  audioUrl: string;
-  duration: number;
-  startOffset: number;
-  endOffset: number;
-  chapterTitle?: string;
-  cached?: boolean;
-  error?: string;
-}
-
-export interface StoryTtsBatchResponse {
-  success: boolean;
-  storyId: string;
-  totalSegments: number;
-  successCount: number;
-  totalDuration: number;
-  segments: AudioSegment[];
-  error?: string;
 }
 
 interface UseStoryTtsOptions {
@@ -67,6 +54,11 @@ const toCacheKey = (payload: TtsSynthesisRequest): string => {
     format: payload.format,
   });
 };
+
+const DEFAULT_STATUS_POLL_INTERVAL_MS = 3000;
+const MAX_STATUS_POLL_ATTEMPTS = 200;
+
+const waitFor = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult {
   const [status, setStatus] = useState<TtsStatus>('idle');
@@ -146,6 +138,69 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
     }
   }, []);
 
+  const pollStoryStatus = useCallback(async (
+    storyKey: string,
+    initialDelay?: number,
+  ): Promise<StoryTtsBatchResponse> => {
+    let attempt = 0;
+    let delayMs = initialDelay ?? DEFAULT_STATUS_POLL_INTERVAL_MS;
+
+    while (attempt < MAX_STATUS_POLL_ATTEMPTS) {
+      if (attempt > 0) {
+        await waitFor(delayMs);
+      }
+
+      let statusResponse: Response;
+      try {
+        statusResponse = await fetch(`/api/tts/synthesize-story/status/${encodeURIComponent(storyKey)}`);
+      } catch (networkError) {
+        attempt += 1;
+        continue;
+      }
+
+      if (statusResponse.status === 404) {
+        attempt += 1;
+        continue;
+      }
+
+      let statusData: StoryTtsBatchStatusResponse;
+      try {
+        statusData = await statusResponse.json();
+      } catch (parseError) {
+        attempt += 1;
+        continue;
+      }
+
+      if (!statusResponse.ok) {
+        throw new Error(statusData?.error || '故事合成失败');
+      }
+
+      if (statusData.status === 'ready') {
+        const result: StoryTtsBatchResponse = {
+          success: true,
+          storyId: statusData.storyId,
+          totalSegments: statusData.totalSegments,
+          successCount: statusData.successCount,
+          totalDuration: statusData.totalDuration,
+          segments: (statusData.segments ?? []) as StoryTtsSegment[],
+          error: statusData.error,
+        };
+        setStatus('ready');
+        setError(undefined);
+        return result;
+      }
+
+      if (statusData.status === 'error') {
+        throw new Error(statusData.error || '朗读合成失败');
+      }
+
+      delayMs = statusData.nextPollInMs ?? delayMs ?? DEFAULT_STATUS_POLL_INTERVAL_MS;
+      attempt += 1;
+    }
+
+    throw new Error('朗读任务处理中，请稍后在页面中刷新状态再试');
+  }, [setError, setStatus]);
+
   const synthesizeStory = useCallback(async (payload: StoryTtsBatchRequest) => {
     try {
       setStatus('loading');
@@ -164,21 +219,35 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
         }),
       });
 
-      const data: StoryTtsBatchResponse = await response.json();
+      const data: StoryTtsBatchStatusResponse | StoryTtsBatchResponse = await response.json();
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '故事合成失败');
+      const isPending = response.status === 202 || (data as StoryTtsBatchStatusResponse).status === 'pending';
+
+      if (isPending) {
+        const pending = data as StoryTtsBatchStatusResponse;
+        const storyKey = pending.storyId || payload.storyId;
+        if (!storyKey) {
+          throw new Error('朗读任务缺少标识，请稍后重试');
+        }
+        const pollInterval = pending.nextPollInMs ?? DEFAULT_STATUS_POLL_INTERVAL_MS;
+        return await pollStoryStatus(storyKey, pollInterval);
+      }
+
+      const readyData = data as StoryTtsBatchResponse;
+
+      if (!response.ok || !readyData.success) {
+        throw new Error(readyData.error || '故事合成失败');
       }
 
       setStatus('ready');
-      return data;
+      return readyData;
     } catch (err: any) {
       setStatus('error');
       const message = err?.message || '故事合成失败';
       setError(message);
       throw err;
     }
-  }, [options.sessionId, options.defaultVoiceId, options.defaultSpeed]);
+  }, [options.sessionId, options.defaultVoiceId, options.defaultSpeed, pollStoryStatus]);
 
   return useMemo(() => ({
     status,

@@ -14,6 +14,7 @@ import {
   LightBulbIcon,
   BookOpenIcon,
   WrenchScrewdriverIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 
 const TOPIC_SUGGESTIONS = [
@@ -83,6 +84,10 @@ export default function ReaderHomePage() {
     navigate('/builder');
   };
 
+  const gotoHistory = () => {
+    navigate('/history');
+  };
+
   return (
     <PointsPageShell
       backgroundVariant="hero"
@@ -93,18 +98,36 @@ export default function ReaderHomePage() {
             <BookOpenIcon className="h-5 w-5 text-points-primary" />
             <span className="font-semibold text-points-text">侦探故事工作室 · 阅读版</span>
           </div>
-          <Button variant="ghost" size="small" onClick={gotoBuilder}>
-            <WrenchScrewdriverIcon className="mr-1 h-4 w-4" />
-            高级模式
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="small"
+              onClick={gotoHistory}
+            >
+              <ClockIcon className="mr-1 h-4 w-4" />
+              历史故事
+            </Button>
+            <Button
+              variant="ghost"
+              size="small"
+              onClick={gotoBuilder}
+              data-testid="advanced-mode-button"
+            >
+              <WrenchScrewdriverIcon className="mr-1 h-4 w-4" />
+              高级模式
+            </Button>
+          </div>
         </div>
       )}
     >
       <header className="my-6 text-center">
-        <h1 className="bg-gradient-to-r from-points-primary via-points-secondary to-points-accent bg-clip-text text-4xl font-black text-transparent md:text-5xl">
+        <h1
+          className="bg-gradient-to-r from-points-primary via-points-secondary to-points-accent bg-clip-text text-4xl font-black text-transparent md:text-5xl"
+          data-testid="hero-title"
+        >
           一键生成你的原创侦探谜案
         </h1>
-        <p className="mt-3 text-points-text-muted md:text-lg">
+        <p className="mt-3 text-points-text-muted md:text-lg" data-testid="hero-subtitle">
           输入主题 → AI 自动完成蓝图、写作、校验，让孩子阅读一部推理完整的故事。
         </p>
       </header>
@@ -123,6 +146,7 @@ export default function ReaderHomePage() {
               placeholder="例如：海边灯塔的消失钟声"
               maxLength={120}
               disabled={isGenerating}
+              data-testid="topic-input"
               className="w-full rounded-2xl border-2 border-points-border bg-white px-5 py-4 text-lg shadow-soft transition focus:border-points-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-points-surface"
             />
             <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-points-text-muted">
@@ -159,6 +183,7 @@ export default function ReaderHomePage() {
             size="large"
             disabled={disabled}
             onClick={handleGenerate}
+            data-testid="start-story-button"
             className="min-w-[260px] !py-5 text-xl font-semibold shadow-soft disabled:opacity-60"
           >
             {isGenerating ? (

@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { WorkflowEvent, WorkflowStageStatus } from '@storyapp/shared';
+import type {
+  WorkflowEvent,
+  WorkflowStageStatus,
+  WorkflowStageExecution,
+  WorkflowStageCommand,
+  WorkflowStageArtifact,
+  WorkflowStageLogEntry,
+  WorkflowStageExecutionSummary,
+} from '@storyapp/shared';
 import toast from 'react-hot-toast';
 
 const STAGE_ORDER = ['stage1_planning', 'stage2_writing', 'stage3_review', 'stage4_validation'];
 
 type StageStatusMap = Record<string, WorkflowEvent>;
+type StageActivityMap = Record<string, WorkflowStageExecution>;
 
 interface UseWorkflowStreamResult {
   events: WorkflowEvent[];
@@ -15,6 +24,7 @@ interface UseWorkflowStreamResult {
   isConnected: boolean;
   error?: string;
   refresh: () => void;
+  stageActivity: StageActivityMap;
 }
 
 const dedupeEvents = (existing: WorkflowEvent[], incoming: WorkflowEvent): WorkflowEvent[] => {
@@ -28,10 +38,125 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
   const [events, setEvents] = useState<WorkflowEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [stageActivity, setStageActivity] = useState<StageActivityMap>({});
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [reconnectVersion, setReconnectVersion] = useState(0);
   const hadInitialConnectionRef = useRef(false);
   const connectionInterruptedRef = useRef(false);
+
+  const applyStageDetailEvent = useCallback((event: WorkflowEvent) => {
+    if (event.category !== 'stage' || !event.stageId) return;
+    const meta = (event.meta ?? {}) as Record<string, any>;
+    const detailType = meta.detailType as string | undefined;
+    const detail = meta.detail;
+    if (!detailType) return;
+    setStageActivity((prev) => {
+      const stageId = event.stageId!;
+      const existing = prev[stageId];
+      const nextStage: WorkflowStageExecution = existing
+        ? { ...existing }
+        : {
+            workflowId: event.workflowId,
+            stageId,
+            label: stageId,
+            status: 'pending',
+            commands: [],
+            logs: [],
+            artifacts: [],
+            updatedAt: event.timestamp,
+          };
+      let changed = false;
+      if (!nextStage.workflowId) {
+        nextStage.workflowId = event.workflowId;
+      }
+      switch (detailType) {
+        case 'status': {
+          const status = (detail?.status as WorkflowStageStatus) ?? nextStage.status;
+          if (status !== nextStage.status) {
+            nextStage.status = status;
+            if (status === 'running' && !nextStage.startedAt) {
+              nextStage.startedAt = event.timestamp;
+            }
+            if ((status === 'completed' || status === 'failed') && !nextStage.finishedAt) {
+              nextStage.finishedAt = event.timestamp;
+            }
+            changed = true;
+          }
+          break;
+        }
+        case 'start':
+        case 'complete':
+        case 'error': {
+          const command = detail?.command as WorkflowStageCommand | undefined;
+          if (!command?.id) {
+            break;
+          }
+          const commands = nextStage.commands.slice();
+          const index = commands.findIndex((item) => item.id === command.id);
+          if (index >= 0) {
+            const prevCommand = commands[index];
+            const merged = { ...prevCommand, ...command };
+            commands[index] = merged;
+          } else {
+            commands.push(command);
+          }
+          nextStage.commands = commands;
+          if (detailType === 'start') {
+            nextStage.currentCommandId = command.id;
+          } else if (nextStage.currentCommandId === command.id) {
+            nextStage.currentCommandId = undefined;
+          }
+          changed = true;
+          break;
+        }
+        case 'log': {
+          const log = detail?.log as WorkflowStageLogEntry | undefined;
+          if (!log?.id) break;
+          if (!nextStage.logs.some((entry) => entry.id === log.id)) {
+            nextStage.logs = [...nextStage.logs, log].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+            changed = true;
+          }
+          break;
+        }
+        case 'artifact': {
+          const artifact = detail?.artifact as WorkflowStageArtifact | undefined;
+          if (!artifact?.id) break;
+          if (!nextStage.artifacts.some((item) => item.id === artifact.id)) {
+            nextStage.artifacts = [...nextStage.artifacts, artifact];
+            changed = true;
+          }
+          break;
+        }
+        default:
+          break;
+      }
+      if (!changed) {
+        return prev;
+      }
+      nextStage.updatedAt = event.timestamp;
+      return {
+        ...prev,
+        [stageId]: nextStage,
+      };
+    });
+  }, []);
+
+  const applyStageSummary = useCallback((summary: WorkflowStageExecutionSummary | undefined) => {
+    if (!summary || !Array.isArray(summary.stages)) {
+      setStageActivity({});
+      return;
+    }
+    const map: StageActivityMap = {};
+    summary.stages.forEach((stage) => {
+      map[stage.stageId] = {
+        ...stage,
+        commands: stage.commands ?? [],
+        logs: stage.logs ?? [],
+        artifacts: stage.artifacts ?? [],
+      };
+    });
+    setStageActivity(map);
+  }, []);
 
   const refresh = useCallback(() => {
     setError(undefined);
@@ -47,6 +172,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
        setError(undefined);
        hadInitialConnectionRef.current = false;
        connectionInterruptedRef.current = false;
+      setStageActivity({});
       return;
     }
 
@@ -73,6 +199,23 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     }
 
     loadHistory();
+    async function loadStageActivity(signal: AbortSignal) {
+      try {
+        const response = await fetch(`/api/story-workflows/${workflowId}/stage-activity`, { signal });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        if (!aborted) {
+          applyStageSummary(data?.data as WorkflowStageExecutionSummary | undefined);
+        }
+      } catch (err) {
+        if (!aborted) {
+          console.warn('获取阶段活动失败', err);
+        }
+      }
+    }
+    loadStageActivity(controller.signal);
 
     const eventSource = new EventSource(`/api/story-workflows/${workflowId}/stream`);
     eventSource.onopen = () => {
@@ -88,6 +231,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
       try {
         const parsed: WorkflowEvent = JSON.parse(event.data);
         setEvents((prev) => dedupeEvents(prev, parsed));
+        applyStageDetailEvent(parsed);
       } catch (err: any) {
         setError(err?.message || '解析工作流事件失败');
         toast.error(err?.message || '解析工作流事件失败');
@@ -120,7 +264,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         reconnectTimeoutRef.current = null;
       }
     };
-  }, [workflowId, refresh, reconnectVersion]);
+  }, [workflowId, refresh, reconnectVersion, applyStageDetailEvent, applyStageSummary]);
 
   const stageStatus = useMemo<StageStatusMap>(() => {
     const map: StageStatusMap = {};
@@ -158,5 +302,6 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     isConnected,
     error,
     refresh,
+    stageActivity,
   };
 }

@@ -111,3 +111,7 @@ backend/public/
 # Runtime nginx confs
 storage/nginx-runtime/*.conf
 testrun/
+
+# Storage files (TTS audio and exports)
+storage/tts/
+storage/exports/

@@ -93,7 +93,8 @@ describe('useWorkflowStream', () => {
   it('loads history and supports manual refresh', async () => {
     render(<TestComponent workflowId="wf-1" />);
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/story-workflows/wf-1/events', expect.anything());
+    expect(global.fetch).toHaveBeenNthCalledWith(1, '/api/story-workflows/wf-1/events', expect.anything());
+    expect(global.fetch).toHaveBeenNthCalledWith(2, '/api/story-workflows/wf-1/stage-activity', expect.anything());
 
     await act(async () => {
       MockEventSource.instances[0]?.emitOpen();
@@ -104,7 +105,7 @@ describe('useWorkflowStream', () => {
       refreshButton.click();
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
   });
 
   it('notifies on disconnect and reconnect', async () => {

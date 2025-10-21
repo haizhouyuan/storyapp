@@ -59,7 +59,7 @@ export default function StoryReaderPage() {
   const location = useLocation();
   const locationState = location.state as LocationState | undefined;
   const initialWorkflow = locationState?.workflow;
-  const { workflow, isLoading, error } = useDetectiveWorkflow(workflowId, initialWorkflow);
+  const { workflow, isLoading, error, refresh } = useDetectiveWorkflow(workflowId, initialWorkflow);
   const timelineWorkflowId = workflow?._id || workflowId || undefined;
   const defaultTimelineOpen = locationState?.openTimeline ?? Boolean(timelineWorkflowId);
 
@@ -331,6 +331,7 @@ export default function StoryReaderPage() {
         onRequestExport={handleCompile}
         onRequestReadFull={handleSynthesizeStory}
         onRetryFailedStage={handleRetryFailedStage}
+        onManualRefresh={refresh}
         isExporting={isCompiling}
         isSynthesizing={isSynthesizing}
         hasFailedStage={hasFailedStage}

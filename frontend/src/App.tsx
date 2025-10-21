@@ -8,6 +8,7 @@ import ReaderHomePage from './pages/ReaderHomePage';
 import StoryReaderPage from './pages/StoryReaderPage';
 import DetectiveBuilderPage from './pages/DetectiveBuilderPage';
 import TtsTestPage from './pages/TtsTestPage';
+import StoryHistoryPage from './pages/StoryHistoryPage';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
             <Route path="/story/:workflowId" element={<StoryReaderPage />} />
             <Route path="/builder" element={<DetectiveBuilderPage />} />
             <Route path="/tts-test" element={<TtsTestPage />} />
+            <Route path="/history" element={<StoryHistoryPage />} />
           </Routes>
 
         </div>

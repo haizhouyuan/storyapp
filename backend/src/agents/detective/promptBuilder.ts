@@ -70,12 +70,16 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
     '仅返回 StoryBlueprint JSON（禁止额外说明、注释或代码块）。',
     '必须包含字段：centralTrick、caseSetup、characters（≥6）、locations、acts（三幕）、clueMatrix、timeline（使用 "DayX HH:MM"）、solution、fairnessNotes、logicChecklist。',
     '根级字段只能包含：title、centralTrick、caseSetup、characters、locations、acts、clueMatrix、timeline、solution、fairnessNotes、logicChecklist、themes。禁止添加其他根级键。',
+    '所有键名必须使用双引号包裹（例如 "locations": [...]），严禁出现 locations: [...]、acts: [...] 等未加引号的写法；所有字符串也必须使用双引号。',
+    '即使某些字段暂时没有实体（如 fairnessNotes、logicChecklist、themes），也必须输出对应键并赋值为空数组 []，不得省略或保留空白。',
+    'solution 字段必须完整给出 culptit、motiveCore、keyReveals、fairnessChecklist，并在其后紧跟 fairnessNotes、logicChecklist、themes 三个数组字段，顺序不可更改。',
     '字段格式示例：centralTrick 要含 summary、mechanism、fairnessNotes；acts 是包含 act、focus、beats 的数组，其中 beats 需提供 scene_id、summary、cluesRevealed、redHerring；clueMatrix 要含 clue、surfaceMeaning、realMeaning、appearsAtAct、mustForeshadow、explicitForeshadowChapters（例如 ["Chapter 1","Chapter 2"]）。',
     'timeline 必须为数组，每项包含 time（如 "Day1 20:00"）、event、participants（字符串数组，可写涉事角色或 "Chapter N"）。',
     '严格遵循以下 StoryBlueprint 骨架（字段不可缺失、不可改名、不可额外扩展）：',
     blueprintSkeleton,
     '禁止输出 "structure"、"chapters"、"scenes" 等非模板字段；章节节点必须放在 acts[].beats[] 中，并使用唯一 scene_id。',
     '所有角色姓名需为 2-3 个中文汉字，可自行翻译外文名，禁止出现英文或连字符。',
+    '禁止输出除最终 JSON 以外的任何文字、提示或解释；不要包含 ```json、首先、说明 等前缀或后缀。',
   ];
 
   if (deviceKeywords.length > 0) {

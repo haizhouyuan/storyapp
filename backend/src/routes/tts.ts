@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import type { StoryTtsSegment } from '@storyapp/shared';
 import type { TtsSynthesisRequest } from '../services/tts/types';
 import { createTtsManager } from '../services/tts';
 import { EventType, logError, logInfo } from '../utils/logger';
@@ -25,6 +26,70 @@ const parseNumber = (value: unknown, fallback?: number): number | undefined => {
   const num = Number(value);
   if (Number.isNaN(num)) return fallback;
   return num;
+};
+
+type StorySynthesisStatus = 'pending' | 'ready' | 'error';
+
+interface StorySynthesisState {
+  storyId: string;
+  status: StorySynthesisStatus;
+  totalSegments: number;
+  successCount: number;
+  totalDuration: number;
+  segments: StoryTtsSegment[];
+  error?: string;
+  updatedAt: number;
+}
+
+const STORY_SYNTHESIS_TTL_MS = Number.parseInt(process.env.TTS_BATCH_STATE_TTL_MS || `${60 * 60 * 1000}`, 10);
+const STORY_STATUS_POLL_INTERVAL_MS = Number.parseInt(process.env.TTS_BATCH_STATUS_POLL_INTERVAL_MS || '3000', 10);
+const storySynthesisStore = new Map<string, StorySynthesisState>();
+
+const cleanupStoryStore = () => {
+  const now = Date.now();
+  for (const [storyId, state] of storySynthesisStore.entries()) {
+    if (now - state.updatedAt > STORY_SYNTHESIS_TTL_MS) {
+      storySynthesisStore.delete(storyId);
+    }
+  }
+};
+
+const initializeStoryState = (storyId: string, totalSegments: number): StorySynthesisState => {
+  const initialState: StorySynthesisState = {
+    storyId,
+    status: 'pending',
+    totalSegments,
+    successCount: 0,
+    totalDuration: 0,
+    segments: [],
+    updatedAt: Date.now(),
+  };
+  storySynthesisStore.set(storyId, initialState);
+  return initialState;
+};
+
+const updateStoryState = (storyId: string, mutator: (state: StorySynthesisState) => void) => {
+  const state = storySynthesisStore.get(storyId);
+  if (!state) {
+    return;
+  }
+  mutator(state);
+  state.updatedAt = Date.now();
+  storySynthesisStore.set(storyId, state);
+};
+
+const upsertSegment = (state: StorySynthesisState, segment: StoryTtsSegment) => {
+  const nextSegments = state.segments.slice();
+  const existingIndex = nextSegments.findIndex((item) => item.segmentIndex === segment.segmentIndex);
+  if (existingIndex >= 0) {
+    nextSegments[existingIndex] = segment;
+  } else {
+    nextSegments.push(segment);
+  }
+  nextSegments.sort((a, b) => a.segmentIndex - b.segmentIndex);
+  state.segments = nextSegments;
+  state.successCount = nextSegments.filter((item) => !item.error).length;
+  state.totalDuration = nextSegments.reduce((sum, item) => sum + (item.duration || 0), 0);
 };
 
 router.get('/voices', (_req: Request, res: Response) => {
@@ -198,107 +263,182 @@ router.post('/synthesize-story', async (req: Request, res: Response) => {
     });
   }
 
+  const effectiveStoryId = typeof storyId === 'string' && storyId.trim()
+    ? storyId.trim()
+    : `story-${Date.now()}`;
+
   try {
     const segmenter = new StoryTextSegmenter(1000); // 每段最多 1000 字
     const segments = segmenter.segmentStory(fullText, chapterMarkers);
 
+    if (segments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: '暂无可朗读的内容',
+        code: 'NO_SEGMENTS',
+      });
+    }
+
+    cleanupStoryStore();
+    const initialState = initializeStoryState(effectiveStoryId, segments.length);
+    initialState.error = undefined;
+
     logInfo(EventType.TTS_REQUEST_RECEIVED, `故事分段完成：${segments.length} 段`, {
-      storyId,
+      storyId: effectiveStoryId,
       totalLength: fullText.length,
       segmentCount: segments.length,
     }, undefined, sessionId);
 
     const mgr = getManager();
 
-    // 并行合成所有分段
-    const synthesisPromises = segments.map(async (segment) => {
-      try {
-        const result = await mgr.synthesize({
-          text: segment.text,
-          voiceId: typeof voiceId === 'string' ? voiceId : undefined,
-          speed: parseNumber(speed, 1),
-          format: 'mp3',
-          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-          metadata: { storyId, segmentIndex: segment.index },
-        }, {
-          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-        });
+    const processStory = async () => {
+      for (const segment of segments) {
+        try {
+          const result = await mgr.synthesize({
+            text: segment.text,
+            voiceId: typeof voiceId === 'string' ? voiceId : undefined,
+            speed: parseNumber(speed, 1),
+            format: 'mp3',
+            sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+            metadata: { storyId: effectiveStoryId, segmentIndex: segment.index },
+          }, {
+            sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          });
 
-        return {
-          segmentIndex: segment.index,
-          audioUrl: result.audioUrl,
-          duration: segment.estimatedDuration,
-          startOffset: segment.startOffset,
-          endOffset: segment.endOffset,
-          chapterTitle: segment.chapterTitle,
-          cached: result.cached,
-        };
-      } catch (error: any) {
-        logError(EventType.TTS_ERROR, `分段 ${segment.index} 合成失败`, error, {
-          segmentIndex: segment.index,
-          storyId,
-        }, sessionId);
+          const segmentResult: StoryTtsSegment = {
+            segmentIndex: segment.index,
+            audioUrl: result.audioUrl,
+            duration: segment.estimatedDuration,
+            startOffset: segment.startOffset,
+            endOffset: segment.endOffset,
+            chapterTitle: segment.chapterTitle,
+            cached: result.cached,
+          };
 
-        return {
-          segmentIndex: segment.index,
-          error: error.message || '合成失败',
-          duration: segment.estimatedDuration,
-          startOffset: segment.startOffset,
-          endOffset: segment.endOffset,
-          chapterTitle: segment.chapterTitle,
-        };
+          updateStoryState(effectiveStoryId, (state) => {
+            upsertSegment(state, segmentResult);
+          });
+        } catch (error: any) {
+          logError(EventType.TTS_ERROR, `分段 ${segment.index} 合成失败`, error, {
+            segmentIndex: segment.index,
+            storyId: effectiveStoryId,
+          }, sessionId);
+
+          const failedSegment: StoryTtsSegment = {
+            segmentIndex: segment.index,
+            duration: segment.estimatedDuration,
+            startOffset: segment.startOffset,
+            endOffset: segment.endOffset,
+            chapterTitle: segment.chapterTitle,
+            error: error?.message || '合成失败',
+          };
+
+          updateStoryState(effectiveStoryId, (state) => {
+            upsertSegment(state, failedSegment);
+          });
+        }
       }
-    });
 
-    const audioSegments = await Promise.all(synthesisPromises);
+      const finalState = storySynthesisStore.get(effectiveStoryId);
+      if (!finalState) {
+        return;
+      }
 
-    const totalDuration = audioSegments.reduce((sum, seg) => sum + seg.duration, 0);
-    const successCount = audioSegments.filter((seg) => !seg.error).length;
+      const isSuccess = finalState.successCount === finalState.totalSegments;
+      updateStoryState(effectiveStoryId, (state) => {
+        state.status = isSuccess ? 'ready' : 'error';
+        state.error = isSuccess ? undefined : '部分朗读片段生成失败';
+      });
 
-    logInfo(EventType.TTS_RESPONSE_SENT, '故事合成完成', {
-      storyId,
-      totalSegments: audioSegments.length,
-      successCount,
-      totalDuration,
-    }, undefined, sessionId);
+      logInfo(EventType.TTS_RESPONSE_SENT, '故事合成完成', {
+        storyId: effectiveStoryId,
+        totalSegments: finalState.totalSegments,
+        successCount: finalState.successCount,
+        totalDuration: finalState.totalDuration,
+      }, undefined, sessionId);
 
-    const responsePayload = {
-      success: true,
-      storyId,
-      totalSegments: audioSegments.length,
-      successCount,
-      totalDuration,
-      segments: audioSegments,
-    } as const;
-
-    if (typeof storyId === 'string' && storyId.trim()) {
-      const status = successCount === audioSegments.length ? 'success' : 'error';
+      const workflowStatus = isSuccess ? 'success' : 'error';
       createTtsEvent(
-        storyId,
-        status,
-        status === 'success' ? '整篇朗读已生成' : '整篇朗读部分失败',
+        effectiveStoryId,
+        workflowStatus,
+        isSuccess ? '整篇朗读已生成' : '整篇朗读部分失败',
         {
-          successCount,
-          totalSegments: audioSegments.length,
+          successCount: finalState.successCount,
+          totalSegments: finalState.totalSegments,
         },
       );
-    }
+    };
 
-    return res.json(responsePayload);
-  } catch (error: any) {
-    logError(EventType.TTS_ERROR, '故事合成失败', error, { storyId }, sessionId);
-    if (typeof storyId === 'string' && storyId.trim()) {
-      createTtsEvent(storyId, 'error', '整篇朗读生成失败', {
+    processStory().catch((error: any) => {
+      logError(EventType.TTS_ERROR, '故事合成失败', error, { storyId: effectiveStoryId }, sessionId);
+      updateStoryState(effectiveStoryId, (state) => {
+        state.status = 'error';
+        state.error = error?.message || 'TTS 合成失败';
+      });
+      createTtsEvent(effectiveStoryId, 'error', '整篇朗读生成失败', {
         error: error?.message,
       });
-    }
+    });
+
+    return res.status(202).json({
+      success: true,
+      status: 'pending',
+      storyId: effectiveStoryId,
+      totalSegments: segments.length,
+      successCount: 0,
+      totalDuration: 0,
+      segments: [] as StoryTtsSegment[],
+      nextPollInMs: STORY_STATUS_POLL_INTERVAL_MS,
+    });
+  } catch (error: any) {
+    logError(EventType.TTS_ERROR, '故事合成失败', error, { storyId: effectiveStoryId }, sessionId);
+    updateStoryState(effectiveStoryId, (state) => {
+      state.status = 'error';
+      state.error = error?.message || 'TTS 合成失败';
+    });
+    createTtsEvent(effectiveStoryId, 'error', '整篇朗读生成失败', {
+      error: error?.message,
+    });
 
     return res.status(500).json({
       success: false,
-      error: error.message || 'TTS 合成失败',
+      error: error?.message || 'TTS 合成失败',
       code: 'SYNTHESIS_ERROR',
     });
   }
+});
+
+router.get('/synthesize-story/status/:storyId', (req: Request, res: Response) => {
+  const { storyId } = req.params;
+  if (!storyId) {
+    return res.status(400).json({
+      success: false,
+      error: 'MISSING_STORY_ID',
+      code: 'MISSING_STORY_ID',
+    });
+  }
+
+  cleanupStoryStore();
+  const state = storySynthesisStore.get(storyId);
+  if (!state) {
+    return res.status(404).json({
+      success: false,
+      error: 'SYNTHESIS_NOT_FOUND',
+      code: 'SYNTHESIS_NOT_FOUND',
+    });
+  }
+
+  return res.json({
+    success: state.status === 'ready',
+    status: state.status,
+    storyId: state.storyId,
+    totalSegments: state.totalSegments,
+    successCount: state.successCount,
+    totalDuration: state.totalDuration,
+    segments: state.segments,
+    error: state.error,
+    nextPollInMs: STORY_STATUS_POLL_INTERVAL_MS,
+  });
 });
 
 export default router;

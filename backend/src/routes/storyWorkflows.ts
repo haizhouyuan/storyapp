@@ -9,11 +9,13 @@ import {
   terminateWorkflow,
   rollbackWorkflow,
   compileWorkflow,
+  getWorkflowStageActivity,
 } from '../services/detectiveWorkflowService';
 import type {
   CreateWorkflowRequest,
   RollbackWorkflowRequest,
   TerminateWorkflowRequest,
+  WorkflowStageStatus,
 } from '@storyapp/shared';
 import {
   registerWorkflowStream,
@@ -30,7 +32,20 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const page = Number.parseInt(String(req.query.page ?? '1'), 10) || 1;
     const limit = Number.parseInt(String(req.query.limit ?? '10'), 10) || 10;
-    const result = await listWorkflows({ page, limit });
+    const statusParam = typeof req.query.status === 'string' ? req.query.status : undefined;
+    let status: WorkflowStageStatus | undefined;
+    if (statusParam) {
+      const candidates: WorkflowStageStatus[] = ['pending', 'running', 'completed', 'failed'];
+      if (!candidates.includes(statusParam as WorkflowStageStatus)) {
+        return res.status(400).json({
+          success: false,
+          error: 'INVALID_STATUS_FILTER',
+          message: 'status 参数无效',
+        });
+      }
+      status = statusParam as WorkflowStageStatus;
+    }
+    const result = await listWorkflows({ page, limit, status });
     res.json({ success: true, data: result });
   } catch (error: any) {
     workflowLogger.error({ err: error }, '获取工作流列表失败');
@@ -166,6 +181,21 @@ router.get('/:id/events', (req: Request, res: Response) => {
   } catch (error: any) {
     workflowLogger.error({ err: error, id }, '获取工作流事件失败');
     res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: error?.message ?? 'unexpected_error' });
+  }
+});
+
+router.get('/:id/stage-activity', (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const summary = getWorkflowStageActivity(id);
+    res.json({ success: true, data: summary });
+  } catch (error: any) {
+    workflowLogger.error({ err: error, id }, '获取阶段活动失败');
+    res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error?.message ?? 'unexpected_error',
+    });
   }
 });
 
