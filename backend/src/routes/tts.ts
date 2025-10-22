@@ -9,6 +9,9 @@ import path from 'path';
 import fs from 'fs';
 import { listTasks, findTask, getProviderSummary, TaskStatus, findLatestTaskByStoryId } from '../services/tts/taskRegistry';
 import { createTtsEvent } from '../services/workflowEventBus';
+import { getDatabase, COLLECTIONS } from '../config/database';
+import { ObjectId } from 'mongodb';
+import type { DetectiveWorkflowDocument } from '../models/DetectiveWorkflow';
 
 const router = Router();
 let manager: TtsManager | undefined;
@@ -67,6 +70,45 @@ const initializeStoryState = (storyId: string, totalSegments: number): StorySynt
   storySynthesisStore.set(storyId, initialState);
   return initialState;
 };
+
+const HEX_OBJECT_ID = /^[a-f\d]{24}$/i;
+
+async function assertStoryPassedValidation(storyId: string): Promise<void> {
+  if (!HEX_OBJECT_ID.test(storyId)) {
+    return;
+  }
+  const db = getDatabase();
+  const collection = db.collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS);
+  const objectId = new ObjectId(storyId);
+  const document = await collection.findOne(
+    { _id: objectId },
+    { projection: { validation: 1, stageStates: 1 } },
+  );
+  if (!document) {
+    return;
+  }
+  const validationStage = (document.stageStates || []).find((stage) => stage.stage === 'stage5_validation');
+  if (!validationStage || validationStage.status !== 'completed') {
+    const error = new Error('故事尚未完成最终校验，请先运行完整工作流。');
+    (error as any).code = 'VALIDATION_PENDING';
+    throw error;
+  }
+  const results = Array.isArray(document.validation?.results) ? document.validation!.results : [];
+  const failResults = results.filter((result) => result.status === 'fail');
+  if (failResults.length > 0) {
+    const error = new Error('故事校验存在失败项，暂无法生成朗读音频。');
+    (error as any).code = 'VALIDATION_FAILED';
+    (error as any).details = failResults;
+    throw error;
+  }
+  const warnResults = results.filter((result) => result.status === 'warn');
+  if (warnResults.length > 0) {
+    const error = new Error('故事校验仍有警告，请修复后再尝试朗读生成。');
+    (error as any).code = 'VALIDATION_HAS_WARN';
+    (error as any).details = warnResults;
+    throw error;
+  }
+}
 
 const updateStoryState = (storyId: string, mutator: (state: StorySynthesisState) => void) => {
   const state = storySynthesisStore.get(storyId);
@@ -263,9 +305,21 @@ router.post('/synthesize-story', async (req: Request, res: Response) => {
     });
   }
 
-  const effectiveStoryId = typeof storyId === 'string' && storyId.trim()
-    ? storyId.trim()
-    : `story-${Date.now()}`;
+  const rawStoryId = typeof storyId === 'string' ? storyId.trim() : '';
+  const effectiveStoryId = rawStoryId ? rawStoryId : `story-${Date.now()}`;
+
+  if (HEX_OBJECT_ID.test(rawStoryId)) {
+    try {
+      await assertStoryPassedValidation(rawStoryId);
+    } catch (validationError: any) {
+      return res.status(409).json({
+        success: false,
+        error: validationError?.code || 'VALIDATION_BLOCKED',
+        message: validationError?.message || '故事尚未通过校验，无法生成朗读音频',
+        details: validationError?.details,
+      });
+    }
+  }
 
   try {
     const segmenter = new StoryTextSegmenter(1000); // 每段最多 1000 字

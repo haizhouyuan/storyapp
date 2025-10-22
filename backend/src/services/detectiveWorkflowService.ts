@@ -31,6 +31,7 @@ import {
   runStage1Planning,
   runStage2Writing,
   runStage3Review,
+  runStage4Revision,
   type StageTelemetry,
 } from '../agents/detective';
 import { runStage4Validation } from '../agents/detective/validators';
@@ -57,8 +58,89 @@ const STAGE_DEFINITIONS = [
   { id: 'stage1_planning', label: 'Stage1 Planning' },
   { id: 'stage2_writing', label: 'Stage2 Writing' },
   { id: 'stage3_review', label: 'Stage3 Review' },
-  { id: 'stage4_validation', label: 'Stage4 Validation' },
+  { id: 'stage4_revision', label: 'Stage4 Revision' },
+  { id: 'stage5_validation', label: 'Stage5 Validation' },
 ] as const;
+
+const TIME_PATTERN = /\b(\d{1,2}:\d{2})\b/;
+const DAY_PATTERN = /Day\s*\d+/i;
+
+const CHAPTER_TIME_RULE_ID = 'chapter-time-tags';
+const TIMELINE_TEXT_RULE_ID = 'timeline-from-text';
+const MOTIVE_RULE_ID = 'motive-foreshadowing';
+
+function parseChapterIndex(label?: string | null): number | null {
+  if (!label) return null;
+  const match = String(label).match(/(\d+)/);
+  if (!match) return null;
+  const index = Number.parseInt(match[1], 10) - 1;
+  if (!Number.isFinite(index) || index < 0) return null;
+  return index;
+}
+
+function ensureChapterAnchorsCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): string[] {
+  const chapters = draft?.chapters ?? [];
+  if (chapters.length === 0) return [];
+  const anchors = Array.isArray(outline?.chapterAnchors) ? outline.chapterAnchors : [];
+  const anchorMap = new Map<number, typeof anchors[number]>();
+  anchors.forEach((anchor) => {
+    const index = parseChapterIndex(anchor?.chapter);
+    if (index !== null) {
+      anchorMap.set(index, anchor);
+    }
+  });
+  const errors: string[] = [];
+  chapters.forEach((chapter, index) => {
+    const text = `${chapter.summary || ''}\n${chapter.content || ''}`;
+    const anchor = anchorMap.get(index);
+    if (anchor) {
+      if (anchor.dayCode && !text.includes(anchor.dayCode)) {
+        errors.push(`[${CHAPTER_TIME_RULE_ID}] Chapter ${index + 1} 缺少 ${anchor.dayCode} 提示`);
+      }
+      if (anchor.time && !text.includes(anchor.time)) {
+        errors.push(`[${CHAPTER_TIME_RULE_ID}] Chapter ${index + 1} 缺少 ${anchor.time} 时间标注`);
+      }
+    }
+    if (!DAY_PATTERN.test(text) || !TIME_PATTERN.test(text)) {
+      errors.push(`[${TIMELINE_TEXT_RULE_ID}] Chapter ${index + 1} 未检测到 DayX HH:MM 自然语言时间提示`);
+    }
+  });
+  return Array.from(new Set(errors));
+}
+
+function ensureMotiveCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): string[] {
+  const chapters = draft?.chapters ?? [];
+  if (chapters.length === 0) return [];
+  const earlyText = chapters
+    .slice(0, Math.min(2, chapters.length))
+    .map((chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`)
+    .join('\n');
+  const suspects = (outline?.characters ?? []).filter(
+    (character) => typeof character?.role === 'string' && /suspect/i.test(character.role ?? ''),
+  );
+  const errors: string[] = [];
+  suspects.forEach((suspect) => {
+    const keywords = Array.isArray(suspect.motiveKeywords)
+      ? suspect.motiveKeywords.filter((kw): kw is string => Boolean(kw && kw.trim()))
+      : [];
+    if (keywords.length === 0) return;
+    const missing = keywords.filter((keyword) => !earlyText.includes(keyword));
+    if (missing.length > 0) {
+      errors.push(`[${MOTIVE_RULE_ID}] 嫌疑人 ${suspect.name || '未知'} 的动机关键词缺失：${missing.join('、')}`);
+    }
+  });
+  return errors;
+}
+
+function assertPostRevisionCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): void {
+  const errors = [
+    ...ensureChapterAnchorsCompliance(outline, draft),
+    ...ensureMotiveCompliance(outline, draft),
+  ];
+  if (errors.length > 0) {
+    throw new Error(errors.join('；'));
+  }
+}
 
 type StageId = typeof STAGE_DEFINITIONS[number]['id'];
 
@@ -304,8 +386,12 @@ async function runStageWithUpdate(
   }
   const telemetry = createStageTelemetry(workflowIdString, stageId, stageLabel);
 
+  let errorOccurred = false;
+  let hasResult = false;
+  
   try {
     const outputs = await runner(telemetry);
+    hasResult = true;
     const finishedAt = new Date();
     updatedDoc = updateWorkflowDocument(updatedDoc, {
       ...outputs,
@@ -329,6 +415,7 @@ async function runStageWithUpdate(
     }
     return updatedDoc;
   } catch (error: any) {
+    errorOccurred = true;
     const finishedAt = new Date();
     updatedDoc = updateWorkflowDocument(updatedDoc, {
       stageStates: updateStageState(updatedDoc.stageStates, stageId, {
@@ -358,6 +445,28 @@ async function runStageWithUpdate(
       );
     }
     throw error;
+  } finally {
+    // 🔧 确保无论成功失败都有日志记录
+    const finishedAt = new Date();
+    const duration = finishedAt.getTime() - startTime.getTime();
+    
+    logger.info({
+      workflowId: workflowIdString,
+      stageId,
+      stageLabel,
+      status: errorOccurred ? 'failed' : 'completed',
+      duration,
+      hasResult,
+    }, '📊 Stage execution finished (finally block)');
+    
+    // 🔧 检测潜在的静默失败
+    if (!errorOccurred && !hasResult) {
+      logger.warn({
+        workflowId: workflowIdString,
+        stageId,
+        stageLabel,
+      }, '⚠️ Stage finished but no result and no error - possible silent failure');
+    }
   }
 }
 
@@ -480,12 +589,123 @@ async function executeWorkflowPipeline(
   });
 
   // Stage 4
-  workingDoc = await runStageWithUpdate(workingDoc, 'stage4_validation', async (telemetry) => {
+  workingDoc = await runStageWithUpdate(workingDoc, 'stage4_revision', async (telemetry) => {
+    const outline = workingDoc.outline as DetectiveOutline;
+    let storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
+    const review = workingDoc.review as Record<string, unknown> | undefined;
+    if (!outline || !storyDraft) {
+      throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage4');
+    }
+    let preValidation: ValidationReport | undefined;
+    try {
+      const preValidationCommand = telemetry?.beginCommand?.({
+        label: '修订前预校验',
+        command: 'runStage4Validation',
+        meta: { phase: 'pre-revision' },
+      });
+      preValidation = runStage4Validation(outline, storyDraft, {
+        outlineId: workingDoc._id?.toHexString(),
+        storyId: workingDoc._id?.toHexString(),
+      });
+      if (preValidationCommand) {
+        telemetry?.completeCommand?.(preValidationCommand, {
+          resultSummary: '预校验完成',
+        });
+      }
+    } catch (error) {
+      telemetry?.log?.('warn', '预校验失败，继续执行修订', {
+        meta: { error: (error as Error)?.message },
+      });
+    }
+    const revision = await runStage4Revision(outline, storyDraft, review, preValidation, plannerPrompt, telemetry);
+    if (!revision.skipped) {
+      storyDraft = revision.draft;
+    }
+    const enforceCommand = telemetry?.beginCommand?.({
+      label: '修订后线索公平性增强',
+      command: 'enforceCluePolicy',
+      meta: {
+        revisionApplied: !revision.skipped,
+      },
+    });
+    const enforced = enforceCluePolicy(outline, storyDraft, {
+      ch1MinClues: 3,
+      minExposures: 2,
+      ensureFinalRecovery: true,
+      adjustOutlineExpectedChapters: true,
+      maxRedHerringRatio: 0.3,
+      maxRedHerringPerChapter: 2,
+    });
+    if (enforceCommand) {
+      telemetry?.completeCommand?.(enforceCommand, {
+        resultSummary: '线索公平性增强完成',
+      });
+    }
+    const harmonizeCommand = telemetry?.beginCommand?.({
+      label: '修订后同步大纲',
+      command: 'harmonizeOutlineWithDraft',
+      meta: { stage: 'revision' },
+    });
+    const harmonized = harmonizeOutlineWithDraft(enforced.outline || outline, enforced.draft, {
+      ensureMechanismKeywords: true,
+      mechanismKeywords: mechanismPreset.keywords,
+    });
+    if (harmonizeCommand) {
+      telemetry?.completeCommand?.(harmonizeCommand, {
+        resultSummary: '已同步大纲与修订稿',
+      });
+    }
+    const revisionNoteCandidates = [
+      ...(revision.draft.revisionNotes ?? []),
+      ...revision.plan.mustFix.map((item) => `已处理：${item.detail}`),
+      ...revision.plan.warnings.map((item) => `已核对：${item.detail}`),
+    ];
+    const revisionNotes = Array.from(new Set(revisionNoteCandidates.filter((note) => note && note.trim().length > 0)));
+    const continuityNoteCandidates = [
+      ...(enforced.draft.continuityNotes ?? []),
+      ...revision.plan.mustFix.map((item) => `修订已覆盖：${item.detail}`),
+      ...revision.plan.warnings.map((item) => `修订确认：${item.detail}`),
+    ];
+    const continuityNotes = Array.from(
+      new Set(continuityNoteCandidates.filter((note) => note && note.trim().length > 0)),
+    );
+    telemetry?.registerArtifact?.({
+      label: '阶段四修订计划',
+      type: 'json',
+      preview: JSON.stringify(
+        {
+          skipped: revision.skipped,
+          mustFix: revision.plan.mustFix.length,
+          warnings: revision.plan.warnings.length,
+          revisionNotes,
+        },
+        null,
+        2,
+      ),
+    });
+    const mergedDraft: DetectiveStoryDraft = {
+      ...enforced.draft,
+      continuityNotes,
+      revisionNotes,
+    };
+    try {
+      assertPostRevisionCompliance(harmonized.outline || outline, mergedDraft);
+    } catch (complianceError: any) {
+      telemetry?.log?.('error', '章节时间/动机检查未通过', {
+        meta: { error: complianceError?.message },
+      });
+      throw complianceError;
+    }
+    return { storyDraft: mergedDraft, outline: harmonized.outline };
+  });
+
+  // Stage 5
+  workingDoc = await runStageWithUpdate(workingDoc, 'stage5_validation', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
     let storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
     let outlineForValidation = outline;
     if (!outline || !storyDraft) {
-      throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage4');
+      throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage5');
     }
     const enableAutoFix = process.env.DETECTIVE_AUTO_FIX !== '0';
     if (enableAutoFix) {

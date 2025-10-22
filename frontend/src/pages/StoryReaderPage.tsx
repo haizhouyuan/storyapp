@@ -9,7 +9,7 @@ import {
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { StoryAudioPlayer } from '../components/StoryAudioPlayer';
-import type { DetectiveWorkflowRecord, DetectiveChapter, ValidationRuleResult, WorkflowEvent } from '@storyapp/shared';
+import type { DetectiveWorkflowRecord, DetectiveChapter, WorkflowEvent } from '@storyapp/shared';
 import { useDetectiveWorkflow } from '../hooks/useDetectiveWorkflow';
 import { useStoryTts, type StoryTtsBatchResponse } from '../hooks/useStoryTts';
 import { stripClueTags, resolveChapterTitle, draftToMarkdown } from '../utils/storyFormatting';
@@ -42,15 +42,51 @@ const DEFAULT_TTS_VOICE =
   process.env.REACT_APP_TTS_VOICE_ID || process.env.REACT_APP_TTS_VOICE || 'iflytek_yeting';
 const DEFAULT_TTS_SPEED = Number(process.env.REACT_APP_TTS_SPEED ?? '1');
 
-function statusColor(status: ValidationRuleResult['status']): string {
-  switch (status) {
-    case 'pass':
-      return 'bg-green-100 text-green-700';
-    case 'warn':
-      return 'bg-amber-100 text-amber-700';
-    default:
-      return 'bg-red-100 text-red-700';
+const CLUE_HIGHLIGHT_CLASS = 'rounded bg-emerald-100 px-1 text-emerald-800 shadow-inner';
+const RED_HERRING_HIGHLIGHT_CLASS = 'rounded bg-amber-100 px-1 text-amber-800 shadow-inner';
+const CRITICAL_VALIDATION_RULES = new Set(['timeline-from-text', 'chapter-time-tags', 'motive-foreshadowing']);
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function buildHighlightedContent(chapter: DetectiveChapter): React.ReactNode[] {
+  const text = stripClueTags(chapter?.content);
+  if (!text) {
+    return [<React.Fragment key="empty">（本章暂无正文）</React.Fragment>];
   }
+
+  const phraseMap = new Map<string, { type: 'clue' | 'redHerring' }>();
+  (chapter.cluesEmbedded || []).forEach((phrase) => {
+    if (!phrase) return;
+    phraseMap.set(phrase, { type: 'clue' });
+  });
+  (chapter.redHerringsEmbedded || []).forEach((phrase) => {
+    if (!phrase) return;
+    if (!phraseMap.has(phrase)) {
+      phraseMap.set(phrase, { type: 'redHerring' });
+    }
+  });
+
+  if (phraseMap.size === 0) {
+    return [text];
+  }
+
+  const sortedPhrases = Array.from(phraseMap.keys()).sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(`(${sortedPhrases.map(escapeRegExp).join('|')})`, 'g');
+  const segments = text.split(pattern);
+
+  return segments.map((segment, index) => {
+    const meta = phraseMap.get(segment);
+    if (!meta) {
+      return <React.Fragment key={`seg-${index}`}>{segment}</React.Fragment>;
+    }
+    const className = meta.type === 'clue' ? CLUE_HIGHLIGHT_CLASS : RED_HERRING_HIGHLIGHT_CLASS;
+    const dataAttr = meta.type === 'clue' ? 'clue-highlight' : 'red-herring-highlight';
+    return (
+      <span key={`seg-${index}`} className={className} data-testid={dataAttr}>
+        {segment}
+      </span>
+    );
+  });
 }
 
 export default function StoryReaderPage() {
@@ -102,10 +138,28 @@ export default function StoryReaderPage() {
 
   const storyMarkdown = useMemo(() => draftToMarkdown(workflow?.storyDraft), [workflow?.storyDraft]);
   const validationSummary = workflow?.validation?.summary;
-  const validationResults = workflow?.validation?.results ?? [];
+  const validationResults = useMemo(
+    () => workflow?.validation?.results ?? [],
+    [workflow?.validation?.results],
+  );
   const timeline = workflow?.outline?.timeline ?? [];
   const characters = workflow?.outline?.characters ?? [];
   const clues = workflow?.outline?.clueMatrix ?? [];
+  const revisionNotes = workflow?.storyDraft?.revisionNotes ?? [];
+  const continuityNotes = workflow?.storyDraft?.continuityNotes ?? [];
+  const validationBuckets = useMemo(() => {
+    const fails = validationResults.filter((result) => result.status === 'fail');
+    const warns = validationResults.filter((result) => result.status === 'warn');
+    const passes = validationResults.filter((result) => result.status === 'pass');
+    return { fails, warns, passes };
+  }, [validationResults]);
+  const criticalValidationWarns = useMemo(
+    () => validationBuckets.warns.filter((result) => CRITICAL_VALIDATION_RULES.has(result.ruleId)),
+    [validationBuckets.warns],
+  );
+  const hasValidationWarns = validationBuckets.warns.length > 0;
+  const hasValidationFails = validationBuckets.fails.length > 0;
+  const hasCriticalValidationWarns = criticalValidationWarns.length > 0;
 
   const goHome = () => navigate('/');
   const gotoBuilder = () => navigate('/builder');
@@ -178,6 +232,16 @@ export default function StoryReaderPage() {
     }
     if (!storyMarkdown.trim()) {
       toast.error('尚无可朗读的正文内容');
+      return;
+    }
+    if (hasValidationFails) {
+      setTtsHint('请先修复校验失败项后再尝试朗读生成。');
+      toast.error('故事校验存在未解决的失败项，无法生成朗读音频');
+      return;
+    }
+    if (hasValidationWarns) {
+      setTtsHint('校验仍有警告，请完成修订后再生成朗读音频。');
+      toast.error('校验仍有警告，请完成修订后再尝试朗读');
       return;
     }
 
@@ -401,7 +465,7 @@ export default function StoryReaderPage() {
               <div>
                 <h1 className="text-3xl font-bold text-points-text">{storyTitle}</h1>
                 <p className="mt-2 text-sm text-points-text-muted">
-                  故事由 4 个阶段生成完成，已自动嵌入线索与公平性校验。
+                  故事由 5 个阶段生成完成（含自动修订与公平性校验），已自动嵌入线索提示。
                 </p>
               </div>
               {validationSummary && (
@@ -539,12 +603,27 @@ export default function StoryReaderPage() {
               <div className="space-y-3">
                 {clues.map((clue, index) => (
                   <div key={`${clue.clue}-${index}`} className="rounded-2xl bg-points-bg px-4 py-3">
-                    <p className="text-sm font-semibold text-points-text">{clue.clue}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-points-text">{clue.clue}</p>
+                      {clue.isRedHerring && (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                          红鲱鱼
+                        </span>
+                      )}
+                    </div>
                     {clue.surfaceMeaning && (
                       <p className="text-xs text-points-text-muted">表面信息：{clue.surfaceMeaning}</p>
                     )}
                     {clue.realMeaning && (
                       <p className="text-xs text-points-text-muted">真实指向：{clue.realMeaning}</p>
+                    )}
+                    {clue.explicitForeshadowChapters && clue.explicitForeshadowChapters.length > 0 && (
+                      <p className="text-xs text-points-text-muted">
+                        铺垫章节：{clue.explicitForeshadowChapters.join('、')}
+                      </p>
+                    )}
+                    {typeof clue.appearsAtAct === 'number' && (
+                      <p className="text-xs text-points-text-muted">首次出现幕次：Act {clue.appearsAtAct}</p>
                     )}
                   </div>
                 ))}
@@ -552,18 +631,111 @@ export default function StoryReaderPage() {
             </PointsSection>
           )}
 
-          {validationResults.length > 0 && (
-            <PointsSection title="校验结果" layout="card" className={sectionTone}>
-              <div className="flex flex-wrap gap-2">
-                {validationResults.map((result) => (
-                  <span
-                    key={result.ruleId}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColor(result.status)}`}
-                  >
-                    {result.ruleId}
-                  </span>
+          {revisionNotes.length > 0 && (
+            <PointsSection
+              title="修订说明"
+              layout="card"
+              className={`${sectionTone ?? ''} ${
+                hasValidationWarns
+                  ? 'border border-amber-400/70 bg-amber-50 text-amber-900 dark:border-amber-300 dark:bg-amber-900/30 dark:text-amber-100'
+                  : ''
+              }`.trim()}
+            >
+              {hasValidationWarns && (
+                <div className="mb-3 rounded-xl bg-amber-100 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                  ⚠️ 校验仍有 {validationBuckets.warns.length} 项警告
+                  {hasCriticalValidationWarns && (
+                    <>
+                      ，其中重点修复：
+                      {criticalValidationWarns
+                        .map((warn) => {
+                          const detail =
+                            Array.isArray(warn.details) && warn.details.length > 0
+                              ? warn.details[0]?.message
+                              : warn.ruleId;
+                          return detail || warn.ruleId;
+                        })
+                        .join('；')}
+                    </>
+                  )}
+                  。请根据提示继续修订并重新运行生成流程。
+                </div>
+              )}
+              <ul
+                className={`list-disc space-y-1 pl-5 text-xs ${
+                  hasValidationWarns ? 'text-amber-900 dark:text-amber-100' : 'text-points-text-muted'
+                }`}
+              >
+                {revisionNotes.map((note, index) => (
+                  <li key={`revision-note-${index}`}>{note}</li>
                 ))}
-              </div>
+              </ul>
+            </PointsSection>
+          )}
+
+          {continuityNotes.length > 0 && (
+            <PointsSection title="连续性提醒" layout="card" className={sectionTone}>
+              <ul className="list-disc space-y-1 pl-5 text-xs text-points-text-muted">
+                {continuityNotes.map((note, index) => (
+                  <li key={`continuity-note-${index}`}>{note}</li>
+                ))}
+              </ul>
+            </PointsSection>
+          )}
+
+          {validationResults.length > 0 && (
+            <PointsSection title="校验提醒" layout="card" className={sectionTone}>
+              {validationBuckets.fails.length === 0 && validationBuckets.warns.length === 0 ? (
+                <p className="text-sm text-points-text-muted">所有校验规则均已通过，无需额外处理。</p>
+              ) : (
+                <div className="space-y-3">
+                  {[...validationBuckets.fails, ...validationBuckets.warns].map((result) => {
+                    const detailMessages =
+                      Array.isArray(result.details) && result.details.length > 0
+                        ? result.details.map((detail, idx) => (
+                            <li key={`${result.ruleId}-detail-${idx}`} className="leading-5">{detail.message}</li>
+                          ))
+                        : null;
+                    const isCriticalWarn = result.status === 'warn' && CRITICAL_VALIDATION_RULES.has(result.ruleId);
+                    const badgeLabel = result.status === 'fail' ? '需修复' : isCriticalWarn ? '必须修复' : '需关注';
+                    const badgeClass =
+                      result.status === 'fail'
+                        ? 'bg-rose-100 text-rose-700'
+                        : isCriticalWarn
+                        ? 'bg-amber-200 text-amber-900'
+                        : 'bg-amber-100 text-amber-700';
+                    return (
+                      <div
+                        key={result.ruleId}
+                        className={`rounded-2xl border px-4 py-3 ${
+                          isCriticalWarn
+                            ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-200 dark:bg-amber-900/40 dark:text-amber-100'
+                            : 'border-points-border'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
+                            {badgeLabel}
+                          </span>
+                          <span className="text-xs text-points-text-muted">{result.ruleId}</span>
+                        </div>
+                        {detailMessages ? (
+                          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-points-text-muted">
+                            {detailMessages}
+                          </ul>
+                        ) : (
+                          <p className="mt-2 text-xs text-points-text-muted">校验器未提供具体说明。</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {validationBuckets.passes.length > 0 && (
+                <p className="mt-3 text-xs text-points-text-muted">
+                  另有 {validationBuckets.passes.length} 项规则已通过。
+                </p>
+              )}
             </PointsSection>
           )}
 
@@ -572,35 +744,54 @@ export default function StoryReaderPage() {
               {chapters.length === 0 ? (
                 <p className="text-sm text-points-text-muted">暂无章节内容。</p>
               ) : (
-                chapters.map((chapter, index) => (
-                  <article
-                    key={index}
-                    data-reader-chapter="true"
-                    data-index={index}
-                    className="scroll-mt-24"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <h2 className="text-2xl font-semibold text-points-text">
-                        第{index + 1}章 {resolveChapterTitle(index, chapter)}
-                      </h2>
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        onClick={() => handleSynthesizeChapter(index, chapter)}
-                        disabled={isSynthesizing && ttsContext.mode === 'chapter' && ttsContext.chapterIndex === index}
-                      >
-                        {(isSynthesizing && ttsContext.mode === 'chapter' && ttsContext.chapterIndex === index) ? (
-                          <span className="flex items-center gap-2"><LoadingSpinner size="small" /> 合成本章…</span>
-                        ) : (
-                          <span className="flex items-center gap-2"><SpeakerWaveIcon className="h-4 w-4" /> 朗读本章</span>
-                        )}
-                      </Button>
-                    </div>
-                    <p className="mt-2 whitespace-pre-line text-base leading-7 text-points-text">
-                      {stripClueTags(chapter?.content)}
-                    </p>
-                  </article>
-                ))
+                chapters.map((chapter, index) => {
+                  const highlightedContent = buildHighlightedContent(chapter);
+                  const uniqueClues = Array.from(new Set((chapter.cluesEmbedded || []).filter(Boolean)));
+                  const uniqueHerrings = Array.from(new Set((chapter.redHerringsEmbedded || []).filter(Boolean)));
+                  return (
+                    <article
+                      key={index}
+                      data-reader-chapter="true"
+                      data-index={index}
+                      className="scroll-mt-24"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <h2 className="text-2xl font-semibold text-points-text">
+                          第{index + 1}章 {resolveChapterTitle(index, chapter)}
+                        </h2>
+                        <Button
+                          variant="ghost"
+                          size="small"
+                          onClick={() => handleSynthesizeChapter(index, chapter)}
+                          disabled={isSynthesizing && ttsContext.mode === 'chapter' && ttsContext.chapterIndex === index}
+                        >
+                          {(isSynthesizing && ttsContext.mode === 'chapter' && ttsContext.chapterIndex === index) ? (
+                            <span className="flex items-center gap-2"><LoadingSpinner size="small" /> 合成本章…</span>
+                          ) : (
+                            <span className="flex items-center gap-2"><SpeakerWaveIcon className="h-4 w-4" /> 朗读本章</span>
+                          )}
+                        </Button>
+                      </div>
+                      <p className="mt-2 whitespace-pre-line text-base leading-7 text-points-text">
+                        {highlightedContent}
+                      </p>
+                      {(uniqueClues.length > 0 || uniqueHerrings.length > 0) && (
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          {uniqueClues.map((clue) => (
+                            <span key={`clue-${clue}`} className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                              线索：{clue}
+                            </span>
+                          ))}
+                          {uniqueHerrings.map((red) => (
+                            <span key={`red-${red}`} className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
+                              误导：{red}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })
               )}
             </div>
           </PointsSection>

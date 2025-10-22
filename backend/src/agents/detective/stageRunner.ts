@@ -2,6 +2,7 @@ import {
   deepseekClient,
   DEEPSEEK_CONFIG,
   isDeepseekApiKeyValid,
+  DEEPSEEK_TIMEOUTS,
 } from '../../config/deepseek';
 import { createLogger } from '../../config/logger';
 import type {
@@ -9,6 +10,7 @@ import type {
   DetectiveStoryDraft,
   WorkflowStageArtifactType,
   WorkflowStageLogLevel,
+  ValidationReport,
 } from '@storyapp/shared';
 import {
   buildStage1Prompt,
@@ -17,6 +19,10 @@ import {
   buildStage2PromptProfile,
   buildStage3Prompt,
   buildStage3PromptProfile,
+  buildStage4RevisionPrompt,
+  buildStage4RevisionPromptProfile,
+  RevisionPlan,
+  RevisionPlanIssue,
 } from './promptUtils';
 import { resolvePromptProfile } from './promptProfiles';
 import type { PromptBuildOptions } from './promptBuilder';
@@ -35,6 +41,8 @@ const DETECTIVE_CONFIG = {
   writingTemperature: Number.parseFloat(process.env.DETECTIVE_WRITING_TEMPERATURE || '0.6'),
   reviewTemperature: Number.parseFloat(process.env.DETECTIVE_REVIEW_TEMPERATURE || '0.2'),
 };
+
+const CRITICAL_VALIDATION_RULES = new Set(['timeline-from-text', 'chapter-time-tags', 'motive-foreshadowing']);
 
 export interface StageTelemetry {
   beginCommand?: (input: { label: string; command?: string; meta?: Record<string, unknown> }) => string | undefined;
@@ -56,6 +64,12 @@ export interface StageTelemetry {
     preview?: string;
     meta?: Record<string, unknown>;
   }) => void;
+}
+
+export interface Stage4RevisionResult {
+  draft: DetectiveStoryDraft;
+  plan: RevisionPlan;
+  skipped: boolean;
 }
 
 type ChatMessage = {
@@ -85,15 +99,32 @@ function ensureApiKey() {
 
 async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallResult> {
   ensureApiKey();
+  
+  // 根据模型类型选择超时时间
+  const timeout = options.model === 'deepseek-reasoner' 
+    ? DEEPSEEK_TIMEOUTS.REASONER 
+    : DEEPSEEK_TIMEOUTS.CHAT;
+  
+  const startTime = Date.now();
+  
   try {
+    logger.info(
+      { model: options.model, timeout: `${timeout}ms` },
+      'DeepSeek API 调用开始',
+    );
+    
     const response = await deepseekClient.post('/chat/completions', {
       model: options.model,
       messages: options.messages,
       max_tokens: options.maxTokens,
       temperature: options.temperature,
       stream: false,
+    }, {
+      timeout, // 单独设置超时
     });
 
+    const duration = Date.now() - startTime;
+    
     let content = response?.data?.choices?.[0]?.message?.content;
     if (!content) {
       const rc = response?.data?.choices?.[0]?.message?.reasoning_content;
@@ -106,15 +137,38 @@ async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallR
       throw new Error('DeepSeek 响应缺少内容');
     }
 
+    logger.info(
+      { model: options.model, duration: `${duration}ms` },
+      'DeepSeek API 调用成功',
+    );
+
     return {
       content,
       usage: response?.data?.usage,
     };
   } catch (error: any) {
+    const duration = Date.now() - startTime;
+    
+    // 判断是否超时错误
+    const isTimeout = error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED';
+    
     logger.error(
-      { err: error, model: options.model },
-      'DeepSeek 调用失败',
+      { 
+        err: error, 
+        model: options.model, 
+        duration: `${duration}ms`,
+        timeout: `${timeout}ms`,
+        isTimeout,
+        errorCode: error.code,
+      },
+      isTimeout ? 'DeepSeek API 调用超时' : 'DeepSeek API 调用失败',
     );
+    
+    // 抛出更友好的错误信息
+    if (isTimeout) {
+      throw new Error(`AI模型响应超时（${timeout/1000}秒），请稍后重试`);
+    }
+    
     throw error;
   }
 }
@@ -166,6 +220,109 @@ function estimateDialogueCountText(text: string): number {
   const matches = text.match(/[「“"']/g);
   if (!matches) return 0;
   return Math.floor(matches.length / 2) || matches.length;
+}
+
+function deriveRevisionPlan(
+  review: Record<string, unknown> | null | undefined,
+  validation?: ValidationReport | null,
+): RevisionPlan {
+  if (!review || typeof review !== 'object') {
+    const basePlan = { mustFix: [], warnings: [], suggestions: [] };
+    if (!validation) return basePlan;
+    return deriveRevisionPlan({} as any, validation);
+  }
+
+  const mustFix: RevisionPlanIssue[] = [];
+  const warnings: RevisionPlanIssue[] = [];
+  const seen = new Set<string>();
+
+  const pushItem = (target: RevisionPlanIssue[], issue: RevisionPlanIssue) => {
+    if (!issue.detail) return;
+    const key = `${issue.id}::${issue.category || ''}::${issue.chapterRef || ''}::${issue.detail}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    target.push(issue);
+  };
+
+  const mustFixList = Array.isArray((review as any).mustFixBeforePublish)
+    ? ((review as any).mustFixBeforePublish as any[]).filter((item) => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  mustFixList.forEach((detail, index) => {
+    pushItem(mustFix, {
+      id: `mustfix-${index + 1}`,
+      detail: detail.trim(),
+    });
+  });
+
+  const issues = Array.isArray((review as any).issues) ? ((review as any).issues as any[]) : [];
+  issues.forEach((issueRaw, index) => {
+    if (!issueRaw || typeof issueRaw !== 'object') return;
+    const detail = typeof issueRaw.detail === 'string' ? issueRaw.detail.trim() : '';
+    if (!detail) return;
+    const category = typeof issueRaw.category === 'string' ? issueRaw.category : undefined;
+    const chapterRef = typeof issueRaw.chapterRef === 'string' ? issueRaw.chapterRef : undefined;
+    const id =
+      typeof issueRaw.id === 'string' && issueRaw.id.trim().length > 0 ? issueRaw.id.trim() : `issue-${index + 1}`;
+    const tokens = [
+      typeof issueRaw.severity === 'string' ? issueRaw.severity.toLowerCase() : '',
+      typeof issueRaw.priority === 'string' ? issueRaw.priority.toLowerCase() : '',
+      typeof issueRaw.level === 'string' ? issueRaw.level.toLowerCase() : '',
+    ];
+    const categoryLower = (category || '').toLowerCase();
+    const isMustFixBySeverity = tokens.some((token) =>
+      ['blocker', 'critical', 'must', 'fail'].some((flag) => token.includes(flag)),
+    );
+    const reviewApproved = typeof (review as any).approved === 'boolean' ? (review as any).approved : true;
+    const isMustFixByCategory = !reviewApproved && ['logic', 'fairness'].includes(categoryLower);
+    const matchedMustFixDetail = mustFixList.some((item) => item.includes(detail));
+    const target = isMustFixBySeverity || isMustFixByCategory || matchedMustFixDetail ? mustFix : warnings;
+    pushItem(target, {
+      id,
+      detail,
+      category,
+      chapterRef,
+    });
+  });
+
+  if (validation && Array.isArray(validation.results)) {
+    validation.results.forEach((result) => {
+      if (!result || typeof result !== 'object') return;
+      const ruleId = typeof result.ruleId === 'string' ? result.ruleId : '';
+      if (!ruleId) return;
+      const detailMessage =
+        Array.isArray(result.details) && result.details.length > 0
+          ? result.details
+              .map((detail) => (detail && typeof detail.message === 'string' ? detail.message.trim() : ''))
+              .filter((msg) => msg)
+              .join('；')
+          : '';
+      const issue: RevisionPlanIssue = {
+        id: `validation-${ruleId}`,
+        detail: detailMessage ? `[${ruleId}] ${detailMessage}` : `[${ruleId}] 根据校验提示补齐缺失信息`,
+        category: 'validation',
+      };
+      if (result.status === 'fail') {
+        pushItem(mustFix, issue);
+        return;
+      }
+      if (CRITICAL_VALIDATION_RULES.has(ruleId) && result.status !== 'pass') {
+        pushItem(mustFix, issue);
+        return;
+      }
+      if (result.status === 'warn') {
+        pushItem(warnings, issue);
+      }
+    });
+  }
+
+  const suggestions =
+    Array.isArray((review as any).suggestions) && (review as any).suggestions.length > 0
+      ? ((review as any).suggestions as any[])
+          .filter((item) => typeof item === 'string' && item.trim().length > 0)
+          .map((item: string) => item.trim())
+      : [];
+
+  return { mustFix, warnings, suggestions };
 }
 
 async function enforceDialoguesInDraft(
@@ -288,6 +445,215 @@ function ensureChineseNames(outline: DetectiveOutline): DetectiveOutline {
   });
 
   return outline;
+}
+
+type ChapterAnchorMeta = {
+  index: number;
+  dayCode?: string;
+  time?: string;
+  label?: string;
+  summary?: string;
+};
+
+const TIME_PATTERN = /\b(\d{1,2}:\d{2})\b/;
+
+function parseChapterIndex(label?: string | null): number | null {
+  if (!label) return null;
+  const match = String(label).match(/(\d+)/);
+  if (!match) return null;
+  const index = Number.parseInt(match[1], 10) - 1;
+  if (!Number.isFinite(index) || index < 0) return null;
+  return index;
+}
+
+function collectChapterAnchors(outline: DetectiveOutline): Map<number, ChapterAnchorMeta> {
+  const map = new Map<number, ChapterAnchorMeta>();
+  const anchors = outline?.chapterAnchors ?? [];
+  if (!Array.isArray(anchors)) return map;
+  anchors.forEach((anchor) => {
+    const index = parseChapterIndex(anchor?.chapter);
+    if (index === null) return;
+    map.set(index, {
+      index,
+      dayCode: anchor?.dayCode ?? undefined,
+      time: anchor?.time ?? undefined,
+      label: anchor?.label ?? undefined,
+      summary: anchor?.summary ?? undefined,
+    });
+  });
+  return map;
+}
+
+function hasAnchorInText(text: string | undefined, anchor: ChapterAnchorMeta): boolean {
+  if (!text) return false;
+  const normalized = text.replace(/\s+/g, '');
+  const dayOk = anchor.dayCode ? normalized.includes(anchor.dayCode.replace(/\s+/g, '')) : true;
+  const timeOk = anchor.time ? normalized.includes(anchor.time.replace(/\s+/g, '')) : true;
+  return dayOk && timeOk;
+}
+
+function buildAnchorSentence(anchor: ChapterAnchorMeta): string {
+  const pieces: string[] = [];
+  if (anchor.dayCode) {
+    pieces.push(anchor.dayCode);
+  }
+  if (anchor.time) {
+    pieces.push(anchor.time);
+  }
+  if (anchor.label) {
+    pieces.push(anchor.label);
+  }
+  let sentence = pieces.join('，');
+  if (!sentence) {
+    sentence = '时间未明';
+  }
+  if (anchor.summary) {
+    sentence = `${sentence}：${anchor.summary}`;
+  }
+  if (!/[。！？!]$/.test(sentence)) {
+    sentence += '。';
+  }
+  return sentence;
+}
+
+function injectAnchorIntoChapter(content: string | undefined, anchor: ChapterAnchorMeta): { text: string; inserted: boolean } {
+  const base = content ?? '';
+  if (hasAnchorInText(base, anchor)) {
+    return { text: base, inserted: false };
+  }
+  const sentence = buildAnchorSentence(anchor);
+  const trimmedStart = base.trimStart();
+  if (!trimmedStart) {
+    return { text: sentence, inserted: true };
+  }
+  const lines = trimmedStart.split(/\n/);
+  if (lines.length > 0) {
+    const firstLine = lines[0];
+    if (/Day\s*\d+/i.test(firstLine) && TIME_PATTERN.test(firstLine)) {
+      if (firstLine.includes(sentence)) {
+        return { text: trimmedStart, inserted: false };
+      }
+      lines.splice(1, 0, sentence);
+      return { text: lines.join('\n'), inserted: true };
+    }
+  }
+  const merged = `${sentence}\n${trimmedStart}`;
+  return { text: merged, inserted: true };
+}
+
+function insertSentenceAfterIntro(content: string | undefined, sentence: string): string {
+  const base = content ?? '';
+  if (!base.trim()) {
+    return sentence.endsWith('。') ? sentence : `${sentence}。`;
+  }
+  const trimmed = base.trimStart();
+  const lines = trimmed.split('\n');
+  if (lines.length === 0) {
+    return `${sentence}\n${trimmed}`;
+  }
+  const firstLine = lines[0];
+  const anchorLine = /Day\s*\d+/i.test(firstLine) && TIME_PATTERN.test(firstLine);
+  if (anchorLine) {
+    lines.splice(1, 0, sentence.endsWith('。') ? sentence : `${sentence}。`);
+    return lines.join('\n');
+  }
+  return `${sentence.endsWith('。') ? sentence : `${sentence}。`}\n${trimmed}`;
+}
+
+function ensureAnchorsForDraft(outline: DetectiveOutline, draft: DetectiveStoryDraft) {
+  const anchorMap = collectChapterAnchors(outline);
+  if (anchorMap.size === 0) {
+    return { chapters: draft.chapters, notes: [] as string[] };
+  }
+  const notes: string[] = [];
+  const updatedChapters = draft.chapters.map((chapter, index) => {
+    if (!anchorMap.has(index)) {
+      return chapter;
+    }
+    const anchor = anchorMap.get(index)!;
+    const { text, inserted } = injectAnchorIntoChapter(chapter.content, anchor);
+    if (!inserted) {
+      return chapter;
+    }
+    notes.push(`自动补齐章节时间提示：Chapter ${index + 1} → ${anchor.dayCode ?? ''} ${anchor.time ?? ''}`.trim());
+    const updatedSummary = chapter.summary && !hasAnchorInText(chapter.summary, anchor)
+      ? `${buildAnchorSentence(anchor)}${chapter.summary.startsWith('\n') ? '' : '\n'}${chapter.summary}`
+      : chapter.summary;
+    return {
+      ...chapter,
+      summary: updatedSummary,
+      content: text,
+      wordCount: text.replace(/\s+/g, '').length,
+    };
+  });
+  return { chapters: updatedChapters, notes };
+}
+
+function ensureMotivesForDraft(
+  outline: DetectiveOutline,
+  draft: DetectiveStoryDraft,
+): { chapters: DetectiveStoryDraft['chapters']; notes: string[] } {
+  const characters = outline?.characters ?? [];
+  const suspects = characters.filter((char) => typeof char?.role === 'string' && /suspect/i.test(char.role));
+  if (suspects.length === 0) {
+    return { chapters: draft.chapters, notes: [] };
+  }
+  const chapters = [...draft.chapters];
+  const combinedEarlyText = chapters
+    .slice(0, Math.min(2, chapters.length))
+    .map((chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`)
+    .join('\n');
+  const notes: string[] = [];
+
+  suspects.forEach((suspect) => {
+    const keywords = Array.isArray(suspect.motiveKeywords)
+      ? Array.from(new Set(suspect.motiveKeywords.filter((kw): kw is string => Boolean(kw && kw.trim()))))
+      : [];
+    if (keywords.length === 0) {
+      return;
+    }
+    const missingKeyword = keywords.find((keyword) => !combinedEarlyText.includes(keyword));
+    if (!missingKeyword) {
+      return;
+    }
+    let targetIndex = 0;
+    if (Array.isArray(suspect.motiveScenes)) {
+      const preferred = suspect.motiveScenes
+        .map((scene) => parseChapterIndex(scene))
+        .find((idx) => idx !== null && idx < chapters.length);
+      if (preferred !== undefined && preferred !== null) {
+        targetIndex = Math.max(0, preferred);
+      }
+    }
+    if (targetIndex >= chapters.length) {
+      targetIndex = chapters.length - 1;
+    }
+    const sentence = `${suspect.name} 在提到${missingKeyword}时神情明显紧绷，这被旁人悄悄记在心里。`;
+    const chapter = chapters[targetIndex];
+    const newContent = insertSentenceAfterIntro(chapter.content, sentence);
+    chapters[targetIndex] = {
+      ...chapter,
+      content: newContent,
+      wordCount: newContent.replace(/\s+/g, '').length,
+    };
+    notes.push(`自动补写动机伏笔：${suspect.name}（关键词：${missingKeyword}） → Chapter ${targetIndex + 1}`);
+  });
+
+  return { chapters, notes };
+}
+
+function applyAnchorsAndMotives(outline: DetectiveOutline, draft: DetectiveStoryDraft) {
+  const anchorResult = ensureAnchorsForDraft(outline, draft);
+  const motiveResult = ensureMotivesForDraft(outline, { ...draft, chapters: anchorResult.chapters });
+  const continuityNotes = [...anchorResult.notes, ...motiveResult.notes];
+  const mergedDraft: DetectiveStoryDraft = {
+    ...draft,
+    chapters: motiveResult.chapters,
+  };
+  return {
+    draft: mergedDraft,
+    continuityNotes,
+  };
 }
 
 function heuristicCadenceAdjust(text: string, maxLen: number): string {
@@ -635,12 +1001,30 @@ export async function runStage2Writing(
         command: 'enforceDialoguesInDraft',
         meta: { dialoguesTarget },
       });
-      const storyDraft = await enforceDialoguesInDraft(storyDraftRaw, dialoguesTarget);
+      const storyDraftWithDialogues = await enforceDialoguesInDraft(storyDraftRaw, dialoguesTarget);
       if (enforceCommand) {
         telemetry?.completeCommand?.(enforceCommand, {
           resultSummary: `完成增强，对话目标 ${dialoguesTarget}`,
         });
       }
+
+      const anchorCommand = telemetry?.beginCommand?.({
+        label: '补齐章节时间与动机伏笔',
+        command: 'applyAnchorsAndMotives',
+      });
+      const anchorResult = applyAnchorsAndMotives(outline, storyDraftWithDialogues);
+      if (anchorCommand) {
+        telemetry?.completeCommand?.(anchorCommand, {
+          resultSummary: `自动补齐提示 ${anchorResult.continuityNotes.length} 项`,
+        });
+      }
+      const continuityNotes = Array.from(
+        new Set([...(storyDraftWithDialogues.continuityNotes ?? []), ...anchorResult.continuityNotes]),
+      ).filter(Boolean);
+      const storyDraft: DetectiveStoryDraft = {
+        ...anchorResult.draft,
+        continuityNotes: continuityNotes.length > 0 ? continuityNotes : anchorResult.draft.continuityNotes,
+      };
 
       telemetry?.registerArtifact?.({
         label: '阶段二写作草稿',
@@ -728,6 +1112,149 @@ export async function runStage3Review(
     preview: JSON.stringify(review, null, 2).slice(0, 2000),
   });
   return review;
+}
+
+export async function runStage4Revision(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+  review: Record<string, unknown> | null | undefined,
+  validation: ValidationReport | null | undefined,
+  promptOpts?: PromptBuildOptions,
+  telemetry?: StageTelemetry,
+): Promise<Stage4RevisionResult> {
+  const plan = deriveRevisionPlan(review, validation);
+  const hasActionableIssues = plan.mustFix.length > 0 || plan.warnings.length > 0;
+
+  telemetry?.log?.('info', '阶段四：生成修订计划', {
+    meta: {
+      mustFix: plan.mustFix.length,
+      warnings: plan.warnings.length,
+      suggestions: plan.suggestions.length,
+    },
+  });
+
+  if (!hasActionableIssues) {
+    telemetry?.log?.('info', '审稿未要求必修修改，跳过自动修订');
+    return {
+      draft: storyDraft,
+      plan,
+      skipped: true,
+    };
+  }
+
+  const promptCommand = telemetry?.beginCommand?.({
+    label: '构建阶段四修订提示词',
+    command: promptOpts ? 'buildStage4RevisionPromptProfile' : 'buildStage4RevisionPrompt',
+    meta: {
+      mustFix: plan.mustFix.length,
+      warnings: plan.warnings.length,
+    },
+  });
+  const prompt = promptOpts
+    ? buildStage4RevisionPromptProfile(outline, storyDraft, review ?? {}, plan, promptOpts)
+    : buildStage4RevisionPrompt(outline, storyDraft, review ?? {}, plan);
+  if (promptCommand) {
+    telemetry?.completeCommand?.(promptCommand, {
+      resultSummary: `提示词长度 ${prompt.length} 字符`,
+    });
+  }
+
+  const RETRIES = 2;
+  for (let attempt = 0; attempt < RETRIES; attempt += 1) {
+    const callCommand = telemetry?.beginCommand?.({
+      label: `调用 DeepSeek 修订模型（尝试 ${attempt + 1}）`,
+      command: 'POST /chat/completions',
+      meta: {
+        model: DETECTIVE_CONFIG.writingModel,
+        temperature: Math.min(0.5, DETECTIVE_CONFIG.writingTemperature),
+        attempt: attempt + 1,
+      },
+    });
+    try {
+      const response = await callDeepseek({
+        model: DETECTIVE_CONFIG.writingModel,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一名推理小说修订编辑，根据问题清单做定向修改并保持最小必要改动，仅输出 JSON。',
+          },
+          { role: 'user', content: prompt },
+        ],
+        maxTokens: DETECTIVE_CONFIG.maxTokens,
+        temperature: Math.min(0.5, DETECTIVE_CONFIG.writingTemperature),
+      });
+
+      if (callCommand) {
+        telemetry?.completeCommand?.(callCommand, {
+          resultSummary: `获得修订稿 ${response.content.length} 字符`,
+          meta: { usage: response.usage },
+        });
+      }
+
+      const parseCommand = telemetry?.beginCommand?.({
+        label: '解析修订输出',
+        command: 'extractJson',
+        meta: { attempt: attempt + 1 },
+      });
+      try {
+        const revised = extractJson(response.content) as DetectiveStoryDraft;
+        if (parseCommand) {
+          telemetry?.completeCommand?.(parseCommand, {
+            resultSummary: `修订稿章节 ${revised?.chapters?.length ?? 0}`,
+          });
+        }
+        if (!Array.isArray(revised?.chapters) || revised.chapters.length === 0) {
+          throw new Error('修订输出缺少章节内容');
+        }
+        telemetry?.registerArtifact?.({
+          label: '阶段四修订后的草稿',
+          type: 'json',
+          preview: JSON.stringify(
+            {
+              chapters: revised.chapters.length,
+              overallWordCount: revised.overallWordCount ?? null,
+              revisionNotes: revised.revisionNotes ?? [],
+            },
+            null,
+            2,
+          ),
+        });
+        return {
+          draft: revised,
+          plan,
+          skipped: false,
+        };
+      } catch (parseError: any) {
+        if (parseCommand) {
+          telemetry?.failCommand?.(parseCommand, {
+            errorMessage: parseError?.message || '解析失败',
+          });
+        }
+        if (attempt === RETRIES - 1) {
+          throw parseError;
+        }
+        telemetry?.log?.('warn', '修订输出解析失败，准备重试', {
+          meta: { attempt: attempt + 1, error: parseError?.message },
+        });
+      }
+    } catch (deepseekError: any) {
+      if (callCommand) {
+        telemetry?.failCommand?.(callCommand, {
+          errorMessage: deepseekError?.message || 'DeepSeek 调用失败',
+          meta: { code: deepseekError?.code },
+        });
+      }
+      if (attempt === RETRIES - 1) {
+        throw deepseekError;
+      }
+      telemetry?.log?.('warn', '修订模型调用失败，准备重试', {
+        commandId: callCommand,
+        meta: { attempt: attempt + 1 },
+      });
+    }
+  }
+
+  throw new Error('Stage4 Revision 未能生成有效修订稿');
 }
 
 function readPromptHint(name: string): string | null {

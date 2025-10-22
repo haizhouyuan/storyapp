@@ -24,9 +24,204 @@ function cluesSummary(outline: DetectiveOutline): string {
     if (!clue) return null as any;
     const label = clue.clue || `线索${index + 1}`;
     const meaning = clue.realMeaning ? `（真实含义：${clue.realMeaning}）` : '';
-    return `${label}${meaning}`;
+    const mislead = clue.isRedHerring ? '【红鲱鱼】' : '';
+    return `${label}${meaning}${mislead}`;
   }).filter(Boolean) as string[];
   return lines.join('\n- ');
+}
+
+function suspectsSummary(outline: DetectiveOutline): string {
+  const characters = outline?.characters ?? [];
+  const suspects = characters.filter((char) => typeof char?.role === 'string' && /suspect/i.test(char.role));
+  if (suspects.length === 0) {
+    return '（大纲未列出嫌疑人，请在正文中塑造至少两名具有明确动机的嫌疑人）';
+  }
+  return suspects
+    .map((suspect) => {
+      const motive = suspect.motive ? `动机：${suspect.motive}` : '动机待补充';
+      const motiveKeywords =
+        Array.isArray(suspect.motiveKeywords) && suspect.motiveKeywords.length > 0
+          ? `动机关键词：${Array.from(new Set(suspect.motiveKeywords)).join('、')}`
+          : '动机关键词待补充';
+      const motiveScenes =
+        Array.isArray(suspect.motiveScenes) && suspect.motiveScenes.length > 0
+          ? `重点场景：${Array.from(new Set(suspect.motiveScenes)).join('、')}`
+          : '重点场景待确认';
+      const secrets =
+        Array.isArray(suspect.secrets) && suspect.secrets.length > 0
+          ? `秘密：${suspect.secrets.join('、')}`
+          : '暂无额外秘密';
+      return `- ${suspect.name} — ${motive}；${motiveKeywords}；${motiveScenes}；${secrets}`;
+    })
+    .join('\n');
+}
+
+function mustForeshadowSummary(outline: DetectiveOutline): string {
+  const clues = outline?.clueMatrix ?? [];
+  const mustForeshadow = clues.filter((clue) => clue?.mustForeshadow);
+  if (mustForeshadow.length === 0) {
+    return '（无 mustForeshadow 线索；如后续正文引入关键证据，请至少提前两章埋设）';
+  }
+  return mustForeshadow
+    .map((clue) => {
+      const chapters = Array.isArray(clue.explicitForeshadowChapters) && clue.explicitForeshadowChapters.length > 0
+        ? clue.explicitForeshadowChapters.join('、')
+        : '章节待指定';
+      return `- ${clue.clue} → 需在 ${chapters} 中埋设，真实含义：${clue.realMeaning ?? '待明确'}`;
+    })
+    .join('\n');
+}
+
+function redHerringSummary(outline: DetectiveOutline): string {
+  const actBeats = outline?.acts?.flatMap((act) => act.beats ?? []) ?? [];
+  const redHerringsFromBeats = actBeats
+    .map((beat) => beat?.redHerring)
+    .filter((v): v is string => Boolean(v && v.trim()));
+  const clues = outline?.clueMatrix ?? [];
+  const clueHerrings = clues.filter((clue) => clue?.isRedHerring).map((clue) => clue.clue);
+  const merged = [...new Set([...redHerringsFromBeats, ...clueHerrings])];
+  if (merged.length === 0) {
+    return '（需至少设计一条红鲱鱼以误导读者对嫌疑人的判断）';
+  }
+  return merged.map((item, index) => `${index + 1}. ${item}`).join('\n');
+}
+
+function chapterGuidance(outline: DetectiveOutline): string {
+  const acts = outline?.acts ?? [];
+  if (acts.length === 0) {
+    return '（未提供幕结构，请在正文中自行按照起承转合安排章节，确保总章数不少于 4）';
+  }
+
+  const anchorMap = new Map<number, string>();
+  (outline?.chapterAnchors ?? []).forEach((anchor) => {
+    if (!anchor?.chapter) return;
+    const match = anchor.chapter.match(/(\d+)/);
+    if (!match) return;
+    const index = Number.parseInt(match[1], 10) - 1;
+    if (!Number.isFinite(index) || index < 0) return;
+    const slots = [anchor.dayCode, anchor.time].filter(Boolean).join(' ');
+    const label = anchor.label ? ` ${anchor.label}` : '';
+    const summary = anchor.summary ? `（${anchor.summary}）` : '';
+    anchorMap.set(index, `${slots || '时间待定'}${label}${summary}`);
+  });
+
+  let chapterCursor = 1;
+  const lines: string[] = [];
+  acts.forEach((act) => {
+    const beats = act?.beats ?? [];
+    const beatCount = Math.max(1, beats.length);
+    const chapterRange =
+      beatCount === 1 ? `第 ${chapterCursor} 章` : `第 ${chapterCursor}-${chapterCursor + beatCount - 1} 章`;
+    const anchorHints: string[] = [];
+    for (let offset = 0; offset < beatCount; offset += 1) {
+      const chapterIndex = chapterCursor - 1 + offset;
+      if (anchorMap.has(chapterIndex)) {
+        anchorHints.push(`Chapter ${chapterIndex + 1}：${anchorMap.get(chapterIndex)}`);
+      }
+    }
+    const anchorLine =
+      anchorHints.length > 0
+        ? `时间锚点：${anchorHints.join('；')}`
+        : '时间锚点：请结合大纲时间线补齐 DayX HH:MM 的自然语言提示';
+    const beatDetails = beats
+      .map((beat) => {
+        const clues = Array.isArray(beat.cluesRevealed) && beat.cluesRevealed.length > 0
+          ? `线索：${beat.cluesRevealed.join('、')}`
+          : '线索：可视情况揭示';
+        const red = beat.redHerring ? `红鲱鱼：${beat.redHerring}` : '';
+        return `    - 节拍 ${act.act}.${beat.beat}：${beat.summary}（${clues}${red ? `；${red}` : ''}）`;
+      })
+      .join('\n');
+    lines.push(
+      [
+        `${chapterRange} 应覆盖 Act ${act.act}（焦点：${act.focus}）。请保留主要事件顺序：`,
+        `    - ${anchorLine}`,
+        beatDetails || '    - （该幕缺少详细节拍，请在正文中自行补全矛盾冲突与线索推进）',
+      ].join('\n'),
+    );
+    chapterCursor += beatCount;
+  });
+
+  return lines.join('\n');
+}
+
+function timelineDayNotes(outline: DetectiveOutline): string {
+  const events = outline?.timeline ?? [];
+  if (events.length === 0) return '（无时间线提醒，如故事跨越多日请在正文主动注明日序与时间点）';
+  const daySet = new Set<string>();
+  events.forEach((event) => {
+    const match = event?.time?.match(/Day\s*(\d+)/i);
+    if (match) {
+      daySet.add(`Day${match[1]}`);
+    }
+  });
+  if (daySet.size > 1) {
+    return `（时间线覆盖 ${Array.from(daySet).join('、')}，正文中必须明确指出日期切换并解释跨日的行动安排）`;
+  }
+  return '（时间线集中在同一日，如正文需要跨日情节，请更新时间标注并给出合理过渡）';
+}
+
+function chapterAnchorSummary(outline: DetectiveOutline): string {
+  const anchors = outline?.chapterAnchors ?? [];
+  if (!Array.isArray(anchors) || anchors.length === 0) {
+    return '（未提供章节时间锚点，请在写作中自行为每章补齐 DayX HH:MM 信息）';
+  }
+  return anchors
+    .map((anchor) => {
+      const chapter = anchor?.chapter ?? 'Chapter ?';
+      const slots = [anchor?.dayCode, anchor?.time].filter(Boolean).join(' ');
+      const label = anchor?.label ? ` — ${anchor.label}` : '';
+      const summary = anchor?.summary ? `（提示：${anchor.summary}）` : '';
+      return `- ${chapter} → ${slots || '时间待定'}${label}${summary}`;
+    })
+    .join('\n');
+}
+
+function motiveKeywordChecklist(outline: DetectiveOutline): string {
+  const characters = outline?.characters ?? [];
+  const suspects = characters.filter((char) => typeof char?.role === 'string' && /suspect/i.test(char.role));
+  if (suspects.length === 0) {
+    return '（未提供嫌疑人动机关键词，请在写作中补充关键动机提示）';
+  }
+  const lines = suspects
+    .map((suspect) => {
+      const keywords = Array.isArray(suspect.motiveKeywords)
+        ? Array.from(new Set(suspect.motiveKeywords.filter((kw): kw is string => Boolean(kw && kw.trim()))))
+        : [];
+      if (keywords.length === 0) {
+        return `- ${suspect.name}：无动机关键词，请在前两章补写其动机伏笔。`;
+      }
+      return `- ${suspect.name}：关键词「${keywords.join('、')}」，需在前两章通过对白或细节埋设。`;
+    })
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return '（动机关键词缺失，请在写作中补齐）';
+  }
+  return lines.join('\n');
+}
+
+export interface RevisionPlanIssue {
+  id: string;
+  detail: string;
+  chapterRef?: string;
+  category?: string;
+}
+
+export interface RevisionPlan {
+  mustFix: RevisionPlanIssue[];
+  warnings: RevisionPlanIssue[];
+  suggestions: string[];
+}
+
+function formatRevisionItems(items: RevisionPlanIssue[]): string {
+  if (!items.length) return '（无）';
+  return items
+    .map((item, index) => {
+      const chapter = item.chapterRef ? `（章节：${item.chapterRef}）` : '';
+      const category = item.category ? `【${item.category}】` : '';
+      return `${index + 1}. ${category}${item.detail}${chapter}`;
+    })
+    .join('\n');
 }
 
 // 兼容旧实现：直接内联规范
@@ -37,7 +232,14 @@ export function buildStage1Prompt(topic: string): string {
   "centralTrick": { "summary": "...", "mechanism": "...", "fairnessNotes": ["..."] },
   "caseSetup": { "victim": "...", "crimeScene": "...", "initialMystery": "..." },
   "characters": [
-    { "name": "...", "role": "detective|suspect|victim|witness", "motive": "...", "secrets": ["..."] }
+    {
+      "name": "...",
+      "role": "detective|suspect|victim|witness",
+      "motive": "...",
+      "secrets": ["..."],
+      "motiveKeywords": ["..."],
+      "motiveScenes": ["Chapter 1 图书馆", "Chapter 2 实验室"]
+    }
   ],
   "acts": [
     { "act": 1, "focus": "...", "beats": [ { "beat": 1, "summary": "...", "cluesRevealed": ["..."], "redHerring": "..." } ] },
@@ -45,10 +247,13 @@ export function buildStage1Prompt(topic: string): string {
     { "act": 3, "focus": "...", "beats": [ { "beat": 1, "summary": "..." } ] }
   ],
   "clueMatrix": [
-    { "clue": "...", "surfaceMeaning": "...", "realMeaning": "...", "appearsAtAct": 1, "mustForeshadow": true, "explicitForeshadowChapters": ["Chapter 1", "Chapter 2"] }
+    { "clue": "...", "surfaceMeaning": "...", "realMeaning": "...", "appearsAtAct": 1, "mustForeshadow": true, "explicitForeshadowChapters": ["Chapter 1", "Chapter 2"], "isRedHerring": false }
   ],
   "timeline": [
     { "time": "Day1 18:30", "event": "...", "participants": ["..."] }
+  ],
+  "chapterAnchors": [
+    { "chapter": "Chapter 1", "dayCode": "Day1", "time": "10:00", "label": "...", "summary": "..." }
   ],
   "solution": { "culprit": "...", "motiveCore": "...", "keyReveals": ["..."], "fairnessChecklist": ["..."] },
   "logicChecklist": ["所有诡计准备动作在谋杀发生前完成并写明时间", "每条关键线索至少在破案前两章有显式铺垫", "时间线与线索矩阵交叉验证无矛盾"],
@@ -58,11 +263,14 @@ export function buildStage1Prompt(topic: string): string {
 要求：
 1. 勿输出解释或额外文本，仅返回 JSON。
 2. 明确描述诡计准备动作发生的具体时间（例如在谋杀前多少分钟），并写入 timeline。
-3. 每条 clueMatrix 必须注明在哪些章节显式埋设（explicitForeshadowChapters）。
-4. 在 fairnessNotes 中指出读者能提前获知的证据与提示。
-5. 3 幕结构，每幕≥2 个 beat；角色≥6（含侦探/受害者/嫌疑/证人）。
-6. 线索≥4，覆盖时间/物证/证词等不同类型。
-9. 主题：${topic}，风格参考黄金时代本格推理。
+3. 如果故事跨越多日，请在 timeline 中使用 Day1/Day2 等标注，并解释日期切换的因果关系。
+4. 生成 chapterAnchors 数组，与章节一一对应，给出 DayX 与 HH:MM、现场标签与一句描述，并在 timeline.participants 中标注对应章节（如 "Chapter 1"）。
+5. 每位嫌疑人必须提供 motiveKeywords（不少于 2 个中文关键词）与 motiveScenes（指明章节或场景），便于后续正文埋设动机伏笔。
+6. 每条 clueMatrix 必须注明 explicitForeshadowChapters；若为误导性线索请设置 isRedHerring=true，并在 beats.redHerring 中安排对应戏份。
+7. 在 fairnessNotes 中指出读者能提前获知的证据与提示，同时说明哪些线索可能被误导性解读。
+8. 3 幕结构，每幕≥2 个 beat；角色≥6（含侦探/受害者/嫌疑/证人），至少 1 条红鲱鱼贯穿发展并最终澄清。
+9. 线索≥4，覆盖时间/物证/证词等不同类型，并保证 mustForeshadow=true 的线索不少于 2 条。
+10. 主题：${topic}，风格参考黄金时代本格推理。
   `.trim();
 }
 
@@ -76,11 +284,27 @@ export function buildStage2Prompt(outline: DetectiveOutline): string {
 以下是侦探故事的大纲（JSON）：
 ${JSON.stringify(outline, null, 2)}
 
-时间线提示（请在正文中自然呈现真实时间点）：
-${timelineSummary(outline)}
+章节规划建议：
+${chapterGuidance(outline)}
 
-关键信息（请勿凭空创造决定性证据）：
-- ${cluesSummary(outline)}
+嫌疑人与动机提示：
+${suspectsSummary(outline)}
+
+必须提前铺垫的线索：
+${mustForeshadowSummary(outline)}
+
+红鲱鱼运用建议：
+${redHerringSummary(outline)}
+
+时间线提醒：
+${timelineSummary(outline)}
+${timelineDayNotes(outline)}
+
+章节时间锚点：
+${chapterAnchorSummary(outline)}
+
+动机关键词提示：
+${motiveKeywordChecklist(outline)}
 
 请输出结构化 JSON，示例如下：
 {
@@ -100,12 +324,14 @@ ${timelineSummary(outline)}
 }
 
 写作要求：
-1. 总字数约 4500-5500 字，每章按照大纲顺序展开完整事件弧。
-2. 线索必须通过自然描写或对白呈现，禁止使用 [CLUE] 等符号标签；在揭晓前至少两次提及 mustForeshadow 线索。
-3. 章节中如出现时间点，请在句子中说明（例如：“真实时间 20:05，灯塔再次响起。”）。
-4. 不得引入大纲外的决定性证据，如确需补充，必须在前章铺垫并写入 cluesEmbedded。
-5. 结局章节需逐条回收关键线索，解释机关运作与凶手动机，给出善后场景。
-6. 对话、感官描写与情绪应符合 middle_grade 阅读级别，避免过度暴力或恐怖细节。
+1. 总字数约 4500-5500 字。章节顺序需遵循“章节规划建议”，确保每一幕的节拍与线索完整呈现。
+2. 每章首段必须以自然语言写出对应的 DayX HH:MM 时间提示（参照“章节时间锚点”）；若与大纲时间不同或需新增时间点，请在 continuityNotes 说明原因。
+3. 在前两章通过对白或描写埋入每位嫌疑人的动机关键词（见“动机关键词提示”），并保持线索性的语境。
+4. 线索必须通过自然描写或对白呈现，禁止使用 [CLUE] 等标签；对 mustForeshadow 线索至少提前两次暗示，并在 cluesEmbedded 中注明。
+5. 红鲱鱼需在正文中制造合理误导，但在真相揭露时澄清误导来源，并在 redHerringsEmbedded 中列出实际使用的误导元素。
+6. 不得引入大纲外的决定性证据；如必须新增，请在上一章或同章前半段做铺垫，并同步更新 cluesEmbedded。
+7. 结局章节需通过角色对话或侦探推理复盘关键线索，避免清单式罗列；同时交代善后与人物情绪。
+8. 整体使用第三人称客观视角，维持紧张而逻辑精密的氛围，语言保持少儿可读性（middle_grade）。
 仅返回 JSON。`.trim();
 }
 
@@ -113,8 +339,27 @@ export function buildStage2PromptProfile(outline: DetectiveOutline, opts?: Promp
   const ctx = buildWriterPrompt(outline, opts);
   const tail = [
     '',
+    '章节规划建议：',
+    chapterGuidance(outline),
+    '',
+    '嫌疑人与动机提示：',
+    suspectsSummary(outline),
+    '',
+    '必须提前铺垫的线索：',
+    mustForeshadowSummary(outline),
+    '',
+    '红鲱鱼运用建议：',
+    redHerringSummary(outline),
+    '',
     '时间线提示：',
     timelineSummary(outline),
+    timelineDayNotes(outline),
+    '',
+    '章节时间锚点：',
+    chapterAnchorSummary(outline),
+    '',
+    '动机关键词提示：',
+    motiveKeywordChecklist(outline),
     '',
     '关键信息（需在正文中自然呈现）：',
     '- ' + cluesSummary(outline),
@@ -174,4 +419,125 @@ export function buildStage3PromptProfile(outline: DetectiveOutline, draftJson: D
     '2. 仅返回 JSON。',
   ].join('\n');
   return `${ctx.system}\n\n${ctx.user}\n\n${body}\n\n${tail}`;
+}
+
+export function buildStage4RevisionPrompt(
+  outline: DetectiveOutline,
+  draftJson: DetectiveStoryDraft,
+  review: Record<string, unknown>,
+  plan: RevisionPlan,
+): string {
+  const mustFixRuleIds = plan.mustFix
+    .map((item) => {
+      const match = item.detail.match(/\[([^\]]+)\]/);
+      return match ? match[1] : null;
+    })
+    .filter((ruleId): ruleId is string => Boolean(ruleId));
+  const requiresTimeline = mustFixRuleIds.some((ruleId) =>
+    ['timeline-from-text', 'chapter-time-tags'].includes(ruleId),
+  );
+  const requiresMotives = mustFixRuleIds.includes('motive-foreshadowing');
+  const criticalLines = [
+    requiresTimeline
+      ? '为所有章节首段补写 DayX HH:MM 的自然语言时间提示，并对照 timeline 更新 continuityNotes 说明理由。'
+      : null,
+    requiresMotives
+      ? '在 Chapter 1-2 通过对白或描写补充嫌疑人动机关键词，使其与 Stage1 提供的 motiveKeywords 对应。'
+      : null,
+  ].filter((line): line is string => Boolean(line));
+  const criticalGuidance = criticalLines.length
+    ? criticalLines.map((line) => `- ${line}`).join('\n')
+    : '- 请逐条处理 Must Fix 项，并在 revisionNotes 中说明调整。';
+  return `
+故事大纲（供参考，请勿违背核心诡计）：
+${JSON.stringify(outline, null, 2)}
+
+现有故事草稿：
+${JSON.stringify(draftJson, null, 2)}
+
+审稿反馈：
+${JSON.stringify(review, null, 2)}
+
+待处理的 Must Fix 列表：
+${formatRevisionItems(plan.mustFix)}
+
+需要关注的其他警告与提醒：
+${formatRevisionItems(plan.warnings)}
+
+可选优化建议：
+${plan.suggestions.length ? plan.suggestions.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '（无）'}
+
+重点修复提示：
+${criticalGuidance}
+
+修订要求：
+1. 必须逐条解决 Must Fix 问题，并优先完成“重点修复提示”中的校验项目；若存在时间线或线索矛盾，请在正文修正并记录 revisionNotes。
+2. 优先处理逻辑与公平性相关警告；若发现原始大纲信息不足，可在 continuityNotes 中记录补充设定，但正文必须自洽。
+3. 仅在必要章节进行增删改，保持原有结构与篇幅；禁止删除已确认的关键线索。
+4. 若需补写时间或动机伏笔，请在章节首段与 Chapter 1-2 中自然融入 DayX HH:MM 与动机关键词，并同步更新 cluesEmbedded/redHerringsEmbedded 与 continuityNotes。
+5. 使用第三人称中文叙述，保持 middle_grade 读者可读性；新增线索或伏笔后需更新相关字段。
+6. 输出完整的故事 JSON，字段同 Stage2（chapters、overallWordCount、narrativeStyle、continuityNotes），并额外提供 revisionNotes 描述所做改动。
+仅返回 JSON。`.trim();
+}
+
+export function buildStage4RevisionPromptProfile(
+  outline: DetectiveOutline,
+  draftJson: DetectiveStoryDraft,
+  review: Record<string, unknown>,
+  plan: RevisionPlan,
+  opts?: PromptBuildOptions,
+): string {
+  const ctx = buildWriterPrompt(outline, opts);
+  const mustFixRuleIds = plan.mustFix
+    .map((item) => {
+      const match = item.detail.match(/\[([^\]]+)\]/);
+      return match ? match[1] : null;
+    })
+    .filter((ruleId): ruleId is string => Boolean(ruleId));
+  const requiresTimeline = mustFixRuleIds.some((ruleId) =>
+    ['timeline-from-text', 'chapter-time-tags'].includes(ruleId),
+  );
+  const requiresMotives = mustFixRuleIds.includes('motive-foreshadowing');
+  const criticalLines = [
+    requiresTimeline
+      ? '补齐章节首段的 DayX HH:MM 时间提示，并在 Continuity Notes 记录差异原因。'
+      : null,
+    requiresMotives
+      ? '在前两章通过对白或细节植入嫌疑人的动机关键词，使读者可在结局前两次察觉。'
+      : null,
+  ].filter((line): line is string => Boolean(line));
+  const criticalGuidance = criticalLines.length
+    ? criticalLines.map((line) => `- ${line}`).join('\n')
+    : '- 逐条落实 Must Fix 与 Warn 项，完成后在 revisionNotes 标记。';
+  const tail = [
+    '—— 修订上下文 ——',
+    '',
+    '待处理的 Must Fix 列表：',
+    formatRevisionItems(plan.mustFix),
+    '',
+    '需要关注的其他警告：',
+    formatRevisionItems(plan.warnings),
+    '',
+    '可选建议：',
+    plan.suggestions.length ? plan.suggestions.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '（无）',
+    '',
+    '重点修复提示：',
+    criticalGuidance,
+  ].join('\n');
+  return [
+    ctx.system,
+    '',
+    ctx.user,
+    '',
+    '故事大纲：',
+    JSON.stringify(outline, null, 2),
+    '',
+    '当前故事草稿：',
+    JSON.stringify(draftJson, null, 2),
+    '',
+    '审稿反馈：',
+    JSON.stringify(review, null, 2),
+    '',
+    tail,
+  ].join('\n');
 }

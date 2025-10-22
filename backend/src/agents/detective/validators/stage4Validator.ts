@@ -307,8 +307,27 @@ function validateMotiveForeshadowing(
   const motiveTexts: string[] = [];
   if (typeof solution.motiveCore === 'string') motiveTexts.push(solution.motiveCore);
   if (Array.isArray(solution.keyReveals)) motiveTexts.push(...(solution.keyReveals as string[]));
-  const motiveTokens = extractMotiveTokens(motiveTexts.join(' '));
-  if (motiveTokens.length === 0) {
+  const suspects = (outline?.characters ?? []).filter(
+    (character) => typeof character?.role === 'string' && /suspect/i.test(character.role ?? ''),
+  );
+  const suspectEntries = suspects
+    .map((suspect) => {
+      const keywords = Array.isArray(suspect.motiveKeywords)
+        ? Array.from(new Set(suspect.motiveKeywords.filter((kw): kw is string => Boolean(kw && kw.trim()))))
+        : [];
+      return {
+        name: suspect.name || '嫌疑人',
+        keywords,
+      };
+    })
+    .filter((entry) => entry.keywords.length > 0);
+  const motiveTokens = Array.from(
+    new Set([
+      ...extractMotiveTokens(motiveTexts.join(' ')),
+      ...suspectEntries.flatMap((entry) => entry.keywords),
+    ]),
+  );
+  if (motiveTokens.length === 0 && suspectEntries.length === 0) {
     return {
       ruleId: 'motive-foreshadowing',
       status: 'pass',
@@ -320,7 +339,15 @@ function validateMotiveForeshadowing(
     .map((chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`)
     .join('\n');
   const hits = motiveTokens.filter((token) => token && earlyText.includes(token));
-  if (hits.length > 0) {
+  const missingTokens = motiveTokens.filter((token) => token && !earlyText.includes(token));
+  const suspectMissing = suspectEntries
+    .map((entry) => {
+      const missing = entry.keywords.filter((keyword) => keyword && !earlyText.includes(keyword));
+      if (missing.length === 0) return null;
+      return `嫌疑人 ${entry.name} 缺少伏笔：${missing.join('、')}`;
+    })
+    .filter((msg): msg is string => Boolean(msg));
+  if (missingTokens.length === 0 && suspectMissing.length === 0) {
     return {
       ruleId: 'motive-foreshadowing',
       status: 'pass',
@@ -330,7 +357,10 @@ function validateMotiveForeshadowing(
   return {
     ruleId: 'motive-foreshadowing',
     status: 'warn',
-    details: [{ message: `未在前文发现动机相关提示，可考虑在前两章埋入：${motiveTokens.slice(0, 5).join('、')}` }],
+    details: [
+      { message: `未在前文发现完整的动机提示，请在前两章补齐：${missingTokens.slice(0, 5).join('、') || '关键关键词'}` },
+      ...(suspectMissing.length > 0 ? suspectMissing.map((msg) => ({ message: msg })) : []),
+    ],
   };
 }
 function normalizeTimelineTime(value?: string): string | null {

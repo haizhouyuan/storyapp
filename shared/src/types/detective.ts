@@ -8,6 +8,8 @@ export interface DetectiveCharacter {
   role: 'detective' | 'suspect' | 'victim' | 'witness' | string;
   motive?: string;
   secrets?: string[];
+  motiveKeywords?: string[];
+  motiveScenes?: string[];
 }
 
 export interface DetectiveActBeat {
@@ -30,12 +32,21 @@ export interface DetectiveClue {
   appearsAtAct?: number;
   mustForeshadow?: boolean;
   explicitForeshadowChapters?: string[];
+  isRedHerring?: boolean;
 }
 
 export interface DetectiveTimelineEvent {
   time: string; // e.g. "Day1 19:40"
   event: string;
   participants?: string[];
+}
+
+export interface DetectiveChapterAnchor {
+  chapter: string; // "Chapter 1"
+  dayCode?: string; // "Day1"
+  time?: string; // "10:00"
+  label?: string;
+  summary?: string;
 }
 
 export interface DetectiveOutline {
@@ -53,6 +64,7 @@ export interface DetectiveOutline {
   acts?: DetectiveAct[];
   clueMatrix?: DetectiveClue[];
   timeline?: DetectiveTimelineEvent[];
+  chapterAnchors?: DetectiveChapterAnchor[];
   themes?: string[];
   logicChecklist?: string[];
 }
@@ -71,6 +83,7 @@ export interface DetectiveStoryDraft {
   overallWordCount?: number;
   narrativeStyle?: string;
   continuityNotes?: string[];
+  revisionNotes?: string[];
 }
 
 export interface ValidationRuleDetail {

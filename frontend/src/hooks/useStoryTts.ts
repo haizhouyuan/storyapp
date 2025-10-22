@@ -7,7 +7,6 @@ import type {
   TtsSynthesisResponse,
   TtsVoicesResponse,
 } from '../../../shared/types';
-export type { StoryTtsBatchResponse } from '../../../shared/types';
 import { requestStorySpeech, fetchTtsVoices } from '../utils/api';
 
 export type TtsStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -219,7 +218,7 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
         }),
       });
 
-      const data: StoryTtsBatchStatusResponse | StoryTtsBatchResponse = await response.json();
+      const data: StoryTtsBatchStatusResponse | StoryTtsBatchResponse | { success?: boolean; message?: string; error?: string } = await response.json();
 
       const isPending = response.status === 202 || (data as StoryTtsBatchStatusResponse).status === 'pending';
 
@@ -233,10 +232,21 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
         return await pollStoryStatus(storyKey, pollInterval);
       }
 
+      if (!response.ok) {
+        const message =
+          (data as any)?.message || (data as any)?.error || '故事合成失败';
+        const error = new Error(message);
+        (error as any).code = (data as any)?.error;
+        throw error;
+      }
+
       const readyData = data as StoryTtsBatchResponse;
 
-      if (!response.ok || !readyData.success) {
-        throw new Error(readyData.error || '故事合成失败');
+      if (!readyData.success) {
+        const message = readyData.error || '故事合成失败';
+        const error = new Error(message);
+        (error as any).code = readyData.error;
+        throw error;
       }
 
       setStatus('ready');
@@ -262,3 +272,5 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
 }
 
 export default useStoryTts;
+
+export type { StoryTtsBatchResponse };

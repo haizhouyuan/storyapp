@@ -1,4 +1,10 @@
-import type { DetectiveOutline, DetectiveStoryDraft, DetectiveTimelineEvent } from '@storyapp/shared';
+import type {
+  DetectiveOutline,
+  DetectiveStoryDraft,
+  DetectiveTimelineEvent,
+  DetectiveChapterAnchor,
+} from '@storyapp/shared';
+import type { DetectiveChapter } from '@storyapp/shared';
 import { DETECTIVE_MECHANISM_GROUPS } from '@storyapp/shared';
 
 interface ChapterExposure {
@@ -12,6 +18,8 @@ interface OutlineHarmonizeMeta {
   timelineNormalized: number;
   mechanismKeywordsAppended: string[];
   generatedClues: string[];
+  chapterAnchorsGenerated: number;
+  chapterAnchorsPatched: number;
 }
 
 export interface OutlineHarmonizeResult {
@@ -32,6 +40,50 @@ const FALLBACK_MECHANISM_KEYWORDS = Array.from(
       .flatMap((cfg) => [...cfg.requires, ...cfg.triggers]),
   ),
 );
+const DAY_PATTERN = /Day\s*\d+/i;
+const HHMM_PATTERN = /\b\d{1,2}:\d{2}\b/;
+
+function parseChapterIndex(label?: string | null): number | null {
+  if (!label) return null;
+  const match = String(label).match(/(\d+)/);
+  if (!match) return null;
+  const index = Number.parseInt(match[1], 10) - 1;
+  if (!Number.isFinite(index) || index < 0) return null;
+  return index;
+}
+
+function deriveChapterAnchorFromChapter(
+  index: number,
+  chapter: DetectiveChapter,
+  fallback?: DetectiveChapterAnchor,
+): DetectiveChapterAnchor | null {
+  const chapterLabel = `Chapter ${index + 1}`;
+  const searchScope = `${chapter.summary ?? ''}\n${chapter.content ?? ''}`;
+  const foundDay = searchScope.match(DAY_PATTERN)?.[0]?.replace(/\s+/g, '') ?? fallback?.dayCode;
+  const foundTime = searchScope.match(HHMM_PATTERN)?.[0] ?? fallback?.time;
+  if (!foundDay && !foundTime && !fallback) {
+    return null;
+  }
+  const firstLine = (chapter.content || '').trim().split('\n')[0] ?? '';
+  const cleanedLabel = firstLine
+    .replace(DAY_PATTERN, '')
+    .replace(HHMM_PATTERN, '')
+    .replace(/^[，,。\s:：\-—~·]+/, '')
+    .split(/[。！？!?]/)[0]
+    .trim();
+  const label = cleanedLabel || fallback?.label;
+  const summary =
+    fallback?.summary ||
+    (chapter.summary ? chapter.summary.split('\n')[0]?.trim() : undefined) ||
+    (cleanedLabel && cleanedLabel !== label ? cleanedLabel : undefined);
+  return {
+    chapter: fallback?.chapter ?? chapterLabel,
+    dayCode: foundDay ?? undefined,
+    time: foundTime ?? undefined,
+    label: label || undefined,
+    summary: summary || undefined,
+  };
+}
 
 /**
  * 将 Stage2/Stage3 真实章节信息回写到大纲：
@@ -147,6 +199,57 @@ export function harmonizeOutlineWithDraft(
   const { events: enrichedTimeline, normalizedCount } = mergeTextualTimes(timeline, chapters);
   safeOutline.timeline = ensureChapterCoverage(enrichedTimeline, chapters);
 
+  const existingAnchors = Array.isArray(safeOutline.chapterAnchors) ? [...safeOutline.chapterAnchors] : [];
+  const anchorMap = new Map<number, DetectiveChapterAnchor>();
+  existingAnchors.forEach((anchor) => {
+    const index = parseChapterIndex(anchor?.chapter);
+    if (index === null) return;
+    anchorMap.set(index, { ...anchor, chapter: `Chapter ${index + 1}` });
+  });
+  let chapterAnchorsGenerated = 0;
+  let chapterAnchorsPatched = 0;
+  chapters.forEach((chapter, index) => {
+    const derived = deriveChapterAnchorFromChapter(index, chapter, anchorMap.get(index));
+    if (!derived) return;
+    if (!anchorMap.has(index)) {
+      anchorMap.set(index, derived);
+      chapterAnchorsGenerated += 1;
+      return;
+    }
+    const current = anchorMap.get(index)!;
+    let patched = false;
+    if (!current.dayCode && derived.dayCode) {
+      current.dayCode = derived.dayCode;
+      patched = true;
+    }
+    if (!current.time && derived.time) {
+      current.time = derived.time;
+      patched = true;
+    }
+    if (!current.label && derived.label) {
+      current.label = derived.label;
+      patched = true;
+    }
+    if (!current.summary && derived.summary) {
+      current.summary = derived.summary;
+      patched = true;
+    }
+    if (patched) {
+      chapterAnchorsPatched += 1;
+    }
+  });
+  if (anchorMap.size > 0) {
+    safeOutline.chapterAnchors = Array.from(anchorMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([idx, anchor]) => ({
+        chapter: anchor.chapter ?? `Chapter ${idx + 1}`,
+        dayCode: anchor.dayCode,
+        time: anchor.time,
+        label: anchor.label,
+        summary: anchor.summary,
+      }));
+  }
+
   const mechanismKeywordsAppended: string[] = [];
   if (options.ensureMechanismKeywords !== false) {
     const appended = ensureMechanismKeywords(safeOutline, options.mechanismKeywords);
@@ -163,6 +266,8 @@ export function harmonizeOutlineWithDraft(
       timelineNormalized: normalizedCount,
       mechanismKeywordsAppended,
       generatedClues,
+      chapterAnchorsGenerated,
+      chapterAnchorsPatched,
     },
   };
 }
