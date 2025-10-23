@@ -54,10 +54,17 @@ if (DEEPSEEK_API_KEY) {
   defaultHeaders.Authorization = `Bearer ${DEEPSEEK_API_KEY}`;
 }
 
+// 超时配置常量（毫秒）
+export const DEEPSEEK_TIMEOUTS = {
+  REASONER: parseInt(process.env.DEEPSEEK_REASONER_TIMEOUT_MS || '300000', 10), // 5分钟
+  CHAT: parseInt(process.env.DEEPSEEK_CHAT_TIMEOUT_MS || '120000', 10),         // 2分钟
+  HEALTHCHECK: 7000,                                                             // 7秒
+} as const;
+
 // 创建DeepSeek API客户端
 export const deepseekClient = axios.create({
   baseURL: DEEPSEEK_API_URL,
-  timeout: 180000, // 增加到180秒超时，适应AI推理/生成
+  // 不设置全局timeout，改为每个请求单独设置
   headers: defaultHeaders,
   // 添加重试和连接配置
   maxRedirects: 5,
@@ -78,14 +85,14 @@ deepseekClient.interceptors.response.use(
       config.__retryCount = 0;
     }
     
-    // 判断是否应该重试
+    // 判断是否应该重试（排除超时错误）
     const shouldRetry = 
       config.__retryCount < 3 && // 最多重试3次
       (
         error.code === 'ECONNRESET' ||
         error.code === 'ENOTFOUND' ||
         error.code === 'ECONNREFUSED' ||
-        error.code === 'ETIMEDOUT' ||
+        // 不重试ETIMEDOUT，避免长时间等待
         (error.response && [502, 503, 504].includes(error.response.status))
       );
     
@@ -147,7 +154,7 @@ export async function checkDeepseekHealth(force = false): Promise<DeepseekHealth
         temperature: 0,
         stream: false,
       },
-      { timeout: 7000 },
+      { timeout: DEEPSEEK_TIMEOUTS.HEALTHCHECK },
     );
 
     const latencyMs = Date.now() - start;

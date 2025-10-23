@@ -201,21 +201,63 @@ router.get('/:id/stage-activity', (req: Request, res: Response) => {
 
 router.get('/:id/stream', (req: Request, res: Response) => {
   const { id } = req.params;
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Keep-Alive', 'timeout=120, max=1000');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  
+  try {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Keep-Alive', 'timeout=120, max=1000');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
-  // 立即写入一条注释可触发代理和客户端建立事件流
-  res.write(': connected\n\n');
+    // 立即写入一条注释可触发代理和客户端建立事件流
+    res.write(': connected\n\n');
 
-  const unregister = registerWorkflowStream(id, res);
+    workflowLogger.info({ workflowId: id }, 'SSE连接已建立');
 
-  req.on('close', () => {
-    unregister();
-  });
+    const unregister = registerWorkflowStream(id, res);
+    let cleaned = false;
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      unregister();
+      workflowLogger.info({ workflowId: id }, 'SSE连接已关闭');
+    };
+
+    // 处理客户端主动断开
+    req.on('close', () => {
+      workflowLogger.debug({ workflowId: id }, 'SSE客户端断开连接');
+      cleanup();
+    });
+
+    // 处理请求错误
+    req.on('error', (err) => {
+      workflowLogger.error({ err, workflowId: id }, 'SSE请求错误');
+      cleanup();
+    });
+
+    // 处理响应错误
+    res.on('error', (err) => {
+      workflowLogger.error({ err, workflowId: id }, 'SSE响应错误');
+      cleanup();
+    });
+
+    // 处理响应完成（可能是由于错误或超时）
+    res.on('finish', () => {
+      workflowLogger.debug({ workflowId: id }, 'SSE响应完成');
+      cleanup();
+    });
+  } catch (error: any) {
+    workflowLogger.error({ err: error, workflowId: id }, 'SSE连接建立失败');
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false, 
+        error: 'STREAM_ERROR', 
+        message: 'Failed to establish SSE connection' 
+      });
+    }
+  }
 });
 
 if (enableTestEndpoints) {

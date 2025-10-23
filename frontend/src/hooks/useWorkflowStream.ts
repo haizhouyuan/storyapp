@@ -9,8 +9,15 @@ import type {
   WorkflowStageExecutionSummary,
 } from '@storyapp/shared';
 import toast from 'react-hot-toast';
+import { useSseLogger } from './useSseLogger';
 
-const STAGE_ORDER = ['stage1_planning', 'stage2_writing', 'stage3_review', 'stage4_validation'];
+const STAGE_ORDER = [
+  'stage1_planning',
+  'stage2_writing',
+  'stage3_review',
+  'stage4_revision',
+  'stage5_validation',
+];
 
 type StageStatusMap = Record<string, WorkflowEvent>;
 type StageActivityMap = Record<string, WorkflowStageExecution>;
@@ -43,6 +50,13 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
   const [reconnectVersion, setReconnectVersion] = useState(0);
   const hadInitialConnectionRef = useRef(false);
   const connectionInterruptedRef = useRef(false);
+  const [eventSource, setEventSource] = useState<EventSource | null>(null);
+  
+  // 🔧 统一 SSE 日志管理
+  useSseLogger(eventSource, { 
+    enabled: process.env.NODE_ENV === 'development',
+    prefix: `SSE-${workflowId?.slice(0, 8) || 'unknown'}`
+  });
 
   const applyStageDetailEvent = useCallback((event: WorkflowEvent) => {
     if (event.category !== 'stage' || !event.stageId) return;
@@ -161,7 +175,6 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
   const refresh = useCallback(() => {
     setError(undefined);
     setIsConnected(false);
-    connectionInterruptedRef.current = false;
     setReconnectVersion((version) => version + 1);
   }, []);
 
@@ -217,8 +230,10 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     }
     loadStageActivity(controller.signal);
 
-    const eventSource = new EventSource(`/api/story-workflows/${workflowId}/stream`);
-    eventSource.onopen = () => {
+    const es = new EventSource(`/api/story-workflows/${workflowId}/stream`);
+    setEventSource(es); // 🔧 设置 EventSource 以便 useSseLogger 监控
+    
+    es.onopen = () => {
       setIsConnected(true);
       setError(undefined);
       if (connectionInterruptedRef.current) {
@@ -227,7 +242,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
       }
       hadInitialConnectionRef.current = true;
     };
-    eventSource.onmessage = (event) => {
+    es.onmessage = (event) => {
       try {
         const parsed: WorkflowEvent = JSON.parse(event.data);
         setEvents((prev) => dedupeEvents(prev, parsed));
@@ -237,14 +252,17 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         toast.error(err?.message || '解析工作流事件失败');
       }
     };
-    eventSource.onerror = () => {
+    es.onerror = () => {
       setIsConnected(false);
-      setError('事件流连接断开，稍后将自动重连');
-      if (hadInitialConnectionRef.current) {
+      if (!connectionInterruptedRef.current) {
+        setError('事件流连接断开，稍后将自动重连');
+      }
+      if (hadInitialConnectionRef.current && !connectionInterruptedRef.current) {
         toast.error('事件流连接断开，稍后将自动重连');
       }
       connectionInterruptedRef.current = true;
-      eventSource.close();
+      es.close();
+      setEventSource(null); // 🔧 清理 EventSource 状态
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -258,7 +276,8 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     return () => {
       aborted = true;
       controller.abort();
-      eventSource.close();
+      es.close();
+      setEventSource(null); // 🔧 清理 EventSource 状态
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;

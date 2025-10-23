@@ -15,6 +15,18 @@ import { checkDatabaseHealth } from '../config/database';
 const logger = createLogger('middleware');
 
 const isTestEnvironment = process.env.NODE_ENV === 'test';
+const isProduction = process.env.NODE_ENV === 'production';
+const httpsEnabled = process.env.HTTPS_ENABLED === 'true';
+
+// 🔧 只在生产环境+HTTPS时启用严格的安全头
+const isSecureContext = isProduction && httpsEnabled;
+
+logger.info({
+  isProduction,
+  httpsEnabled,
+  isSecureContext,
+  nodeEnv: process.env.NODE_ENV
+}, '🔒 Security configuration loaded');
 
 // Security middleware using Helmet
 const baseHelmetOptions = {
@@ -31,8 +43,15 @@ const baseHelmetOptions = {
       frameSrc: ["'none'"],
     },
   },
-  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+  // 🔧 只在安全上下文启用 COOP
+  crossOriginOpenerPolicy: isSecureContext 
+    ? { policy: 'same-origin-allow-popups' } 
+    : false,
   crossOriginEmbedderPolicy: false,
+  // 🔧 只在安全上下文启用 COEP
+  crossOriginResourcePolicy: isSecureContext 
+    ? { policy: 'same-origin' } 
+    : false,
   strictTransportSecurity: {
     maxAge: 31536000,
     includeSubDomains: true,

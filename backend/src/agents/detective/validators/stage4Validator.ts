@@ -38,6 +38,10 @@ export function runStage4Validation(
   ruleResults.push(validateMotiveForeshadowing(outline, storyDraft));
   ruleResults.push(validateChapterTimeTags(outline, storyDraft));
   ruleResults.push(validateFinalReveal(storyDraft));
+  ruleResults.push(validateChapterWordTargets(outline, storyDraft));
+  ruleResults.push(validateEmotionalBeats(outline, storyDraft));
+  ruleResults.push(validateMisdirectionDeployment(outline, storyDraft));
+  ruleResults.push(validateEndingResolution(storyDraft));
   const summary = ruleResults.reduce(
     (acc, rule) => {
       if (rule.status === 'pass') acc.pass += 1;
@@ -283,6 +287,288 @@ function validateFinalReveal(storyDraft: DetectiveStoryDraft): ValidationRuleRes
   };
 }
 
+function computeChapterWordCount(chapter: any): number {
+  if (!chapter) return 0;
+  if (typeof chapter.wordCount === 'number' && chapter.wordCount > 0) {
+    return chapter.wordCount;
+  }
+  const content = typeof chapter.content === 'string' ? chapter.content : '';
+  return content.replace(/\s+/g, '').length;
+}
+
+function validateChapterWordTargets(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const blueprints = (outline as any)?.chapterBlueprints;
+  if (!Array.isArray(blueprints) || blueprints.length === 0) {
+    return {
+      ruleId: 'chapter-word-target',
+      status: 'pass',
+      details: [{ message: '大纲未指定章节篇幅目标' }],
+    };
+  }
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'chapter-word-target',
+      status: 'warn',
+      details: [{ message: '缺少章节内容，无法比对篇幅目标' }],
+    };
+  }
+  const computation: RuleComputation = {
+    status: 'pass',
+    details: [],
+  };
+  blueprints.forEach((bp: any) => {
+    const idx = parseChapterIndex(bp?.chapter);
+    if (idx === null) {
+      updateRuleStatus(computation, 'warn', {
+        message: `章节篇幅目标引用了无效章节标识：${bp?.chapter ?? '未知'}`,
+      });
+      return;
+    }
+    if (idx < 0 || idx >= chapters.length) {
+      updateRuleStatus(computation, 'warn', {
+        message: `章节篇幅目标指向第 ${idx + 1} 章，但正文缺少该章节`,
+      });
+      return;
+    }
+    const target = typeof bp?.wordTarget === 'number' ? bp.wordTarget : 0;
+    if (target <= 0) {
+      updateRuleStatus(computation, 'warn', {
+        message: `章节 ${idx + 1} 未指定有效的 wordTarget`,
+      });
+      return;
+    }
+    const actual = computeChapterWordCount(chapters[idx]);
+    const minAllowed = target * 0.92;
+    const maxAllowed = target * 1.08;
+    if (actual === 0) {
+      updateRuleStatus(computation, 'fail', {
+        message: `章节 ${idx + 1} 未写入正文，目标篇幅 ${target}`,
+      });
+      return;
+    }
+    if (actual < minAllowed || actual > maxAllowed) {
+      const deviation = ((actual - target) / target) * 100;
+      updateRuleStatus(computation, 'warn', {
+        message: `章节 ${idx + 1} 篇幅偏离目标（目标 ${target} 字，实际 ${actual} 字，偏差 ${deviation.toFixed(1)}%）`,
+        meta: { chapter: idx + 1, target, actual, deviation },
+      });
+    }
+  });
+  if (computation.details.length === 0) {
+    computation.details.push({ message: '章节篇幅均符合目标区间' });
+  }
+  return {
+    ruleId: 'chapter-word-target',
+    status: computation.status,
+    details: computation.details,
+  };
+}
+
+function keywordHit(text: string, keywords: string[]): boolean {
+  const normalized = text.replace(/\s+/g, '');
+  return keywords.some((keyword) => keyword && normalized.includes(keyword));
+}
+
+function validateEmotionalBeats(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const beats = (outline as any)?.emotionalBeats;
+  if (!Array.isArray(beats) || beats.length === 0) {
+    return {
+      ruleId: 'emotional-beats',
+      status: 'pass',
+      details: [{ message: '大纲未声明情绪节拍，跳过检查' }],
+    };
+  }
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'emotional-beats',
+      status: 'warn',
+      details: [{ message: '缺少章节内容，无法验证情绪节拍' }],
+    };
+  }
+  const computation: RuleComputation = {
+    status: 'pass',
+    details: [],
+  };
+  beats.forEach((beat: any, idx: number) => {
+    const chapterIndex = parseChapterIndex(beat?.chapter);
+    if (chapterIndex === null) {
+      updateRuleStatus(computation, 'warn', {
+        message: `情绪节拍 ${idx + 1} 缺少有效章节标识`,
+      });
+      return;
+    }
+    if (chapterIndex < 0 || chapterIndex >= chapters.length) {
+      updateRuleStatus(computation, 'warn', {
+        message: `情绪节拍指向第 ${chapterIndex + 1} 章，但正文缺少该章节`,
+      });
+      return;
+    }
+    const text = `${chapters[chapterIndex]?.summary ?? ''}\n${chapters[chapterIndex]?.content ?? ''}`;
+    const keywords = Array.isArray(beat?.keywords)
+      ? beat.keywords.filter((kw: unknown): kw is string => typeof kw === 'string' && kw.trim().length > 0)
+      : [];
+    if (keywords.length === 0) {
+      updateRuleStatus(computation, 'warn', {
+        message: `情绪节拍 ${beat?.chapter ?? idx + 1} 未提供关键词参考`,
+      });
+      return;
+    }
+    if (!keywordHit(text, keywords)) {
+      updateRuleStatus(computation, 'warn', {
+        message: `情绪节拍 ${beat?.chapter ?? idx + 1} 缺少关键词（${keywords.join('、')}）的情绪描写`,
+      });
+    }
+  });
+  if (computation.details.length === 0) {
+    computation.details.push({ message: '情绪节拍均已在对应章节体现' });
+  }
+  return {
+    ruleId: 'emotional-beats',
+    status: computation.status,
+    details: computation.details,
+  };
+}
+
+function extractKeywords(input: string | undefined): string[] {
+  if (!input) return [];
+  return input
+    .split(/[,，。；;：“”"、\s]/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function validateMisdirectionDeployment(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const moments = (outline as any)?.misdirectionMoments;
+  if (!Array.isArray(moments) || moments.length === 0) {
+    return {
+      ruleId: 'misdirection-deployment',
+      status: 'pass',
+      details: [{ message: '大纲未声明误导节点，跳过检查' }],
+    };
+  }
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'misdirection-deployment',
+      status: 'warn',
+      details: [{ message: '缺少章节内容，无法验证误导节点' }],
+    };
+  }
+  const computation: RuleComputation = {
+    status: 'pass',
+    details: [],
+  };
+  const fullText = chapters.map((ch) => `${ch.summary || ''}\n${ch.content || ''}`).join('\n');
+  moments.forEach((moment: any, idx: number) => {
+    const chapterIndex = parseChapterIndex(moment?.chapter);
+    if (chapterIndex === null) {
+      updateRuleStatus(computation, 'warn', {
+        message: `误导节点 ${idx + 1} 缺少有效章节标识`,
+      });
+      return;
+    }
+    if (chapterIndex < 0 || chapterIndex >= chapters.length) {
+      updateRuleStatus(computation, 'warn', {
+        message: `误导节点指向第 ${chapterIndex + 1} 章，但正文缺少该章节`,
+      });
+      return;
+    }
+    const chapterText = `${chapters[chapterIndex]?.summary ?? ''}\n${chapters[chapterIndex]?.content ?? ''}`;
+    const suspect = typeof moment?.suspect === 'string' ? moment.suspect.trim() : '';
+    const setupKeywords = extractKeywords(moment?.setup).slice(0, 3);
+    const surfaceKeywords = extractKeywords(moment?.surfaceInterpretation).slice(0, 2);
+    const revealHint = typeof moment?.revealHint === 'string' ? moment.revealHint.trim() : '';
+    const hasSetup = keywordHit(chapterText, [suspect, ...setupKeywords, ...surfaceKeywords].filter(Boolean));
+    if (!hasSetup) {
+      updateRuleStatus(computation, 'warn', {
+        message: `${moment?.chapter ?? `节点${idx + 1}`} 未凸显误导情境或嫌疑人线索`,
+      });
+    }
+    if (revealHint) {
+      const laterText = chapters
+        .slice(chapterIndex + 1)
+        .map((ch) => `${ch.summary || ''}\n${ch.content || ''}`)
+        .join('\n');
+      if (laterText && !keywordHit(laterText, extractKeywords(revealHint))) {
+        updateRuleStatus(computation, 'warn', {
+          message: `${moment?.chapter ?? `节点${idx + 1}`} 的误导未在后续章节以“${revealHint}”相关线索澄清`,
+        });
+      }
+    } else if (fullText && !keywordHit(fullText, extractKeywords(moment?.setup))) {
+      updateRuleStatus(computation, 'warn', {
+        message: `${moment?.chapter ?? `节点${idx + 1}`} 未提供明确的误导文本提示`,
+      });
+    }
+  });
+  if (computation.details.length === 0) {
+    computation.details.push({ message: '误导节点均出现在指定章节并得到澄清' });
+  }
+  return {
+    ruleId: 'misdirection-deployment',
+    status: computation.status,
+    details: computation.details,
+  };
+}
+
+function validateEndingResolution(storyDraft: DetectiveStoryDraft): ValidationRuleResult {
+  const chapters = storyDraft?.chapters ?? [];
+  if (chapters.length === 0) {
+    return {
+      ruleId: 'ending-resolution',
+      status: 'warn',
+      details: [{ message: '缺少章节，无法验证结尾收束' }],
+    };
+  }
+  const finalChapter = chapters[chapters.length - 1];
+  const text = String(finalChapter?.content || '').trim();
+  if (!text) {
+    return {
+      ruleId: 'ending-resolution',
+      status: 'warn',
+      details: [{ message: '结尾章节为空，需补写事件收尾' }],
+    };
+  }
+  const paragraphs = text
+    .split(/\n+/)
+    .map((para) => para.trim())
+    .filter((para) => para);
+  if (paragraphs.length === 0) {
+    return {
+      ruleId: 'ending-resolution',
+      status: 'warn',
+      details: [{ message: '结尾缺少完整段落，建议补写善后描述' }],
+    };
+  }
+  const closureKeywords = ['后来', '事后', '几天后', '最终', '恢复', '再次', '重新', '平复'];
+  const closureParagraph = paragraphs.find((para) => {
+    const length = para.replace(/\s+/g, '').length;
+    return length >= 120 && keywordHit(para, closureKeywords);
+  });
+  if (!closureParagraph) {
+    return {
+      ruleId: 'ending-resolution',
+      status: 'warn',
+      details: [{ message: '结尾缺少 120 字以上的善后段落或未来走向描述' }],
+    };
+  }
+  return {
+    ruleId: 'ending-resolution',
+    status: 'pass',
+    details: [{ message: '结尾包含善后/未来走向的完整段落' }],
+  };
+}
+
 function extractMotiveTokens(text?: string): string[] {
   if (!text) return [];
   const pieces = text
@@ -515,6 +801,14 @@ function findEarliestClueMention(
     }
   }
   return -1;
+}
+function parseChapterIndex(label?: string | null): number | null {
+  if (!label) return null;
+  const match = String(label).match(/Chapter\s*(\d+)/i);
+  if (!match) return null;
+  const idx = Number.parseInt(match[1], 10);
+  if (Number.isNaN(idx)) return null;
+  return idx - 1;
 }
 function extractChapterIndex(chapterId: string): number | null {
   const match = chapterId.match(/Chapter\s*(\d+)/i);

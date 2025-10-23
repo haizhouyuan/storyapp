@@ -56,6 +56,9 @@ const toCacheKey = (payload: TtsSynthesisRequest): string => {
 
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 3000;
 const MAX_STATUS_POLL_ATTEMPTS = 200;
+const STATUS_POLL_BACKOFF_FACTOR = 1.5;
+const STATUS_POLL_MAX_INTERVAL_MS = 15000;
+const STATUS_POLL_MIN_INTERVAL_MS = 1000;
 
 const waitFor = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -142,7 +145,7 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
     initialDelay?: number,
   ): Promise<StoryTtsBatchResponse> => {
     let attempt = 0;
-    let delayMs = initialDelay ?? DEFAULT_STATUS_POLL_INTERVAL_MS;
+    let delayMs = Math.max(initialDelay ?? DEFAULT_STATUS_POLL_INTERVAL_MS, STATUS_POLL_MIN_INTERVAL_MS);
 
     while (attempt < MAX_STATUS_POLL_ATTEMPTS) {
       if (attempt > 0) {
@@ -154,25 +157,55 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
         statusResponse = await fetch(`/api/tts/synthesize-story/status/${encodeURIComponent(storyKey)}`);
       } catch (networkError) {
         attempt += 1;
+        delayMs = Math.min(delayMs * STATUS_POLL_BACKOFF_FACTOR, STATUS_POLL_MAX_INTERVAL_MS);
         continue;
       }
 
       if (statusResponse.status === 404) {
         attempt += 1;
+        delayMs = Math.min(delayMs * STATUS_POLL_BACKOFF_FACTOR, STATUS_POLL_MAX_INTERVAL_MS);
         continue;
       }
 
-      let statusData: StoryTtsBatchStatusResponse;
-      try {
-        statusData = await statusResponse.json();
-      } catch (parseError) {
+      if (statusResponse.status === 429) {
+        let retryAfterMs =
+          (Number(statusResponse.headers.get('Retry-After')) || 0) * 1000;
+        if (!retryAfterMs) {
+          try {
+            const retryPayload = await statusResponse.json() as { retryAfter?: number };
+            if (typeof retryPayload?.retryAfter === 'number') {
+              retryAfterMs = retryPayload.retryAfter * 1000;
+            }
+          } catch {
+            // ignore json parse errors for 429 payload
+          }
+        }
+        if (!retryAfterMs) {
+          retryAfterMs = delayMs * STATUS_POLL_BACKOFF_FACTOR;
+        }
+        delayMs = Math.min(
+          Math.max(retryAfterMs, STATUS_POLL_MIN_INTERVAL_MS),
+          STATUS_POLL_MAX_INTERVAL_MS,
+        );
         attempt += 1;
         continue;
       }
 
-      if (!statusResponse.ok) {
-        throw new Error(statusData?.error || '故事合成失败');
+      let rawData: any;
+      try {
+        rawData = await statusResponse.json();
+      } catch (parseError) {
+        attempt += 1;
+        delayMs = Math.min(delayMs * STATUS_POLL_BACKOFF_FACTOR, STATUS_POLL_MAX_INTERVAL_MS);
+        continue;
       }
+
+      if (!statusResponse.ok) {
+        const message = typeof rawData?.error === 'string' ? rawData.error : '故事合成失败';
+        throw new Error(message);
+      }
+
+      const statusData = rawData as StoryTtsBatchStatusResponse;
 
       if (statusData.status === 'ready') {
         const result: StoryTtsBatchResponse = {
@@ -193,7 +226,11 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
         throw new Error(statusData.error || '朗读合成失败');
       }
 
-      delayMs = statusData.nextPollInMs ?? delayMs ?? DEFAULT_STATUS_POLL_INTERVAL_MS;
+      const suggestedNext = statusData.nextPollInMs ?? delayMs;
+      delayMs = Math.min(
+        Math.max(suggestedNext, delayMs * STATUS_POLL_BACKOFF_FACTOR),
+        STATUS_POLL_MAX_INTERVAL_MS,
+      );
       attempt += 1;
     }
 

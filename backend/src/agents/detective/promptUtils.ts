@@ -93,6 +93,12 @@ function chapterGuidance(outline: DetectiveOutline): string {
   }
 
   const anchorMap = new Map<number, string>();
+  const blueprintMap = new Map<number, {
+    wordTarget?: number;
+    conflictGoal?: string;
+    backgroundNeeded?: string[];
+    emotionalBeat?: string;
+  }>();
   (outline?.chapterAnchors ?? []).forEach((anchor) => {
     if (!anchor?.chapter) return;
     const match = anchor.chapter.match(/(\d+)/);
@@ -104,6 +110,27 @@ function chapterGuidance(outline: DetectiveOutline): string {
     const summary = anchor.summary ? `（${anchor.summary}）` : '';
     anchorMap.set(index, `${slots || '时间待定'}${label}${summary}`);
   });
+  const blueprints = (outline as any)?.chapterBlueprints;
+  if (Array.isArray(blueprints)) {
+    blueprints.forEach((bp: any) => {
+      if (!bp?.chapter) return;
+      const match = String(bp.chapter).match(/(\d+)/);
+      if (!match) return;
+      const index = Number.parseInt(match[1], 10) - 1;
+      if (!Number.isFinite(index) || index < 0) return;
+      const backgrounds = Array.isArray(bp.backgroundNeeded)
+        ? bp.backgroundNeeded.filter(
+            (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0,
+          )
+        : undefined;
+      blueprintMap.set(index, {
+        wordTarget: typeof bp.wordTarget === 'number' ? bp.wordTarget : undefined,
+        conflictGoal: typeof bp.conflictGoal === 'string' ? bp.conflictGoal : undefined,
+        backgroundNeeded: backgrounds,
+        emotionalBeat: typeof bp.emotionalBeat === 'string' ? bp.emotionalBeat : undefined,
+      });
+    });
+  }
 
   let chapterCursor = 1;
   const lines: string[] = [];
@@ -132,10 +159,31 @@ function chapterGuidance(outline: DetectiveOutline): string {
         return `    - 节拍 ${act.act}.${beat.beat}：${beat.summary}（${clues}${red ? `；${red}` : ''}）`;
       })
       .join('\n');
+    const blueprintHints: string[] = [];
+    for (let offset = 0; offset < beatCount; offset += 1) {
+      const chapterIndex = chapterCursor - 1 + offset;
+      if (!blueprintMap.has(chapterIndex)) {
+        continue;
+      }
+      const bp = blueprintMap.get(chapterIndex)!;
+      const targetText = bp.wordTarget ? `目标${bp.wordTarget}字` : '目标字数 1600 左右';
+      const conflict = bp.conflictGoal ? `冲突：${bp.conflictGoal}` : '';
+      const background = bp.backgroundNeeded && bp.backgroundNeeded.length > 0
+        ? `背景：${bp.backgroundNeeded.join('、')}`
+        : '';
+      const emotion = bp.emotionalBeat ? `情绪：${bp.emotionalBeat}` : '';
+      const parts = [targetText, conflict, background, emotion].filter(Boolean);
+      blueprintHints.push(`Chapter ${chapterIndex + 1} → ${parts.join('；')}`);
+    }
+    const blueprintLine =
+      blueprintHints.length > 0
+        ? `    - 篇幅/情绪：${blueprintHints.join('；')}`
+        : '    - 篇幅/情绪：如字数不足请扩写氛围与心理。';
     lines.push(
       [
         `${chapterRange} 应覆盖 Act ${act.act}（焦点：${act.focus}）。请保留主要事件顺序：`,
         `    - ${anchorLine}`,
+        blueprintLine,
         beatDetails || '    - （该幕缺少详细节拍，请在正文中自行补全矛盾冲突与线索推进）',
       ].join('\n'),
     );
@@ -200,6 +248,102 @@ function motiveKeywordChecklist(outline: DetectiveOutline): string {
   return lines.join('\n');
 }
 
+function atmosphereSummary(outline: DetectiveOutline): string {
+  const atmosphere = (outline as any)?.settingAtmosphere ?? {};
+  const openingMood = typeof atmosphere.openingMood === 'string' && atmosphere.openingMood.trim()
+    ? atmosphere.openingMood.trim()
+    : null;
+  const weather = typeof atmosphere.weather === 'string' && atmosphere.weather.trim()
+    ? atmosphere.weather.trim()
+    : null;
+  const sensory = Array.isArray(atmosphere.sensoryPalette)
+    ? Array.from(
+        new Set(
+          atmosphere.sensoryPalette.filter(
+            (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0,
+          ),
+        ),
+      )
+    : [];
+  const lines: string[] = [];
+  if (openingMood) {
+    lines.push(`开篇氛围：${openingMood}`);
+  }
+  if (weather) {
+    lines.push(`天气/环境：${weather}`);
+  }
+  if (sensory.length > 0) {
+    lines.push(`重点感官：${sensory.join('、')}`);
+  }
+  return lines.length > 0 ? lines.join('\n') : '（未提供氛围提示，请自行塑造环境感官）';
+}
+
+function chapterBlueprintSummary(outline: DetectiveOutline): string {
+  const blueprints = (outline as any)?.chapterBlueprints;
+  if (!Array.isArray(blueprints) || blueprints.length === 0) {
+    return '（未提供章节篇幅与冲突目标，请在写作时自行控制在 1500 字左右并补足矛盾/情绪）';
+  }
+  return blueprints
+    .map((bp: any) => {
+      const name = bp?.chapter ?? 'Chapter ?';
+      const target = typeof bp?.wordTarget === 'number' ? `${bp.wordTarget}字` : '约1600字';
+      const conflict = typeof bp?.conflictGoal === 'string' && bp.conflictGoal.trim()
+        ? `冲突：${bp.conflictGoal}`
+        : '';
+      const backgrounds = Array.isArray(bp?.backgroundNeeded)
+        ? bp.backgroundNeeded.filter(
+            (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0,
+          )
+        : [];
+      const background =
+        backgrounds.length > 0
+          ? `背景：${backgrounds.join('、')}`
+          : '';
+      const emotional =
+        typeof bp?.emotionalBeat === 'string' && bp.emotionalBeat.trim()
+          ? `情绪：${bp.emotionalBeat}`
+          : '';
+      const parts = [target, conflict, background, emotional].filter(Boolean);
+      return `- ${name} → ${parts.join('；')}`;
+    })
+    .join('\n');
+}
+
+function emotionalBeatsSummary(outline: DetectiveOutline): string {
+  const beats = (outline as any)?.emotionalBeats;
+  if (!Array.isArray(beats) || beats.length === 0) {
+    return '（未提供情绪节拍，请在前两章主动描写嫌疑人心理反应和紧张感）';
+  }
+  return beats
+    .map((beat, index) => {
+      const chapter = beat?.chapter ?? `情绪点${index + 1}`;
+      const focus = beat?.focus ?? '情绪焦点待补充';
+      const delivery = beat?.delivery ? `呈现方式：${beat.delivery}` : '';
+      const keywords = Array.isArray(beat?.keywords) && beat.keywords.length > 0
+        ? `关键词：${beat.keywords.join('、')}`
+        : '';
+      return `- ${chapter} → ${focus}${delivery ? `；${delivery}` : ''}${keywords ? `；${keywords}` : ''}`;
+    })
+    .join('\n');
+}
+
+function misdirectionMomentsSummary(outline: DetectiveOutline): string {
+  const moments = (outline as any)?.misdirectionMoments;
+  if (!Array.isArray(moments) || moments.length === 0) {
+    return '（未提供误导节点，请保证至少一个嫌疑人出现可疑行为并于结局澄清）';
+  }
+  return moments
+    .map((moment, index) => {
+      const chapter = moment?.chapter ?? `Chapter ${index + 1}`;
+      const setup = moment?.setup ?? '误导内容待补充';
+      const surface = moment?.surfaceInterpretation ? `表面含义：${moment.surfaceInterpretation}` : '';
+      const reveal = moment?.revealHint ? `真相铺垫：${moment.revealHint}` : '';
+      const suspect = moment?.suspect ? `涉及嫌疑人：${moment.suspect}` : '';
+      return `- ${chapter} → ${setup}${surface ? `；${surface}` : ''}${reveal ? `；${reveal}` : ''}${suspect ? `；${suspect}` : ''}`;
+    })
+    .join('\n');
+}
+
 export interface RevisionPlanIssue {
   id: string;
   detail: string;
@@ -231,6 +375,7 @@ export function buildStage1Prompt(topic: string): string {
 {  
   "centralTrick": { "summary": "...", "mechanism": "...", "fairnessNotes": ["..."] },
   "caseSetup": { "victim": "...", "crimeScene": "...", "initialMystery": "..." },
+  "settingAtmosphere": { "openingMood": "...", "sensoryPalette": ["..."], "nightDetails": "...", "weather": "..." },
   "characters": [
     {
       "name": "...",
@@ -241,6 +386,12 @@ export function buildStage1Prompt(topic: string): string {
       "motiveScenes": ["Chapter 1 图书馆", "Chapter 2 实验室"]
     }
   ],
+      "portrait": "...",
+      "chapterIntro": "Chapter 1",
+      "psychologicalCue": "...",
+      "relationships": ["..."]
+    }
+  ],
   "acts": [
     { "act": 1, "focus": "...", "beats": [ { "beat": 1, "summary": "...", "cluesRevealed": ["..."], "redHerring": "..." } ] },
     { "act": 2, "focus": "...", "beats": [ { "beat": 1, "summary": "..." } ] },
@@ -249,11 +400,29 @@ export function buildStage1Prompt(topic: string): string {
   "clueMatrix": [
     { "clue": "...", "surfaceMeaning": "...", "realMeaning": "...", "appearsAtAct": 1, "mustForeshadow": true, "explicitForeshadowChapters": ["Chapter 1", "Chapter 2"], "isRedHerring": false }
   ],
+  "clueNarrativeHints": {
+    "某线索A": { "foreshadow": "通过某角色的细微动作暗示", "recoveryTone": "侦探以平静语气解密" }
+  },
   "timeline": [
     { "time": "Day1 18:30", "event": "...", "participants": ["..."] }
   ],
   "chapterAnchors": [
     { "chapter": "Chapter 1", "dayCode": "Day1", "time": "10:00", "label": "...", "summary": "..." }
+  ],
+  "chapterBlueprints": [
+    {
+      "chapter": "Chapter 1",
+      "wordTarget": 1600,
+      "conflictGoal": "...",
+      "backgroundNeeded": ["..."],
+      "emotionalBeat": "..."
+    }
+  ],
+  "emotionalBeats": [
+    { "chapter": "Chapter 1", "focus": "嫌疑人嫉妒开始燃烧", "keywords": ["嫉妒", "紧张"], "delivery": "通过内心独白" }
+  ],
+  "misdirectionMoments": [
+    { "chapter": "Chapter 2", "setup": "...", "surfaceInterpretation": "...", "revealHint": "...", "suspect": "..." }
   ],
   "solution": { "culprit": "...", "motiveCore": "...", "keyReveals": ["..."], "fairnessChecklist": ["..."] },
   "logicChecklist": ["所有诡计准备动作在谋杀发生前完成并写明时间", "每条关键线索至少在破案前两章有显式铺垫", "时间线与线索矩阵交叉验证无矛盾"],
@@ -265,12 +434,13 @@ export function buildStage1Prompt(topic: string): string {
 2. 明确描述诡计准备动作发生的具体时间（例如在谋杀前多少分钟），并写入 timeline。
 3. 如果故事跨越多日，请在 timeline 中使用 Day1/Day2 等标注，并解释日期切换的因果关系。
 4. 生成 chapterAnchors 数组，与章节一一对应，给出 DayX 与 HH:MM、现场标签与一句描述，并在 timeline.participants 中标注对应章节（如 "Chapter 1"）。
-5. 每位嫌疑人必须提供 motiveKeywords（不少于 2 个中文关键词）与 motiveScenes（指明章节或场景），便于后续正文埋设动机伏笔。
-6. 每条 clueMatrix 必须注明 explicitForeshadowChapters；若为误导性线索请设置 isRedHerring=true，并在 beats.redHerring 中安排对应戏份。
-7. 在 fairnessNotes 中指出读者能提前获知的证据与提示，同时说明哪些线索可能被误导性解读。
-8. 3 幕结构，每幕≥2 个 beat；角色≥6（含侦探/受害者/嫌疑/证人），至少 1 条红鲱鱼贯穿发展并最终澄清。
-9. 线索≥4，覆盖时间/物证/证词等不同类型，并保证 mustForeshadow=true 的线索不少于 2 条。
-10. 主题：${topic}，风格参考黄金时代本格推理。
+5. 在 chapterBlueprints 中为每章给出 wordTarget（1400-1900 之间）与 conflictGoal / backgroundNeeded / emotionalBeat，用于控制篇幅与情绪刻画。
+6. 每位嫌疑人必须提供 motiveKeywords（不少于 2 个中文关键词）与 motiveScenes（指明章节或场景），并在 characterBackstories.chapterIntro 中说明首次出现位置。
+7. 每条 clueMatrix 必须注明 explicitForeshadowChapters；若为误导性线索请设置 isRedHerring=true，并在 beats.redHerring 中安排对应戏份，同时于 clueNarrativeHints 给出表面/真实呈现方式。
+8. 在 fairnessNotes 中指出读者能提前获知的证据与提示，同时说明哪些线索可能被误导性解读；在 emotionalBeats/misdirectionMoments 中指明触发该情绪或误导的章节。
+9. 3 幕结构，每幕≥2 个 beat；角色≥6（含侦探/受害者/嫌疑/证人），至少 1 条红鲱鱼贯穿发展并最终澄清。
+10. 线索≥4，覆盖时间/物证/证词等不同类型，并保证 mustForeshadow=true 的线索不少于 2 条；timeline 与 chapterAnchors、chapterBlueprints 的时间标签必须自洽。
+11. 主题：${topic}，风格参考黄金时代本格推理。
   `.trim();
 }
 
@@ -287,6 +457,9 @@ ${JSON.stringify(outline, null, 2)}
 章节规划建议：
 ${chapterGuidance(outline)}
 
+篇幅与冲突目标：
+${chapterBlueprintSummary(outline)}
+
 嫌疑人与动机提示：
 ${suspectsSummary(outline)}
 
@@ -295,6 +468,15 @@ ${mustForeshadowSummary(outline)}
 
 红鲱鱼运用建议：
 ${redHerringSummary(outline)}
+
+氛围与感官指引：
+${atmosphereSummary(outline)}
+
+情绪节拍提醒：
+${emotionalBeatsSummary(outline)}
+
+误导节点安排：
+${misdirectionMomentsSummary(outline)}
 
 时间线提醒：
 ${timelineSummary(outline)}
@@ -330,8 +512,12 @@ ${motiveKeywordChecklist(outline)}
 4. 线索必须通过自然描写或对白呈现，禁止使用 [CLUE] 等标签；对 mustForeshadow 线索至少提前两次暗示，并在 cluesEmbedded 中注明。
 5. 红鲱鱼需在正文中制造合理误导，但在真相揭露时澄清误导来源，并在 redHerringsEmbedded 中列出实际使用的误导元素。
 6. 不得引入大纲外的决定性证据；如必须新增，请在上一章或同章前半段做铺垫，并同步更新 cluesEmbedded。
-7. 结局章节需通过角色对话或侦探推理复盘关键线索，避免清单式罗列；同时交代善后与人物情绪。
-8. 整体使用第三人称客观视角，维持紧张而逻辑精密的氛围，语言保持少儿可读性（middle_grade）。
+7. 严格对照“篇幅与冲突目标”，控制每章内容在 wordTarget ±8% 区间；如不足请扩写背景、氛围或心理描写，并记录在 continuityNotes。
+8. 依据“氛围与感官指引”在开篇两章体现环境与感官线索，结合“情绪节拍提醒”描写嫌疑人心理波动。
+9. “误导节点安排”中的场景必须在指定章节出现，由侦探或角色行为触发，并在后续章节/结局中做自然澄清。
+10. 结局章节需通过角色对话或侦探推理复盘关键线索，避免清单式罗列；同时补充至少一段 120 字以上的善后与人物情绪。
+11. 若线索/情绪/篇幅存在偏差，请在 continuityNotes 中标记具体章节与处理方式，方便后续修订。
+12. 整体使用第三人称客观视角，维持紧张而逻辑精密的氛围，语言保持少儿可读性（middle_grade）。
 仅返回 JSON。`.trim();
 }
 
@@ -342,6 +528,9 @@ export function buildStage2PromptProfile(outline: DetectiveOutline, opts?: Promp
     '章节规划建议：',
     chapterGuidance(outline),
     '',
+    '篇幅与冲突目标：',
+    chapterBlueprintSummary(outline),
+    '',
     '嫌疑人与动机提示：',
     suspectsSummary(outline),
     '',
@@ -350,6 +539,15 @@ export function buildStage2PromptProfile(outline: DetectiveOutline, opts?: Promp
     '',
     '红鲱鱼运用建议：',
     redHerringSummary(outline),
+    '',
+    '氛围与感官指引：',
+    atmosphereSummary(outline),
+    '',
+    '情绪节拍提醒：',
+    emotionalBeatsSummary(outline),
+    '',
+    '误导节点安排：',
+    misdirectionMomentsSummary(outline),
     '',
     '时间线提示：',
     timelineSummary(outline),
@@ -437,12 +635,28 @@ export function buildStage4RevisionPrompt(
     ['timeline-from-text', 'chapter-time-tags'].includes(ruleId),
   );
   const requiresMotives = mustFixRuleIds.includes('motive-foreshadowing');
+  const requiresWordTargets = mustFixRuleIds.includes('chapter-word-target');
+  const requiresEmotions = mustFixRuleIds.includes('emotional-beats');
+  const requiresMisdirection = mustFixRuleIds.includes('misdirection-deployment');
+  const requiresEnding = mustFixRuleIds.includes('ending-resolution');
   const criticalLines = [
     requiresTimeline
       ? '为所有章节首段补写 DayX HH:MM 的自然语言时间提示，并对照 timeline 更新 continuityNotes 说明理由。'
       : null,
     requiresMotives
       ? '在 Chapter 1-2 通过对白或描写补充嫌疑人动机关键词，使其与 Stage1 提供的 motiveKeywords 对应。'
+      : null,
+    requiresWordTargets
+      ? '依据大纲 wordTarget 扩写或删减章节内容，使篇幅保持在目标 ±8% 区间，并在 revisionNotes 标记调整。'
+      : null,
+    requiresEmotions
+      ? '补写情绪节拍：在指定章节植入 emotionalBeats 中的关键词与心理描写，使读者感知情绪波动。'
+      : null,
+    requiresMisdirection
+      ? '补充误导节点：在对应章节强化误导细节，并确保后续章节通过 revealHint 相关线索澄清。'
+      : null,
+    requiresEnding
+      ? '结尾需新增 ≥120 字的善后段落，交代事件解决后的状态与人物情绪。'
       : null,
   ].filter((line): line is string => Boolean(line));
   const criticalGuidance = criticalLines.length
@@ -498,12 +712,28 @@ export function buildStage4RevisionPromptProfile(
     ['timeline-from-text', 'chapter-time-tags'].includes(ruleId),
   );
   const requiresMotives = mustFixRuleIds.includes('motive-foreshadowing');
+  const requiresWordTargets = mustFixRuleIds.includes('chapter-word-target');
+  const requiresEmotions = mustFixRuleIds.includes('emotional-beats');
+  const requiresMisdirection = mustFixRuleIds.includes('misdirection-deployment');
+  const requiresEnding = mustFixRuleIds.includes('ending-resolution');
   const criticalLines = [
     requiresTimeline
       ? '补齐章节首段的 DayX HH:MM 时间提示，并在 Continuity Notes 记录差异原因。'
       : null,
     requiresMotives
       ? '在前两章通过对白或细节植入嫌疑人的动机关键词，使读者可在结局前两次察觉。'
+      : null,
+    requiresWordTargets
+      ? '对照 wordTarget 调整章节篇幅（±8%），不足时补写场景/心理，超出时精简冗余描述。'
+      : null,
+    requiresEmotions
+      ? '在情绪节拍指定章节补写 emotionalBeats 的关键词与心理活动。'
+      : null,
+    requiresMisdirection
+      ? '强化误导节点并在后续章节用 revealHint 相关情节完成澄清。'
+      : null,
+    requiresEnding
+      ? '为结尾新增 ≥120 字的善后段，交代角色状态与未来安排。'
       : null,
   ].filter((line): line is string => Boolean(line));
   const criticalGuidance = criticalLines.length

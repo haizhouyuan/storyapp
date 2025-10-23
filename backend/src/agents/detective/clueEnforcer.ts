@@ -48,11 +48,34 @@ function countExposures(draft: DetectiveStoryDraft, clueName: string): number {
   return n;
 }
 
-function appendClueMention(ch: DetectiveChapter, clue: string, mode: 'mention'|'embed'|'both' = 'both') {
+type ClueNarrativeHint = {
+  foreshadow?: string;
+  recoveryTone?: string;
+};
+
+function renderClueForeshadowLine(clue: string, hint?: ClueNarrativeHint): string {
+  if (hint?.foreshadow && typeof hint.foreshadow === 'string') {
+    const trimmed = hint.foreshadow.trim();
+    if (trimmed) {
+      return trimmed.endsWith('。') || trimmed.endsWith('！') || trimmed.endsWith('！') || trimmed.endsWith('！')
+        ? trimmed
+        : `${trimmed}。`;
+    }
+  }
+  return `周围人低声提到“${clue}”，空气顿时紧绷起来。`;
+}
+
+function appendClueMention(
+  ch: DetectiveChapter,
+  clue: string,
+  mode: 'mention'|'embed'|'both' = 'both',
+  hint?: ClueNarrativeHint,
+) {
   const additions: string[] = [];
+  const foreshadowLine = renderClueForeshadowLine(clue, hint);
   if (mode === 'mention' || mode === 'both') {
-    const hint = `\n侦探暗自记下：${clue}并非巧合。`;
-    ch.content = `${(ch.content || '').trimEnd()}\n${hint}`.trim();
+    const merged = `${(ch.content || '').trimEnd()}\n${foreshadowLine}`.trim();
+    ch.content = merged;
     additions.push('mention');
   }
   if (mode === 'embed' || mode === 'both') {
@@ -66,8 +89,17 @@ function appendClueMention(ch: DetectiveChapter, clue: string, mode: 'mention'|'
   return additions;
 }
 
-function ensureFinalRecovery(ch: DetectiveChapter, clue: string) {
-  const recoveryLine = `\n侦探在结语中解释：“${clue} 正是揭开谜底的关键。”`;
+function ensureFinalRecovery(ch: DetectiveChapter, clue: string, hint?: ClueNarrativeHint) {
+  let recoveryLine: string;
+  if (hint?.recoveryTone && typeof hint.recoveryTone === 'string' && hint.recoveryTone.trim()) {
+    recoveryLine = hint.recoveryTone.trim();
+    if (!/[。！？!?]$/.test(recoveryLine)) {
+      recoveryLine += '。';
+    }
+  } else {
+    recoveryLine = `侦探平静地指出：“${clue} 正是揭开谜底的关键。”`;
+  }
+  recoveryLine = `\n${recoveryLine}`;
   const norm = normalizeClue(ch.content || '');
   const key = normalizeClue(clue);
   if (!norm.includes(key)) {
@@ -139,6 +171,19 @@ export function enforceCluePolicy(
 
   let patchedDraft = ensureChapters(draft || { chapters: [] }, 3); // 至少 3 章（开端/中段/结尾）
   const changes: EnforceResult['changes'] = [];
+  const narrativeHintsRaw = (outline as any)?.clueNarrativeHints || {};
+  const normalizeHintKey = (value: string) => value.replace(/\s+/g, '').toLowerCase();
+  const hintMap = new Map<string, ClueNarrativeHint>();
+  if (narrativeHintsRaw && typeof narrativeHintsRaw === 'object') {
+    Object.keys(narrativeHintsRaw).forEach((key) => {
+      const hint = narrativeHintsRaw[key];
+      if (!hint) return;
+      hintMap.set(normalizeHintKey(key), {
+        foreshadow: typeof hint.foreshadow === 'string' ? hint.foreshadow : undefined,
+        recoveryTone: typeof hint.recoveryTone === 'string' ? hint.recoveryTone : undefined,
+      });
+    });
+  }
 
   const must = (outline?.clueMatrix || [])
     .filter((c) => c?.clue && c?.mustForeshadow)
@@ -155,7 +200,7 @@ export function enforceCluePolicy(
     const hasMention = (normalizeClue(ch1.content || '')).includes(c.normalized)
       || (ch1.cluesEmbedded || []).map(normalizeClue).includes(c.normalized);
     if (!hasMention) {
-      appendClueMention(ch1, c.name, 'both');
+      appendClueMention(ch1, c.name, 'both', hintMap.get(c.normalized));
       inserted += 1;
       changes.push({ type: 'ch1_foreshadow', clue: c.name, chapterIndex: 0 });
     }
@@ -166,7 +211,7 @@ export function enforceCluePolicy(
   for (const c of must) {
     let n = countExposures(patchedDraft, c.name);
     while (n < minExposures) {
-      appendClueMention(n === 0 ? ch1 : ch2, c.name, 'both');
+      appendClueMention(n === 0 ? ch1 : ch2, c.name, 'both', hintMap.get(c.normalized));
       n = countExposures(patchedDraft, c.name);
       changes.push({ type: 'exposure_boost', clue: c.name, note: `exposures=${n}` });
       if (n >= minExposures) break;
@@ -178,7 +223,7 @@ export function enforceCluePolicy(
     const lastIdx = patchedDraft.chapters.length - 1;
     const finalCh = patchedDraft.chapters[lastIdx];
     for (const c of must) {
-      ensureFinalRecovery(finalCh, c.name);
+      ensureFinalRecovery(finalCh, c.name, hintMap.get(c.normalized));
       changes.push({ type: 'final_recovery', clue: c.name, chapterIndex: lastIdx });
     }
     const optionalClues = (outline?.clueMatrix || []).filter((c) => c?.clue && !c.mustForeshadow);

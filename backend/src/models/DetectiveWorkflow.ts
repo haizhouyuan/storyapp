@@ -10,6 +10,7 @@ import type {
   WorkflowRevisionType,
   WorkflowRevisionMeta,
   WorkflowStageStatus,
+  DetectiveWorkflowMeta,
 } from '@storyapp/shared';
 
 export interface DetectiveWorkflowDocument {
@@ -26,7 +27,7 @@ export interface DetectiveWorkflowDocument {
   history: WorkflowRevision[];
   terminatedAt?: Date;
   terminationReason?: string;
-  meta?: Record<string, unknown>;
+  meta?: DetectiveWorkflowMeta;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +40,7 @@ export interface CreateWorkflowDocumentParams {
   storyDraft?: DetectiveStoryDraft;
   review?: Record<string, unknown>;
   validation?: ValidationReport;
+  meta?: DetectiveWorkflowMeta;
 }
 
 export function createWorkflowDocument(params: CreateWorkflowDocumentParams): DetectiveWorkflowDocument {
@@ -55,6 +57,7 @@ export function createWorkflowDocument(params: CreateWorkflowDocumentParams): De
     stageStates,
     status,
     history: [],
+    meta: params.meta,
     createdAt: now,
     updatedAt: now,
   };

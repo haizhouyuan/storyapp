@@ -1,6 +1,8 @@
 // Detective Workflow Shared Types
 // 侦探故事工作流 - 共享类型定义
 
+import type { StoryTtsSegment } from './story';
+
 export type ValidationRuleStatus = 'pass' | 'warn' | 'fail';
 
 export interface DetectiveCharacter {
@@ -78,13 +80,179 @@ export interface DetectiveChapter {
   redHerringsEmbedded?: string[];
 }
 
+export type DetectiveRevisionNoteCategory = 'model' | 'system' | 'validation' | 'manual';
+
+export interface DetectiveRevisionNote {
+  message: string;
+  category: DetectiveRevisionNoteCategory;
+  stage?: string;
+  source?: string;
+  relatedRuleId?: string;
+  chapter?: string;
+  createdAt?: string;
+  id?: string;
+}
+
+export interface DetectiveStoryAudioAsset {
+  storyId: string;
+  workflowId?: string;
+  generatedAt: string;
+  status: 'ready' | 'error';
+  totalDuration?: number;
+  segments: StoryTtsSegment[];
+  voiceId?: string;
+  speed?: number;
+  provider?: string;
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface DetectiveStoryDraft {
   chapters: DetectiveChapter[];
   overallWordCount?: number;
   narrativeStyle?: string;
   continuityNotes?: string[];
-  revisionNotes?: string[];
+  revisionNotes?: DetectiveRevisionNote[];
+  ttsAssets?: DetectiveStoryAudioAsset[];
 }
+
+export type ClueType = 'true' | 'red_herring' | 'character';
+
+export interface ClueAnchor {
+  chapter: number;
+  paragraph: number;
+  startOffset: number;
+  endOffset: number;
+}
+
+export interface ClueNode {
+  id: string;
+  kind: 'clue' | 'fact' | 'inference' | 'denouement';
+  text: string;
+  chapterHint?: number;
+  visibleBeforeDenouement: boolean;
+  mmo?: Array<'means' | 'motive' | 'opportunity'>;
+  type?: ClueType;
+  sourceRef?: string;
+  anchors?: ClueAnchor[];
+  anchorStatus?: 'pending' | 'resolved' | 'stale';
+}
+
+export interface ClueEdge {
+  from: string;
+  to: string;
+  rationale?: string;
+}
+
+export interface ClueGraph {
+  nodes: ClueNode[];
+  edges: ClueEdge[];
+}
+
+export interface FairPlayReport {
+  unsupportedInferences: string[];
+  orphanClues: string[];
+  economyScore: number;
+}
+
+export interface BetaReaderInsight {
+  topSuspect: string;
+  confidence: number;
+  evidence: string[];
+  summary: string;
+  competingSuspects?: string[];
+  openQuestions?: string[];
+}
+
+export interface HypothesisCandidate {
+  suspect: string;
+  confidence: number;
+  evidence: string[];
+  rationale?: string;
+}
+
+export interface HypothesisEvaluation {
+  candidates: HypothesisCandidate[];
+  notes?: string[];
+  recommendation?: string;
+}
+
+export interface DenouementScript {
+  recapBullets: string[];
+  eliminationOrder: Array<{ suspect: string; reason: string }>;
+  finalContradiction: string;
+  lastPush: 'experiment' | 'psychology' | 'mechanism';
+}
+
+export interface StylePack {
+  id: string;
+  role: 'detective' | 'sidekick' | 'inspector' | 'suspect' | 'narrator';
+  lexicon: string[];
+  fillers: string[];
+  punctuation: string[];
+  banPairs?: Array<[string, string]>;
+}
+
+export interface StyleAdjustmentReport {
+  notes: string[];
+  adjustments: number;
+}
+
+export type GateVerdict = 'pass' | 'warn' | 'block';
+
+export interface GateLog {
+  name: string;
+  verdict: GateVerdict;
+  reason?: string;
+  metrics?: Record<string, number | string>;
+  durationMs?: number;
+  tokens?: {
+    input?: number;
+    output?: number;
+  };
+  timestamp?: string;
+}
+
+export type WorkflowStageCode = 'S0' | 'S1' | 'S2' | 'S3' | 'S4' | 'S5';
+
+export interface StageLog {
+  stage: WorkflowStageCode;
+  stageId?: string;
+  promptVersion?: string;
+  gates: GateLog[];
+  durationMs?: number;
+  modelCalls?: number;
+  notes?: string[];
+  meta?: Record<string, unknown>;
+  timestamp?: string;
+}
+
+export interface WorkflowTelemetry {
+  stages: StageLog[];
+  promptVersions?: Record<string, string>;
+}
+
+export interface Stage3AnalysisSnapshot {
+  betaReader?: BetaReaderInsight;
+  hypotheses?: HypothesisEvaluation;
+}
+
+export interface ClueGraphSnapshot {
+  generatedAt: string;
+  graph: ClueGraph;
+  report: FairPlayReport;
+  version?: string;
+}
+
+export type DetectiveWorkflowMeta = {
+  mechanismPreset?: unknown;
+  clueGraphSnapshot?: ClueGraphSnapshot;
+  telemetry?: WorkflowTelemetry;
+  promptVersions?: Record<string, string>;
+  stageResults?: {
+    stage3?: Stage3AnalysisSnapshot;
+  };
+} & Record<string, unknown>;
 
 export interface ValidationRuleDetail {
   message: string;

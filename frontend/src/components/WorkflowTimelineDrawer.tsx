@@ -5,6 +5,7 @@ import type {
   WorkflowStageStatus,
   WorkflowStageCommandStatus,
   WorkflowStageExecution,
+  WorkflowStageState,
 } from '@storyapp/shared';
 import { ArrowDownTrayIcon, SpeakerWaveIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import Button from './Button';
@@ -15,7 +16,8 @@ const stageLabels: Record<string, string> = {
   stage1_planning: '阶段一 · 蓝图规划',
   stage2_writing: '阶段二 · 逐章写作',
   stage3_review: '阶段三 · 审阅调优',
-  stage4_validation: '阶段四 · 公平校验',
+  stage4_revision: '阶段四 · 修订整合',
+  stage5_validation: '阶段五 · 公平校验',
 };
 
 const statusColors: Record<WorkflowStageStatus | 'idle', string> = {
@@ -133,6 +135,8 @@ const StageEventList: React.FC<{
 interface WorkflowTimelineDrawerProps {
   workflowId?: string | null;
   storyTitle?: string;
+  stageStates?: WorkflowStageState[];
+  workflowStatus?: WorkflowStageStatus;
   initialOpen?: boolean;
   onScrollToChapter?: (chapterIndex: number) => void;
   onRequestExport?: () => void;
@@ -151,6 +155,8 @@ interface WorkflowTimelineDrawerProps {
 export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
   workflowId,
   storyTitle,
+  stageStates,
+  workflowStatus,
   initialOpen = true,
   onScrollToChapter,
   onRequestExport,
@@ -173,6 +179,62 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
   const { events, stageStatus, ttsEvents, infoEvents, overallStatus, isConnected, error, refresh, stageActivity } =
     useWorkflowStream(workflowId);
 
+  const stageStateMap = useMemo(() => {
+    if (!stageStates || stageStates.length === 0) return null;
+    const map = new Map<string, WorkflowStageState>();
+    stageStates.forEach((state) => {
+      map.set(state.stage, state);
+    });
+    return map;
+  }, [stageStates]);
+
+  const statusPriority = useCallback((status: WorkflowStageStatus | 'idle' | undefined) => {
+    switch (status) {
+      case 'failed':
+        return 4;
+      case 'completed':
+        return 3;
+      case 'running':
+        return 2;
+      case 'pending':
+        return 1;
+      case 'idle':
+        return 0;
+      default:
+        return 0;
+    }
+  }, []);
+
+  const mergedStageStatus = useMemo<Record<string, WorkflowEvent>>(() => {
+    if (!stageStateMap) {
+      return stageStatus;
+    }
+    const merged: Record<string, WorkflowEvent> = { ...stageStatus };
+    const nowIso = new Date().toISOString();
+    stageStateMap.forEach((state, stageId) => {
+      const existing = merged[stageId];
+      const existingPriority = statusPriority(existing?.status as WorkflowStageStatus | undefined);
+      const statePriority = statusPriority(state.status);
+      if (!existing || statePriority >= existingPriority) {
+        const timestamp = state.finishedAt ?? state.startedAt ?? nowIso;
+        merged[stageId] = {
+          workflowId: workflowId ?? '',
+          category: 'stage',
+          stageId,
+          status: state.status,
+          message: stageLabels[stageId] ? `${stageLabels[stageId]} ${state.status === 'completed' ? '完成' : state.status === 'failed' ? '失败' : '状态更新'}` : '状态更新',
+          eventId: `state-sync-${stageId}`,
+          timestamp,
+          meta: {
+            detailType: 'state-sync',
+            stageStatus: state.status,
+          },
+        };
+      }
+    });
+    return merged;
+  }, [stageStatus, stageStateMap, statusPriority, workflowId]);
+
   const groupedStageEvents = useMemo<Record<string, WorkflowEvent[]>>(() => {
     const groups: Record<string, WorkflowEvent[]> = {};
     for (const event of events) {
@@ -185,7 +247,32 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
     return groups;
   }, [events]);
 
-  const overallBadge = statusColors[overallStatus];
+  const derivedOverallStatus = useMemo<WorkflowStageStatus | 'idle'>(() => {
+    const fallback = (() => {
+      if (!stageStates || stageStates.length === 0) return undefined;
+      if (stageStates.some((state) => state.status === 'failed')) return 'failed';
+      if (stageStates.every((state) => state.status === 'completed')) return 'completed';
+      if (stageStates.some((state) => state.status === 'running')) return 'running';
+      if (stageStates.some((state) => state.status === 'pending')) return 'pending';
+      return 'idle';
+    })();
+
+    if (workflowStatus && (!fallback || statusPriority(workflowStatus) > statusPriority(fallback))) {
+      return workflowStatus;
+    }
+
+    if (fallback) {
+      if (overallStatus === 'idle' || (overallStatus === 'pending' && statusPriority(fallback) > statusPriority(overallStatus))) {
+        return fallback;
+      }
+      if (overallStatus === 'running' && statusPriority(fallback) > statusPriority(overallStatus)) {
+        return fallback;
+      }
+    }
+    return overallStatus;
+  }, [overallStatus, stageStates, workflowStatus, statusPriority]);
+
+  const overallBadge = statusColors[derivedOverallStatus];
 
   useEffect(() => {
     if (!workflowId) {
@@ -376,13 +463,14 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
                 )}
 
                 {Object.entries(stageLabels).map(([stageId, label]) => {
-                  const stageEventStatus = stageStatus[stageId]?.status;
+                  const stageEventStatus = mergedStageStatus[stageId]?.status;
+                  const fallbackStageState = stageStateMap?.get(stageId);
                   const badgeStatus: WorkflowStageStatus =
                     stageEventStatus === 'running' ||
                     stageEventStatus === 'completed' ||
                     stageEventStatus === 'failed'
                       ? stageEventStatus
-                      : 'pending';
+                      : (fallbackStageState?.status ?? 'pending');
                   const stageEvents = groupedStageEvents[stageId] ?? [];
                   const latestStageMeta =
                     stageEvents.length > 0 ? stageEvents[stageEvents.length - 1].meta ?? {} : {};

@@ -16,6 +16,15 @@ import type {
   RollbackWorkflowRequest,
   TerminateWorkflowRequest,
   DetectiveMechanismPreset,
+  DetectiveRevisionNote,
+  DetectiveStoryAudioAsset,
+  DetectiveWorkflowMeta,
+  WorkflowTelemetry,
+  StageLog,
+  GateLog,
+  WorkflowStageCode,
+  Stage3AnalysisSnapshot,
+  FairPlayReport,
 } from '@storyapp/shared';
 import {
   createWorkflowDocument,
@@ -32,6 +41,12 @@ import {
   runStage2Writing,
   runStage3Review,
   runStage4Revision,
+  buildClueGraphFromOutline,
+  scoreFairPlay,
+  CLUE_GRAPH_VERSION,
+  normalizeRevisionNote,
+  normalizeRevisionNotes,
+  mergeRevisionNotes,
   type StageTelemetry,
 } from '../agents/detective';
 import { runStage4Validation } from '../agents/detective/validators';
@@ -54,6 +69,13 @@ import {
 
 const logger = createLogger('services:detectiveWorkflow');
 
+const PROMPT_VERSION_STAGE1 = 'stage1.contract.v1';
+const PROMPT_VERSION_KEY_STAGE1 = 'stage1_outline';
+const PROMPT_VERSION_STAGE3 = 'stage3.review.v1';
+const PROMPT_VERSION_KEY_STAGE3 = 'stage3_review';
+const PROMPT_VERSION_STAGE5 = 'stage5.validation.v1';
+const PROMPT_VERSION_KEY_STAGE5 = 'stage5_validation';
+
 const STAGE_DEFINITIONS = [
   { id: 'stage1_planning', label: 'Stage1 Planning' },
   { id: 'stage2_writing', label: 'Stage2 Writing' },
@@ -61,6 +83,24 @@ const STAGE_DEFINITIONS = [
   { id: 'stage4_revision', label: 'Stage4 Revision' },
   { id: 'stage5_validation', label: 'Stage5 Validation' },
 ] as const;
+
+type StageId = typeof STAGE_DEFINITIONS[number]['id'];
+
+const STAGE_CODE_LOOKUP: Record<StageId, WorkflowStageCode> = {
+  stage1_planning: 'S1',
+  stage2_writing: 'S2',
+  stage3_review: 'S3',
+  stage4_revision: 'S4',
+  stage5_validation: 'S5',
+};
+
+const STAGE_ORDER_LOOKUP: Record<StageId, number> = STAGE_DEFINITIONS.reduce(
+  (acc, stage, index) => {
+    acc[stage.id] = index;
+    return acc;
+  },
+  {} as Record<StageId, number>,
+);
 
 const TIME_PATTERN = /\b(\d{1,2}:\d{2})\b/;
 const DAY_PATTERN = /Day\s*\d+/i;
@@ -76,6 +116,189 @@ function parseChapterIndex(label?: string | null): number | null {
   const index = Number.parseInt(match[1], 10) - 1;
   if (!Number.isFinite(index) || index < 0) return null;
   return index;
+}
+
+function extractRuleId(detail?: string, issueId?: string): string | undefined {
+  if (typeof issueId === 'string' && issueId.startsWith('validation-')) {
+    return issueId.replace(/^validation-/, '');
+  }
+  if (typeof detail !== 'string') {
+    return undefined;
+  }
+  const match = detail.match(/\[([^\]]+)\]/);
+  return match ? match[1] : undefined;
+}
+
+function mapStageCode(stageId: StageId): WorkflowStageCode {
+  return STAGE_CODE_LOOKUP[stageId] ?? 'S0';
+}
+
+function computeStageDurationMs(states: WorkflowStageState[], stageId: StageId): number | undefined {
+  const state = states.find((item) => item.stage === stageId);
+  if (!state?.startedAt || !state?.finishedAt) return undefined;
+  const start = Date.parse(state.startedAt);
+  const end = Date.parse(state.finishedAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return undefined;
+  return Math.max(end - start, 0);
+}
+
+function stageOrder(stageId?: string, stageCode?: WorkflowStageCode): number {
+  if (stageId && (STAGE_ORDER_LOOKUP as Record<string, number>)[stageId as StageId] !== undefined) {
+    return (STAGE_ORDER_LOOKUP as Record<string, number>)[stageId as StageId];
+  }
+  if (stageCode) {
+    const sequence: WorkflowStageCode[] = ['S0', 'S1', 'S2', 'S3', 'S4', 'S5'];
+    const idx = sequence.indexOf(stageCode);
+    if (idx >= 0) {
+      return idx;
+    }
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function upsertPromptVersion(
+  meta: DetectiveWorkflowMeta | undefined,
+  key: string,
+  value: string,
+): DetectiveWorkflowMeta {
+  const nextPromptVersions = { ...(meta?.promptVersions ?? {}), [key]: value };
+  const existingStages = Array.isArray(meta?.telemetry?.stages)
+    ? [...(meta?.telemetry?.stages as StageLog[])]
+    : [];
+  const telemetryBase: WorkflowTelemetry = {
+    stages: existingStages,
+    promptVersions: {
+      ...(meta?.telemetry?.promptVersions ?? {}),
+      [key]: value,
+    },
+  };
+  return {
+    ...(meta ?? {}),
+    promptVersions: nextPromptVersions,
+    telemetry: telemetryBase,
+  };
+}
+
+function upsertStageLog(meta: DetectiveWorkflowMeta | undefined, log: StageLog): DetectiveWorkflowMeta {
+  const timestamp = log.timestamp ?? new Date().toISOString();
+  const telemetry = meta?.telemetry;
+  const existingStages = Array.isArray(telemetry?.stages)
+    ? [...(telemetry?.stages as StageLog[])]
+    : [];
+  const filtered = existingStages.filter((entry) => entry.stageId !== log.stageId);
+  const enriched: StageLog = {
+    ...log,
+    timestamp,
+    gates: log.gates ?? [],
+  };
+  const ordered = [...filtered, enriched].sort(
+    (a, b) => stageOrder(a.stageId, a.stage) - stageOrder(b.stageId, b.stage),
+  );
+  return {
+    ...(meta ?? {}),
+    telemetry: {
+      stages: ordered,
+      promptVersions: meta?.telemetry?.promptVersions,
+    },
+  };
+}
+
+function setStage3Analysis(
+  meta: DetectiveWorkflowMeta | undefined,
+  analysis: Stage3AnalysisSnapshot | undefined,
+): DetectiveWorkflowMeta {
+  const stageResults = {
+    ...(meta?.stageResults ?? {}),
+    stage3: analysis,
+  };
+  return {
+    ...(meta ?? {}),
+    stageResults,
+  };
+}
+
+export function computeHypothesisGate(analysis?: Stage3AnalysisSnapshot | null): GateLog {
+  if (!analysis?.hypotheses?.candidates?.length) {
+    return {
+      name: 'hypothesis.uniqueness',
+      verdict: 'warn',
+      reason: '缺少有效的竞争假设',
+      metrics: {
+        candidateCount: 0,
+      },
+    };
+  }
+  const sorted = [...analysis.hypotheses.candidates].sort((a, b) => b.confidence - a.confidence);
+  const primary = sorted[0];
+  const runnerUp = sorted[1];
+  const gap = runnerUp ? Math.abs(primary.confidence - runnerUp.confidence) : primary.confidence;
+  const verdict: GateLog['verdict'] = runnerUp && gap < 0.2 ? 'warn' : 'pass';
+  const reason = verdict === 'warn'
+    ? `多解竞争度高：${primary.suspect} vs ${runnerUp?.suspect}`
+    : undefined;
+  return {
+    name: 'hypothesis.uniqueness',
+    verdict,
+    reason,
+    metrics: {
+      candidateCount: sorted.length,
+      primaryConfidence: Number(primary.confidence.toFixed(3)),
+      runnerUpConfidence: runnerUp ? Number(runnerUp.confidence.toFixed(3)) : 0,
+      confidenceGap: Number(gap.toFixed(3)),
+    },
+  };
+}
+
+export function computeFairPlayGate(report: FairPlayReport): GateLog {
+  const verdict: GateLog['verdict'] = report.unsupportedInferences.length > 0 ? 'block' : 'pass';
+  const reason = verdict === 'block'
+    ? `仍有 ${report.unsupportedInferences.length} 条推论缺乏显式线索支撑`
+    : undefined;
+  return {
+    name: 'fairPlay.final',
+    verdict,
+    reason,
+    metrics: {
+      unsupported: report.unsupportedInferences.length,
+      orphan: report.orphanClues.length,
+      economyScore: report.economyScore,
+    },
+  };
+}
+
+export function computeComplexityGate(analysis?: Stage3AnalysisSnapshot | null): GateLog {
+  const candidates = analysis?.hypotheses?.candidates ?? [];
+  if (!candidates.length) {
+    return {
+      name: 'complexity.uniqueness',
+      verdict: 'warn',
+      reason: '缺少假说评估结果',
+      metrics: {
+        competitors: 0,
+        inevitability: 0,
+      },
+    };
+  }
+  const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
+  const primary = sorted[0];
+  const runnerUp = sorted[1];
+  const competitors = sorted.filter((item) => item.confidence >= 0.3).length;
+  const inevitability = Number((primary.confidence - (runnerUp?.confidence ?? 0)).toFixed(3));
+  const verdict: GateLog['verdict'] = competitors >= 2 && inevitability >= 0.4 ? 'pass' : 'warn';
+  const reason = verdict === 'warn'
+    ? '竞争嫌疑不足或最终矛盾力度不足'
+    : undefined;
+  return {
+    name: 'complexity.uniqueness',
+    verdict,
+    reason,
+    metrics: {
+      competitors,
+      primaryConfidence: Number(primary.confidence.toFixed(3)),
+      runnerUpConfidence: runnerUp ? Number(runnerUp.confidence.toFixed(3)) : 0,
+      inevitability,
+    },
+  };
 }
 
 function ensureChapterAnchorsCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): string[] {
@@ -142,8 +365,6 @@ function assertPostRevisionCompliance(outline: DetectiveOutline, draft: Detectiv
   }
 }
 
-type StageId = typeof STAGE_DEFINITIONS[number]['id'];
-
 type StageRunnerOutput = Partial<Pick<DetectiveWorkflowDocument, 'outline' | 'storyDraft' | 'review' | 'validation'>>;
 
 type WorkflowExecutionOptions = {
@@ -159,7 +380,7 @@ function buildInitialStageStates(): WorkflowStageState[] {
   }));
 }
 
-function resolveMechanismPreset(meta?: Record<string, unknown>): DetectiveMechanismPreset {
+function resolveMechanismPreset(meta?: DetectiveWorkflowMeta): DetectiveMechanismPreset {
   const preferredId =
     meta &&
     typeof meta === 'object' &&
@@ -357,6 +578,82 @@ async function markWorkflowFailed(workflowId: ObjectId, error: any) {
   });
 }
 
+export async function cleanupStaleWorkflows(options?: { maxAgeMinutes?: number; stages?: StageId[] }) {
+  const maxAgeMinutes = Math.max(1, options?.maxAgeMinutes ?? 10);
+  const stages = (options?.stages && options.stages.length > 0
+    ? options.stages
+    : STAGE_DEFINITIONS.map((stage) => stage.id)) as StageId[];
+  const thresholdDate = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+  const thresholdIso = thresholdDate.toISOString();
+
+  const db = getDatabase();
+  const collection = db.collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS);
+
+  const filter = {
+    status: 'running' as WorkflowStageStatus,
+    stageStates: {
+      $elemMatch: {
+        stage: { $in: stages },
+        status: 'running',
+        startedAt: { $lt: thresholdIso },
+      },
+    },
+  };
+
+  const staleDocuments = await collection
+    .find(filter, {
+      projection: {
+        stageStates: 1,
+        topic: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    })
+    .toArray();
+
+  const cleaned: Array<{
+    workflowId: string;
+    staleStage: string | null;
+    startedAt?: string;
+    topic?: string;
+  }> = [];
+
+  for (const doc of staleDocuments) {
+    if (!doc._id) continue;
+    const staleStage = doc.stageStates?.find(
+      (state) =>
+        stages.includes(state.stage as StageId) &&
+        state.status === 'running' &&
+        state.startedAt &&
+        state.startedAt < thresholdIso,
+    );
+
+    await markWorkflowFailed(doc._id, new Error('workflow_stale_timeout'));
+
+    const workflowId = doc._id.toHexString();
+    createInfoEvent(workflowId, '检测到生成阶段长时间无响应，已标记为失败', {
+      staleStage: staleStage?.stage ?? null,
+      startedAt: staleStage?.startedAt,
+      maxAgeMinutes,
+      cleanupAt: new Date().toISOString(),
+    });
+
+    cleaned.push({
+      workflowId,
+      staleStage: staleStage?.stage ?? null,
+      startedAt: staleStage?.startedAt,
+      topic: doc.topic,
+    });
+  }
+
+  return {
+    cleanedCount: cleaned.length,
+    cleaned,
+    maxAgeMinutes,
+    threshold: thresholdIso,
+  };
+}
+
 async function runStageWithUpdate(
   document: DetectiveWorkflowDocument,
   stageId: StageId,
@@ -474,7 +771,7 @@ async function executeWorkflowPipeline(
   document: DetectiveWorkflowDocument,
   options: WorkflowExecutionOptions,
 ): Promise<DetectiveWorkflowDocument> {
-  const mechanismPreset = resolveMechanismPreset(document.meta as Record<string, unknown> | undefined);
+  const mechanismPreset = resolveMechanismPreset(document.meta);
   const planningProfile = (process.env.DETECTIVE_PROMPT_PROFILE as 'strict' | 'balanced' | 'creative') || 'balanced';
   const planningSeed = `${mechanismPreset.id}-${planningProfile}`;
   const plannerPrompt: PromptBuildOptions = {
@@ -507,6 +804,86 @@ async function executeWorkflowPipeline(
   workingDoc = await runStageWithUpdate(workingDoc, 'stage1_planning', async (telemetry) => ({
     outline: await runStage1Planning(workingDoc.topic, plannerPrompt, telemetry),
   }));
+
+  if (workingDoc.outline) {
+    try {
+      const clueGraph = buildClueGraphFromOutline(workingDoc.outline as DetectiveOutline);
+      const fairPlayReport = scoreFairPlay(clueGraph);
+      const generatedAt = new Date().toISOString();
+
+      let nextMeta: DetectiveWorkflowMeta = {
+        ...(workingDoc.meta ?? {}),
+        clueGraphSnapshot: {
+          generatedAt,
+          graph: clueGraph,
+          report: fairPlayReport,
+          version: CLUE_GRAPH_VERSION,
+        },
+      };
+
+      nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE1, PROMPT_VERSION_STAGE1);
+
+      let modelCalls: number | undefined;
+      if (workingDoc._id) {
+        try {
+          const summary = getStageExecutionSummary(workingDoc._id.toHexString());
+          const stageExecution = summary.stages.find((stage) => stage.stageId === 'stage1_planning');
+          if (stageExecution) {
+            modelCalls = stageExecution.commands.filter((cmd) => cmd.command === 'POST /chat/completions').length;
+          }
+        } catch (summaryError: any) {
+          logger.warn({ err: summaryError }, 'Stage1: 无法获取执行摘要，模型调用统计缺失');
+        }
+      }
+
+      const gateVerdict: GateLog['verdict'] = fairPlayReport.unsupportedInferences.length > 0 ? 'warn' : 'pass';
+      const gateReason = fairPlayReport.unsupportedInferences.length > 0
+        ? `存在 ${fairPlayReport.unsupportedInferences.length} 个推论缺少显式支撑`
+        : undefined;
+      const gateLog: GateLog = {
+        name: 'fairPlay.initial',
+        verdict: gateVerdict,
+        reason: gateReason,
+        metrics: {
+          unsupported: fairPlayReport.unsupportedInferences.length,
+          orphan: fairPlayReport.orphanClues.length,
+          economyScore: fairPlayReport.economyScore,
+        },
+        timestamp: generatedAt,
+      };
+
+      const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage1_planning');
+      const stageLog: StageLog = {
+        stage: mapStageCode('stage1_planning'),
+        stageId: 'stage1_planning',
+        promptVersion: PROMPT_VERSION_STAGE1,
+        gates: [gateLog],
+        durationMs,
+        modelCalls,
+        timestamp: generatedAt,
+      };
+
+      nextMeta = upsertStageLog(nextMeta, stageLog);
+
+      workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
+      await persistWorkflow(workingDoc);
+      if (workingDoc._id) {
+        createInfoEvent(workingDoc._id.toHexString(), '已生成线索公平性快照', {
+          nodes: clueGraph.nodes.length,
+          edges: clueGraph.edges.length,
+          unsupportedInferences: fairPlayReport.unsupportedInferences.length,
+          orphanClues: fairPlayReport.orphanClues.length,
+          economyScore: fairPlayReport.economyScore,
+          gateVerdict,
+        });
+      }
+    } catch (clueGraphSnapshotError: any) {
+      logger.warn(
+        { err: clueGraphSnapshotError },
+        'Stage1 线索图快照生成失败（跳过并继续后续流程）',
+      );
+    }
+  }
 
   // Stage 2
   workingDoc = await runStageWithUpdate(workingDoc, 'stage2_writing', async (telemetry) => {
@@ -588,6 +965,46 @@ async function executeWorkflowPipeline(
     return { review };
   });
 
+  if (workingDoc.review) {
+    try {
+      const reviewObj = workingDoc.review as Record<string, unknown>;
+      const analysis: Stage3AnalysisSnapshot = {
+        betaReader: reviewObj?.betaReader as any,
+        hypotheses: reviewObj?.hypotheses as any,
+      };
+      let nextMeta = setStage3Analysis(workingDoc.meta, analysis);
+      nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE3, PROMPT_VERSION_STAGE3);
+      let modelCalls: number | undefined;
+      if (workingDoc._id) {
+        try {
+          const summary = getStageExecutionSummary(workingDoc._id.toHexString());
+          const stageExecution = summary.stages.find((stage) => stage.stageId === 'stage3_review');
+          if (stageExecution) {
+            modelCalls = stageExecution.commands.filter((cmd) => cmd.command === 'POST /chat/completions').length;
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Stage3: 无法获取执行摘要');
+        }
+      }
+      const gates: GateLog[] = [computeHypothesisGate(analysis)];
+      const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage3_review');
+      const stageLog: StageLog = {
+        stage: mapStageCode('stage3_review'),
+        stageId: 'stage3_review',
+        promptVersion: PROMPT_VERSION_STAGE3,
+        gates,
+        durationMs,
+        modelCalls,
+        timestamp: new Date().toISOString(),
+      };
+      nextMeta = upsertStageLog(nextMeta, stageLog);
+      workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
+      await persistWorkflow(workingDoc);
+    } catch (analysisError) {
+      logger.warn({ err: analysisError }, 'Stage3 分析结果入库失败');
+    }
+  }
+
   // Stage 4
   workingDoc = await runStageWithUpdate(workingDoc, 'stage4_revision', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
@@ -655,12 +1072,62 @@ async function executeWorkflowPipeline(
         resultSummary: '已同步大纲与修订稿',
       });
     }
-    const revisionNoteCandidates = [
-      ...(revision.draft.revisionNotes ?? []),
-      ...revision.plan.mustFix.map((item) => `已处理：${item.detail}`),
-      ...revision.plan.warnings.map((item) => `已核对：${item.detail}`),
-    ];
-    const revisionNotes = Array.from(new Set(revisionNoteCandidates.filter((note) => note && note.trim().length > 0)));
+    const revisionTimestamp = new Date().toISOString();
+    const baseRevisionNotes = normalizeRevisionNotes(revision.draft.revisionNotes, {
+      category: 'model',
+      stage: 'stage4_revision',
+      source: 'model-output',
+      createdAt: revisionTimestamp,
+    });
+    const mustFixNotes = revision.plan.mustFix
+      .map((item) =>
+        normalizeRevisionNote(
+          {
+            message: `已处理：${item.detail}`,
+            category: 'validation',
+            relatedRuleId: extractRuleId(item?.detail, item?.id),
+            chapter: typeof item?.chapterRef === 'string' ? item.chapterRef : undefined,
+            source: 'validation-must-fix',
+            stage: 'stage4_revision',
+            createdAt: revisionTimestamp,
+          },
+          {
+            category: 'validation',
+            stage: 'stage4_revision',
+            source: 'validation-must-fix',
+            createdAt: revisionTimestamp,
+          },
+        ),
+      )
+      .filter((note): note is DetectiveRevisionNote => Boolean(note));
+    const warningNotes = revision.plan.warnings
+      .map((item) =>
+        normalizeRevisionNote(
+          {
+            message: `已核对：${item.detail}`,
+            category: 'validation',
+            relatedRuleId: extractRuleId(item?.detail, item?.id),
+            chapter: typeof item?.chapterRef === 'string' ? item.chapterRef : undefined,
+            source: 'validation-warning',
+            stage: 'stage4_revision',
+            createdAt: revisionTimestamp,
+          },
+          {
+            category: 'validation',
+            stage: 'stage4_revision',
+            source: 'validation-warning',
+            createdAt: revisionTimestamp,
+          },
+        ),
+      )
+      .filter((note): note is DetectiveRevisionNote => Boolean(note));
+    const continuityRevisionNotes = normalizeRevisionNotes(enforced.draft.continuityNotes, {
+      category: 'system',
+      stage: 'stage4_revision',
+      source: 'continuity-post-enforce',
+      createdAt: revisionTimestamp,
+    });
+    const revisionNotes = mergeRevisionNotes([baseRevisionNotes, mustFixNotes, warningNotes, continuityRevisionNotes]);
     const continuityNoteCandidates = [
       ...(enforced.draft.continuityNotes ?? []),
       ...revision.plan.mustFix.map((item) => `修订已覆盖：${item.detail}`),
@@ -687,6 +1154,7 @@ async function executeWorkflowPipeline(
       ...enforced.draft,
       continuityNotes,
       revisionNotes,
+      ttsAssets: enforced.draft.ttsAssets ?? storyDraft.ttsAssets,
     };
     try {
       assertPostRevisionCompliance(harmonized.outline || outline, mergedDraft);
@@ -774,7 +1242,43 @@ async function executeWorkflowPipeline(
       type: 'json',
       preview: JSON.stringify(validation, null, 2).slice(0, 2000),
     });
-    return { validation, outline: outlineForValidation, storyDraft };
+    const clueGraph = buildClueGraphFromOutline(outlineForValidation);
+    const fairPlayReport = scoreFairPlay(clueGraph);
+    const stage3Analysis = (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.stageResults?.stage3;
+    const fairGate = computeFairPlayGate(fairPlayReport);
+    const complexityGate = computeComplexityGate(stage3Analysis);
+    const validationWithMetrics: ValidationReport = {
+      ...validation,
+      metrics: {
+        ...(validation.metrics ?? {}),
+        fairPlayEconomy: fairPlayReport.economyScore,
+        unsupportedInferences: fairPlayReport.unsupportedInferences.length,
+        inevitabilityIndex: (complexityGate.metrics?.inevitability as number | undefined) ?? 0,
+        competitorCount: (complexityGate.metrics?.competitors as number | undefined) ?? 0,
+      },
+    };
+
+    let nextMeta = upsertPromptVersion(workingDoc.meta, PROMPT_VERSION_KEY_STAGE5, PROMPT_VERSION_STAGE5);
+    const gates: GateLog[] = [fairGate, complexityGate];
+    const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage5_validation');
+    const stageLog: StageLog = {
+      stage: mapStageCode('stage5_validation'),
+      stageId: 'stage5_validation',
+      promptVersion: PROMPT_VERSION_STAGE5,
+      gates,
+      durationMs,
+      modelCalls: 0,
+      timestamp: new Date().toISOString(),
+    };
+    nextMeta = upsertStageLog(nextMeta, stageLog);
+    workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
+    await persistWorkflow(workingDoc);
+
+    if (fairGate.verdict === 'block') {
+      throw new Error(fairGate.reason ?? 'Fair-Play Gate 未通过，请补充线索支撑');
+    }
+
+    return { validation: validationWithMetrics, outline: outlineForValidation, storyDraft };
   });
 
   const revision = createWorkflowRevision({
@@ -808,6 +1312,57 @@ function computeListItem(document: DetectiveWorkflowDocument): WorkflowListItem 
 
 export function getWorkflowStageActivity(workflowId: string) {
   return getStageExecutionSummary(workflowId);
+}
+
+const MAX_TTS_ASSETS = Number.parseInt(process.env.WORKFLOW_MAX_TTS_ASSETS || '5', 10);
+
+export async function saveWorkflowTtsAsset(
+  workflowId: string,
+  asset: DetectiveStoryAudioAsset,
+): Promise<void> {
+  if (!workflowId || !ObjectId.isValid(workflowId)) {
+    throw new Error('Invalid workflow id');
+  }
+
+  const db = getDatabase();
+  const collection = db.collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS);
+  const objectId = new ObjectId(workflowId);
+  const document = await collection.findOne(
+    { _id: objectId },
+    { projection: { storyDraft: 1 } },
+  );
+
+  if (!document) {
+    throw new Error('Workflow not found');
+  }
+
+  const generatedAt = asset.generatedAt ?? new Date().toISOString();
+  const normalizedAsset: DetectiveStoryAudioAsset = {
+    ...asset,
+    generatedAt,
+    workflowId: asset.workflowId ?? workflowId,
+    status: asset.status ?? 'ready',
+    segments: Array.isArray(asset.segments) ? asset.segments : [],
+  };
+
+  const existingAssets = Array.isArray(document.storyDraft?.ttsAssets)
+    ? document.storyDraft!.ttsAssets
+    : [];
+
+  const deduped = existingAssets.filter((item) => item?.storyId !== normalizedAsset.storyId);
+  deduped.unshift(normalizedAsset);
+  const maxAssets = Number.isFinite(MAX_TTS_ASSETS) && MAX_TTS_ASSETS > 0 ? MAX_TTS_ASSETS : 5;
+  const nextAssets = deduped.slice(0, maxAssets);
+
+  await collection.updateOne(
+    { _id: objectId },
+    {
+      $set: {
+        'storyDraft.ttsAssets': nextAssets,
+        updatedAt: new Date(),
+      },
+    },
+  );
 }
 
 export async function createDetectiveWorkflow(params: { topic: string; locale?: string }): Promise<DetectiveWorkflowRecord> {

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import type { StoryTtsSegment } from '@storyapp/shared';
+import type { StoryTtsSegment, DetectiveStoryAudioAsset } from '@storyapp/shared';
 import type { TtsSynthesisRequest } from '../services/tts/types';
 import { createTtsManager } from '../services/tts';
 import { EventType, logError, logInfo } from '../utils/logger';
@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import { listTasks, findTask, getProviderSummary, TaskStatus, findLatestTaskByStoryId } from '../services/tts/taskRegistry';
 import { createTtsEvent } from '../services/workflowEventBus';
+import { saveWorkflowTtsAsset } from '../services/detectiveWorkflowService';
 import { getDatabase, COLLECTIONS } from '../config/database';
 import { ObjectId } from 'mongodb';
 import type { DetectiveWorkflowDocument } from '../models/DetectiveWorkflow';
@@ -421,6 +422,28 @@ router.post('/synthesize-story', async (req: Request, res: Response) => {
           totalSegments: finalState.totalSegments,
         },
       );
+
+      if (HEX_OBJECT_ID.test(rawStoryId)) {
+        const totalDuration = finalState.totalDuration;
+        const ttsAsset: DetectiveStoryAudioAsset = {
+          storyId: effectiveStoryId,
+          workflowId: rawStoryId,
+          generatedAt: new Date().toISOString(),
+          status: isSuccess ? 'ready' : 'error',
+          totalDuration,
+          segments: finalState.segments,
+          voiceId: typeof voiceId === 'string' ? voiceId : undefined,
+          speed: parseNumber(speed, undefined),
+          provider: mgr.getProviderId(),
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+        };
+        saveWorkflowTtsAsset(rawStoryId, ttsAsset).catch((persistError: any) => {
+          logError(EventType.TTS_ERROR, '持久化 TTS 结果失败', persistError, {
+            storyId: effectiveStoryId,
+            workflowId: rawStoryId,
+          }, sessionId);
+        });
+      }
     };
 
     processStory().catch((error: any) => {

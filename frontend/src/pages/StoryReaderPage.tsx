@@ -9,7 +9,14 @@ import {
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { StoryAudioPlayer } from '../components/StoryAudioPlayer';
-import type { DetectiveWorkflowRecord, DetectiveChapter, WorkflowEvent } from '@storyapp/shared';
+import type {
+  DetectiveWorkflowRecord,
+  DetectiveChapter,
+  DetectiveRevisionNote,
+  DetectiveRevisionNoteCategory,
+  DetectiveStoryAudioAsset,
+  WorkflowEvent,
+} from '@storyapp/shared';
 import { useDetectiveWorkflow } from '../hooks/useDetectiveWorkflow';
 import { useStoryTts, type StoryTtsBatchResponse } from '../hooks/useStoryTts';
 import { stripClueTags, resolveChapterTitle, draftToMarkdown } from '../utils/storyFormatting';
@@ -33,10 +40,7 @@ interface LocationState {
   openTimeline?: boolean;
 }
 
-type TtsContext =
-  | { mode: 'none' }
-  | { mode: 'full' }
-  | { mode: 'chapter'; chapterIndex: number };
+type TtsContext = { mode: 'none' } | { mode: 'full' };
 
 const DEFAULT_TTS_VOICE =
   process.env.REACT_APP_TTS_VOICE_ID || process.env.REACT_APP_TTS_VOICE || 'iflytek_yeting';
@@ -45,6 +49,26 @@ const DEFAULT_TTS_SPEED = Number(process.env.REACT_APP_TTS_SPEED ?? '1');
 const CLUE_HIGHLIGHT_CLASS = 'rounded bg-emerald-100 px-1 text-emerald-800 shadow-inner';
 const RED_HERRING_HIGHLIGHT_CLASS = 'rounded bg-amber-100 px-1 text-amber-800 shadow-inner';
 const CRITICAL_VALIDATION_RULES = new Set(['timeline-from-text', 'chapter-time-tags', 'motive-foreshadowing']);
+const REVISION_NOTE_CATEGORY_VALUES: DetectiveRevisionNoteCategory[] = ['model', 'system', 'validation', 'manual'];
+const REVISION_NOTE_CATEGORY_META: Record<DetectiveRevisionNoteCategory, { label: string; badgeClass: string }> = {
+  model: { label: '模型修订', badgeClass: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200' },
+  system: { label: '系统自动', badgeClass: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200' },
+  validation: { label: '校验处理', badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' },
+  manual: { label: '人工备注', badgeClass: 'bg-slate-200 text-slate-700 dark:bg-slate-800/60 dark:text-slate-100' },
+};
+const REVISION_NOTE_SOURCE_LABELS: Record<string, string> = {
+  'model-output': '模型输出',
+  'auto-continuity': '连续性自动补写',
+  'continuity-post-enforce': '连续性复核',
+  'validation-must-fix': 'Must Fix 处理',
+  'validation-warning': '警告核查',
+};
+const REVISION_STAGE_LABELS: Record<string, string> = {
+  stage2_writing: 'Stage2 写作',
+  stage3_review: 'Stage3 审阅',
+  stage4_revision: 'Stage4 修订',
+  stage5_validation: 'Stage5 校验',
+};
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -109,6 +133,7 @@ export default function StoryReaderPage() {
   const [compileError, setCompileError] = useState<string | null>(null);
   const [isTimelineOpen, setIsTimelineOpen] = useState(defaultTimelineOpen);
   const [isRetryingStage, setIsRetryingStage] = useState(false);
+  const [hasManuallyClearedAudio, setHasManuallyClearedAudio] = useState(false);
 
   const { synthesizeStory, status: ttsStatus, error: ttsError } = useStoryTts({
     defaultVoiceId: DEFAULT_TTS_VOICE,
@@ -131,6 +156,13 @@ export default function StoryReaderPage() {
     setIsTimelineOpen(defaultTimelineOpen);
   }, [defaultTimelineOpen]);
 
+  useEffect(() => {
+    setHasManuallyClearedAudio(false);
+    setAudioData(null);
+    setTtsContext({ mode: 'none' });
+    setTtsHint('');
+  }, [workflowId]);
+
   const chapters: DetectiveChapter[] = useMemo(
     () => workflow?.storyDraft?.chapters ?? [],
     [workflow?.storyDraft?.chapters],
@@ -145,7 +177,69 @@ export default function StoryReaderPage() {
   const timeline = workflow?.outline?.timeline ?? [];
   const characters = workflow?.outline?.characters ?? [];
   const clues = workflow?.outline?.clueMatrix ?? [];
-  const revisionNotes = workflow?.storyDraft?.revisionNotes ?? [];
+  const ttsAssets: DetectiveStoryAudioAsset[] = useMemo(() => {
+    const rawAssets = workflow?.storyDraft?.ttsAssets;
+    return Array.isArray(rawAssets) ? rawAssets : [];
+  }, [workflow?.storyDraft?.ttsAssets]);
+  const latestReadyAsset = useMemo<DetectiveStoryAudioAsset | undefined>(() => {
+    return ttsAssets.find((asset) => asset.status === 'ready' && Array.isArray(asset.segments) && asset.segments.length > 0);
+  }, [ttsAssets]);
+  const revisionNotes = useMemo<DetectiveRevisionNote[]>(() => {
+    const raw = workflow?.storyDraft?.revisionNotes;
+    if (!raw) return [];
+    const array: unknown[] = Array.isArray(raw) ? raw : [raw];
+    const resolveCategory = (value: unknown): DetectiveRevisionNoteCategory => {
+      if (typeof value === 'string' && REVISION_NOTE_CATEGORY_VALUES.includes(value as DetectiveRevisionNoteCategory)) {
+        return value as DetectiveRevisionNoteCategory;
+      }
+      return 'model';
+    };
+    const notes: DetectiveRevisionNote[] = [];
+    array.forEach((item) => {
+      if (typeof item === 'string') {
+        const message = item.trim();
+        if (!message) return;
+        notes.push({ message, category: 'model' });
+        return;
+      }
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      const obj: any = item;
+      const rawMessage: string =
+        typeof obj.message === 'string'
+          ? obj.message
+          : typeof obj.detail === 'string'
+          ? obj.detail
+          : '';
+      const message = String(rawMessage).trim();
+      if (!message) {
+        return;
+      }
+      const note: DetectiveRevisionNote = {
+        message,
+        category: resolveCategory(obj.category),
+        stage: typeof obj.stage === 'string' ? obj.stage : undefined,
+        source: typeof obj.source === 'string' ? obj.source : undefined,
+        relatedRuleId:
+          typeof obj.relatedRuleId === 'string'
+            ? obj.relatedRuleId
+            : typeof obj.ruleId === 'string'
+            ? obj.ruleId
+            : undefined,
+        chapter:
+          typeof obj.chapter === 'string'
+            ? obj.chapter
+            : typeof obj.chapterRef === 'string'
+            ? obj.chapterRef
+            : undefined,
+        createdAt: typeof obj.createdAt === 'string' ? obj.createdAt : undefined,
+        id: typeof obj.id === 'string' ? obj.id : undefined,
+      };
+      notes.push(note);
+    });
+    return notes;
+  }, [workflow?.storyDraft?.revisionNotes]);
   const continuityNotes = workflow?.storyDraft?.continuityNotes ?? [];
   const validationBuckets = useMemo(() => {
     const fails = validationResults.filter((result) => result.status === 'fail');
@@ -246,6 +340,7 @@ export default function StoryReaderPage() {
     }
 
     try {
+      setHasManuallyClearedAudio(false);
       setTtsContext({ mode: 'full' });
       setTtsHint('正在合成整篇朗读，预计耗时 20-40 秒…');
       const result = await synthesizeStory({
@@ -256,6 +351,7 @@ export default function StoryReaderPage() {
         speed: DEFAULT_TTS_SPEED,
       });
       setAudioData(result);
+      setHasManuallyClearedAudio(false);
       if (result.successCount === result.totalSegments) {
         setTtsHint('朗读音频已就绪，可开始播放。');
         toast.success('整篇朗读已生成');
@@ -270,54 +366,56 @@ export default function StoryReaderPage() {
     }
   };
 
-  const handleSynthesizeChapter = async (index: number, chapter: DetectiveChapter) => {
-    const text = stripClueTags(chapter?.content);
-    if (!text) {
-      toast.error('本章暂无可朗读内容');
-      return;
-    }
-    try {
-      setTtsContext({ mode: 'chapter', chapterIndex: index });
-      setTtsHint(`正在合成第 ${index + 1} 章朗读…`);
-      const result = await synthesizeStory({
-        storyId: `${timelineWorkflowId || 'story'}-chapter-${index}`,
-        fullText: text,
-        chapterMarkers: [resolveChapterTitle(index, chapter)],
-        voiceId: DEFAULT_TTS_VOICE,
-        speed: DEFAULT_TTS_SPEED,
-      });
-      setAudioData(result);
-      if (result.successCount === result.totalSegments) {
-        setTtsHint(`第 ${index + 1} 章朗读已生成。`);
-        toast.success(`第 ${index + 1} 章朗读已生成`);
-      } else {
-        setTtsHint('本章朗读部分失败，可稍后重试。');
-        toast.error('本章朗读生成不完整');
-      }
-    } catch (err: any) {
-      const message = err?.message || '朗读合成失败';
-      setTtsHint('');
-      toast.error(message);
-    }
-  };
-
   const handleClearAudio = () => {
     setAudioData(null);
     setTtsHint('');
     setTtsContext({ mode: 'none' });
+    setHasManuallyClearedAudio(true);
   };
 
   const cachedSegments = audioData ? audioData.segments.filter((segment) => segment.cached).length : 0;
 
   const playbackTitle = useMemo(() => {
-    if (ttsContext.mode === 'chapter' && typeof ttsContext.chapterIndex === 'number') {
-      return `第${ttsContext.chapterIndex + 1}章 ${resolveChapterTitle(ttsContext.chapterIndex, chapters[ttsContext.chapterIndex])}`;
-    }
     if (ttsContext.mode === 'full') {
       return storyTitle;
     }
     return '';
   }, [chapters, storyTitle, ttsContext]);
+
+  useEffect(() => {
+    if (!latestReadyAsset) {
+      return;
+    }
+    if (isSynthesizing) {
+      return;
+    }
+    if (hasManuallyClearedAudio) {
+      return;
+    }
+    if (
+      audioData &&
+      audioData.storyId === latestReadyAsset.storyId &&
+      audioData.totalSegments === latestReadyAsset.segments.length
+    ) {
+      return;
+    }
+    const totalDuration = Number.isFinite(latestReadyAsset.totalDuration)
+      ? (latestReadyAsset.totalDuration as number)
+      : latestReadyAsset.segments.reduce((sum, segment) => sum + (segment.duration || 0), 0);
+    const successCount = latestReadyAsset.segments.filter((segment) => !segment.error).length;
+    const restoredAudio: StoryTtsBatchResponse = {
+      success: true,
+      status: 'ready',
+      storyId: latestReadyAsset.storyId,
+      totalSegments: latestReadyAsset.segments.length,
+      successCount,
+      totalDuration,
+      segments: latestReadyAsset.segments,
+    };
+    setAudioData(restoredAudio);
+    setTtsContext({ mode: 'full' });
+    setTtsHint('朗读音频已生成，可直接播放。');
+  }, [audioData, hasManuallyClearedAudio, isSynthesizing, latestReadyAsset]);
 
   const handleCompile = async () => {
     if (!timelineWorkflowId) {
@@ -389,6 +487,8 @@ export default function StoryReaderPage() {
       <WorkflowTimelineDrawer
         workflowId={timelineWorkflowId}
         storyTitle={storyTitle}
+        stageStates={workflow?.stageStates}
+        workflowStatus={workflow?.status}
         initialOpen={defaultTimelineOpen}
         onOpenChange={setIsTimelineOpen}
         onScrollToChapter={handleScrollToChapter}
@@ -662,13 +762,47 @@ export default function StoryReaderPage() {
                 </div>
               )}
               <ul
-                className={`list-disc space-y-1 pl-5 text-xs ${
+                className={`space-y-2 text-xs ${
                   hasValidationWarns ? 'text-amber-900 dark:text-amber-100' : 'text-points-text-muted'
                 }`}
               >
-                {revisionNotes.map((note, index) => (
-                  <li key={`revision-note-${index}`}>{note}</li>
-                ))}
+                {revisionNotes.map((note, index) => {
+                  const key = note.id ?? `${note.category}-${index}`;
+                  const categoryMeta = REVISION_NOTE_CATEGORY_META[note.category] ?? REVISION_NOTE_CATEGORY_META.model;
+                  const stageLabel = note.stage ? REVISION_STAGE_LABELS[note.stage] ?? note.stage : undefined;
+                  const sourceLabel = note.source ? REVISION_NOTE_SOURCE_LABELS[note.source] ?? note.source : undefined;
+                  return (
+                    <li
+                      key={`revision-note-${key}`}
+                      className="rounded-xl border border-points-border/60 bg-white/80 px-3 py-2 shadow-sm dark:border-white/20 dark:bg-slate-900/40"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium">
+                        <span className={`rounded-full px-2 py-0.5 ${categoryMeta.badgeClass}`}>{categoryMeta.label}</span>
+                        {stageLabel && (
+                          <span className="text-points-text-muted dark:text-slate-200">阶段：{stageLabel}</span>
+                        )}
+                        {note.relatedRuleId && (
+                          <span className="text-points-text-muted dark:text-slate-200">规则：{note.relatedRuleId}</span>
+                        )}
+                        {note.chapter && (
+                          <span className="text-points-text-muted dark:text-slate-200">章节：{note.chapter}</span>
+                        )}
+                        {sourceLabel && (
+                          <span className="text-points-text-muted dark:text-slate-200">来源：{sourceLabel}</span>
+                        )}
+                      </div>
+                      <p
+                        className={`mt-1 text-[13px] leading-5 ${
+                          hasValidationWarns
+                            ? 'text-amber-900 dark:text-amber-100'
+                            : 'text-points-text-muted dark:text-slate-200'
+                        }`}
+                      >
+                        {note.message}
+                      </p>
+                    </li>
+                  );
+                })}
               </ul>
             </PointsSection>
           )}
@@ -755,23 +889,9 @@ export default function StoryReaderPage() {
                       data-index={index}
                       className="scroll-mt-24"
                     >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <h2 className="text-2xl font-semibold text-points-text">
-                          第{index + 1}章 {resolveChapterTitle(index, chapter)}
-                        </h2>
-                        <Button
-                          variant="ghost"
-                          size="small"
-                          onClick={() => handleSynthesizeChapter(index, chapter)}
-                          disabled={isSynthesizing && ttsContext.mode === 'chapter' && ttsContext.chapterIndex === index}
-                        >
-                          {(isSynthesizing && ttsContext.mode === 'chapter' && ttsContext.chapterIndex === index) ? (
-                            <span className="flex items-center gap-2"><LoadingSpinner size="small" /> 合成本章…</span>
-                          ) : (
-                            <span className="flex items-center gap-2"><SpeakerWaveIcon className="h-4 w-4" /> 朗读本章</span>
-                          )}
-                        </Button>
-                      </div>
+                      <h2 className="text-2xl font-semibold text-points-text">
+                        第{index + 1}章 {resolveChapterTitle(index, chapter)}
+                      </h2>
                       <p className="mt-2 whitespace-pre-line text-base leading-7 text-points-text">
                         {highlightedContent}
                       </p>

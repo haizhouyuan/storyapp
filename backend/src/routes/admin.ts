@@ -4,6 +4,7 @@ import { getDatabase } from '../config/database';
 import { COLLECTIONS, getDatabaseStats, cleanupOldLogs } from '../config/initializeDatabase';
 import { LogLevel, EventType } from '../utils/logger';
 import { createLogger } from '../config/logger';
+import { cleanupStaleWorkflows } from '../services/detectiveWorkflowService';
 
 const router = Router();
 const adminLogger = createLogger('routes:admin');
@@ -620,6 +621,34 @@ router.get('/sessions/active', async (req: Request, res: Response) => {
       success: false,
       error: '获取活跃会话失败',
       message: error.message
+    });
+  }
+});
+
+router.post('/workflows/cleanup-stale', async (req: Request, res: Response) => {
+  try {
+    const rawMinutes = req.body?.maxAgeMinutes;
+    const parsedMinutes = Number(rawMinutes);
+    const maxAgeMinutes = Number.isFinite(parsedMinutes) ? Math.max(1, parsedMinutes) : 10;
+    const stagesInput = Array.isArray(req.body?.stages) ? req.body.stages : undefined;
+    const stages =
+      stagesInput?.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0) ?? undefined;
+
+    const result = await cleanupStaleWorkflows({
+      maxAgeMinutes,
+      stages: stages as any,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error: any) {
+    adminLogger.error({ err: error }, '清理卡死工作流失败');
+    res.status(500).json({
+      success: false,
+      error: 'CLEANUP_FAILED',
+      message: error?.message ?? '清理卡死工作流失败',
     });
   }
 });

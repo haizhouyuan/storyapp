@@ -65,6 +65,7 @@ app.use(metricsMiddleware);
 app.use(securityMiddleware);
 
 // Normalize security headers for development environments
+const isSecureContext = process.env.NODE_ENV === 'production' && process.env.HTTPS_ENABLED === 'true';
 app.use((_, res, next) => {
   res.removeHeader('Strict-Transport-Security');
   const csp = res.getHeader('Content-Security-Policy');
@@ -74,6 +75,10 @@ app.use((_, res, next) => {
       .map((directive) => directive.trim())
       .filter((directive) => directive.length > 0 && directive.toLowerCase() !== 'upgrade-insecure-requests');
     res.setHeader('Content-Security-Policy', sanitized.join('; '));
+  }
+  // 🔧 非安全上下文移除 Origin-Agent-Cluster 头
+  if (!isSecureContext) {
+    res.removeHeader('Origin-Agent-Cluster');
   }
   next();
 });

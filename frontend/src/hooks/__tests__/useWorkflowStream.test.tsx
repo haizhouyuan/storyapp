@@ -3,15 +3,19 @@ import { render, screen, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { useWorkflowStream } from '../useWorkflowStream';
 
-const toastMock = Object.assign(jest.fn(), {
-  error: jest.fn(),
-  success: jest.fn(),
+jest.mock('react-hot-toast', () => {
+  const mockToast = Object.assign(jest.fn(), {
+    error: jest.fn(),
+    success: jest.fn(),
+  });
+  return {
+    __esModule: true,
+    default: mockToast,
+  };
 });
 
-jest.mock('react-hot-toast', () => ({
-  __esModule: true,
-  default: toastMock,
-}));
+const mockToast = jest.mocked(jest.requireMock('react-hot-toast').default, { shallow: false }) as jest.Mock &
+  Record<'error' | 'success', jest.Mock>;
 
 type MockEventHandlers = {
   onopen: ((event: any) => void) | null;
@@ -57,9 +61,9 @@ const originalFetch = global.fetch;
 beforeEach(() => {
   (global.EventSource as any) = MockEventSource;
   MockEventSource.instances = [];
-  toastMock.mockClear();
-  toastMock.error.mockClear();
-  toastMock.success.mockClear();
+  mockToast.mockClear();
+  mockToast.error.mockClear();
+  mockToast.success.mockClear();
   global.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => ({ data: [] }),
@@ -130,7 +134,7 @@ describe('useWorkflowStream', () => {
       MockEventSource.instances[0]?.emitError();
     });
 
-    expect(toastMock.error).toHaveBeenCalledWith('事件流连接断开，稍后将自动重连');
+    expect(mockToast.error).toHaveBeenCalledWith('事件流连接断开，稍后将自动重连');
 
     await act(async () => {
       jest.runOnlyPendingTimers();
@@ -141,6 +145,6 @@ describe('useWorkflowStream', () => {
       next?.emitOpen();
     });
 
-    expect(toastMock.success).toHaveBeenCalledWith('事件流已重新连接');
+    expect(mockToast.success).toHaveBeenCalledWith('事件流已重新连接');
   });
 });

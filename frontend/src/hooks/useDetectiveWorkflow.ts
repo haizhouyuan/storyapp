@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DetectiveWorkflowRecord } from '@storyapp/shared';
 import { getWorkflow } from '../utils/detectiveApi';
 
@@ -11,16 +11,19 @@ export function useDetectiveWorkflow(workflowId?: string, initialWorkflow?: Dete
   const [workflow, setWorkflow] = useState<DetectiveWorkflowRecord | null>(initialWorkflow ?? null);
   const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(workflowId) && !initialWorkflow);
   const [error, setError] = useState<string | null>(null);
+  const hadInitialWorkflowRef = useRef<boolean>(Boolean(initialWorkflow));
 
   const fetchWorkflow = useCallback(
-    async (id?: string): Promise<DetectiveWorkflowRecord> => {
+    async (id?: string, options?: { silent?: boolean }): Promise<DetectiveWorkflowRecord> => {
       const targetId = id ?? workflowId;
       if (!targetId) {
         const message = '缺少故事 ID';
         setError(message);
         throw new Error(message);
       }
-      setIsLoading(true);
+      if (!options?.silent) {
+        setIsLoading(true);
+      }
       try {
         const data = await getWorkflow(targetId);
         setWorkflow(data);
@@ -31,17 +34,22 @@ export function useDetectiveWorkflow(workflowId?: string, initialWorkflow?: Dete
         setError(message);
         throw err;
       } finally {
-        setIsLoading(false);
+        if (!options?.silent) {
+          setIsLoading(false);
+        }
       }
     },
     [workflowId],
   );
 
   useEffect(() => {
-    if (!workflow && workflowId) {
-      fetchWorkflow(workflowId).catch(() => undefined);
+    if (!workflowId) {
+      return;
     }
-  }, [workflow, workflowId, fetchWorkflow]);
+    const silent = hadInitialWorkflowRef.current;
+    hadInitialWorkflowRef.current = false;
+    fetchWorkflow(workflowId, { silent }).catch(() => undefined);
+  }, [workflowId, fetchWorkflow]);
 
   return {
     workflow,

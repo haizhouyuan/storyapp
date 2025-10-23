@@ -1,0 +1,20 @@
+{
+  "files": {
+    "main.css": "/static/css/main.9429ecf9.css",
+    "main.js": "/static/js/main.ba679129.js",
+    "runtime.js": "/static/js/runtime.d2366040.js",
+    "react-vendor.js": "/static/js/react-vendor.3e2059c6.js",
+    "ui-vendor.js": "/static/js/ui-vendor.8af8f3b3.js",
+    "vendors.js": "/static/js/vendors.322a3d33.js",
+    "service-worker.js": "/service-worker.js",
+    "index.html": "/index.html"
+  },
+  "entrypoints": [
+    "static/js/runtime.d2366040.js",
+    "static/js/react-vendor.3e2059c6.js",
+    "static/js/ui-vendor.8af8f3b3.js",
+    "static/js/vendors.322a3d33.js",
+    "static/css/main.9429ecf9.css",
+    "static/js/main.ba679129.js"
+  ]
+}
