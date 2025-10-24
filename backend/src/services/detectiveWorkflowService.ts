@@ -1817,7 +1817,7 @@ async function executeWorkflowPipeline(
       clueGraph = previousSnapshot.graph;
     }
     let fairPlayReport = scoreFairPlay(clueGraph);
-    const clueDiagnostics = buildClueDiagnosticsSnapshot(clueGraph, fairPlayReport);
+    let clueDiagnostics = buildClueDiagnosticsSnapshot(clueGraph, fairPlayReport);
     const stage3Analysis = (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.stageResults?.stage3;
     let revisionPlan = storyDraft.revisionPlan;
     if (revisionPlan) {
@@ -1862,6 +1862,10 @@ async function executeWorkflowPipeline(
           revisionPlan,
         };
       }
+    }
+    if (!anchorResultFinal && previousSnapshot?.graph) {
+      fairPlayReport = scoreFairPlay(clueGraph);
+      clueDiagnostics = buildClueDiagnosticsSnapshot(clueGraph, fairPlayReport);
     }
     const fairGate = computeFairPlayGate(fairPlayReport, { autoFixAttempted: enableAutoFix });
     const complexityGate = computeComplexityGate(stage3Analysis);

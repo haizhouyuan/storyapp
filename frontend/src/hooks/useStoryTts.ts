@@ -62,14 +62,6 @@ const STATUS_POLL_MIN_INTERVAL_MS = 1000;
 
 const waitFor = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const API_BASE = (process.env.REACT_APP_API_URL || '').replace(/\/$/, '');
-const buildApiUrl = (path: string): string => {
-  const normalized = path.startsWith('/') ? path : `/${path}`;
-  if (!API_BASE) {
-    return `/api${normalized}`;
-  }
-  return `${API_BASE}${normalized}`;
-};
 
 export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult {
   const [status, setStatus] = useState<TtsStatus>('idle');
@@ -164,7 +156,7 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
       let statusResponse: Response;
       try {
         statusResponse = await fetch(
-          buildApiUrl(`/tts/synthesize-story/status/${encodeURIComponent(storyKey)}`),
+          `/api/tts/synthesize-story/status/${encodeURIComponent(storyKey)}`,
         );
       } catch (networkError) {
         attempt += 1;
@@ -253,7 +245,7 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
       setStatus('loading');
       setError(undefined);
 
-      const response = await fetch(buildApiUrl('/tts/synthesize-story'), {
+      const response = await fetch('/api/tts/synthesize-story', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

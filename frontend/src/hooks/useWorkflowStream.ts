@@ -19,14 +19,6 @@ const STAGE_ORDER = [
   'stage5_validation',
 ];
 
-const API_BASE = (process.env.REACT_APP_API_URL || '').replace(/\/$/, '');
-const buildApiUrl = (path: string): string => {
-  const normalized = path.startsWith('/') ? path : `/${path}`;
-  if (!API_BASE) {
-    return `/api${normalized}`;
-  }
-  return `${API_BASE}${normalized}`;
-};
 
 type StageStatusMap = Record<string, WorkflowEvent>;
 type StageActivityMap = Record<string, WorkflowStageExecution>;
@@ -188,7 +180,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         return;
       }
       try {
-        const response = await fetch(buildApiUrl(`/story-workflows/${workflowId}/stage-activity`), {
+        const response = await fetch(`/api/story-workflows/${workflowId}/stage-activity`, {
           signal,
         });
         if (!response.ok) {
@@ -210,6 +202,15 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     setReconnectVersion((version) => version + 1);
   }, []);
 
+  const stageStatus = useMemo<StageStatusMap>(() => {
+    const map: StageStatusMap = {};
+    for (const event of events) {
+      if (event.category !== 'stage' || !event.stageId) continue;
+      map[event.stageId] = event;
+    }
+    return map;
+  }, [events]);
+
   useEffect(() => {
     if (!workflowId) {
       setEvents([]);
@@ -226,7 +227,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
 
     async function loadHistory() {
       try {
-        const response = await fetch(buildApiUrl(`/story-workflows/${workflowId}/events`), {
+        const response = await fetch(`/api/story-workflows/${workflowId}/events`, {
           signal: controller.signal,
         });
         if (!response.ok) {
@@ -248,7 +249,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     loadHistory();
     fetchStageActivity(controller.signal);
 
-    const es = new EventSource(buildApiUrl(`/story-workflows/${workflowId}/stream`));
+    const es = new EventSource(`/api/story-workflows/${workflowId}/stream`);
     setEventSource(es); // 🔧 设置 EventSource 以便 useSseLogger 监控
     
     es.onopen = () => {
@@ -318,15 +319,6 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
       failureRefreshRef.current = false;
     }
   }, [workflowId, stageStatus, fetchStageActivity]);
-
-  const stageStatus = useMemo<StageStatusMap>(() => {
-    const map: StageStatusMap = {};
-    for (const event of events) {
-      if (event.category !== 'stage' || !event.stageId) continue;
-      map[event.stageId] = event;
-    }
-    return map;
-  }, [events]);
 
   const ttsEvents = useMemo(() => events.filter((event) => event.category === 'tts'), [events]);
   const infoEvents = useMemo(() => events.filter((event) => event.category === 'info'), [events]);
