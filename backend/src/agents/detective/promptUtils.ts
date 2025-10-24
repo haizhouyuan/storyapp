@@ -368,6 +368,14 @@ function formatRevisionItems(items: RevisionPlanIssue[]): string {
     .join('\n');
 }
 
+function detectUniquenessGap(plan: RevisionPlan): boolean {
+  return [...plan.mustFix, ...plan.warnings].some((item) => {
+    const id = item.id ?? '';
+    const detail = item.detail ?? '';
+    return /hypothesis|beta-reader/i.test(id) || /多解|误导|竞争嫌疑/.test(detail);
+  });
+}
+
 // 兼容旧实现：直接内联规范
 export function buildStage1Prompt(topic: string): string {
   return `
@@ -639,6 +647,7 @@ export function buildStage4RevisionPrompt(
   const requiresEmotions = mustFixRuleIds.includes('emotional-beats');
   const requiresMisdirection = mustFixRuleIds.includes('misdirection-deployment');
   const requiresEnding = mustFixRuleIds.includes('ending-resolution');
+  const hasUniquenessGap = detectUniquenessGap(plan);
   const pendingMotiveCandidates = Array.isArray(draftJson.motivePatchCandidates)
     ? draftJson.motivePatchCandidates.filter((candidate) => candidate.status === 'pending')
     : [];
@@ -669,7 +678,10 @@ export function buildStage4RevisionPrompt(
       ? '补充误导节点：在对应章节强化误导细节，并确保后续章节通过 revealHint 相关线索澄清。'
       : null,
     requiresEnding
-      ? '结尾需新增 ≥120 字的善后段落，交代事件解决后的状态与人物情绪。'
+      ? '结尾需新增 ≥120 字的善后段落，交代事件解决后的状态与人物情绪，可参考模板“后来……最终……孩子们……”，保持自然叙写。'
+      : null,
+    hasUniquenessGap
+      ? '补写竞争嫌疑与误导：在正文加入至少一位替代嫌疑人/关键红鲱鱼，确保 Beta Reader 难以在中途锁定真凶。'
       : null,
   ].filter((line): line is string => Boolean(line));
   const criticalGuidance = criticalLines.length
@@ -732,6 +744,7 @@ export function buildStage4RevisionPromptProfile(
   const requiresEmotions = mustFixRuleIds.includes('emotional-beats');
   const requiresMisdirection = mustFixRuleIds.includes('misdirection-deployment');
   const requiresEnding = mustFixRuleIds.includes('ending-resolution');
+  const uniquenessGapProfile = detectUniquenessGap(plan);
   const pendingMotiveCandidates = Array.isArray(draftJson.motivePatchCandidates)
     ? draftJson.motivePatchCandidates.filter((candidate) => candidate.status === 'pending')
     : [];
@@ -762,7 +775,10 @@ export function buildStage4RevisionPromptProfile(
       ? '强化误导节点并在后续章节用 revealHint 相关情节完成澄清。'
       : null,
     requiresEnding
-      ? '为结尾新增 ≥120 字的善后段，交代角色状态与未来安排。'
+      ? '为结尾新增 ≥120 字的善后段，交代角色状态与未来安排，可套用“后来……最终……孩子们……”结构并写成完整段落。'
+      : null,
+    uniquenessGapProfile
+      ? '补写竞争嫌疑、误导与替代路径，确保读者在终局前至少面对两名可疑对象。'
       : null,
   ].filter((line): line is string => Boolean(line));
   const criticalGuidance = criticalLines.length

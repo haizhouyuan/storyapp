@@ -6,6 +6,12 @@ import type {
   WorkflowStageCommandStatus,
   WorkflowStageExecution,
   WorkflowStageState,
+  DetectiveWorkflowRecord,
+  ClueDiagnostics,
+  ClueAnchor,
+  RevisionPlanSummary,
+  Stage5GateSnapshot,
+  DraftAnchorsSummary,
 } from '@storyapp/shared';
 import { ArrowDownTrayIcon, SpeakerWaveIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import Button from './Button';
@@ -85,6 +91,18 @@ const StageEventList: React.FC<{
     if (typeof meta.action === 'string') return true;
     return false;
   };
+  const renderMessage = (message: WorkflowEvent['message']) => {
+    if (typeof message === 'string') return message;
+    if (message === null || message === undefined) return '（无详细说明）';
+    if (typeof message === 'object') {
+      try {
+        return JSON.stringify(message);
+      } catch {
+        return '[object]';
+      }
+    }
+    return String(message);
+  };
 
   return (
     <ul className="space-y-2">
@@ -123,7 +141,7 @@ const StageEventList: React.FC<{
                   </span>
                 )}
               </div>
-              <p className="mt-1 leading-5 text-slate-600">{event.message}</p>
+              <p className="mt-1 leading-5 text-slate-600">{renderMessage(event.message)}</p>
             </motion.li>
           );
         })}
@@ -135,6 +153,7 @@ const StageEventList: React.FC<{
 interface WorkflowTimelineDrawerProps {
   workflowId?: string | null;
   storyTitle?: string;
+  workflow?: DetectiveWorkflowRecord | null;
   stageStates?: WorkflowStageState[];
   workflowStatus?: WorkflowStageStatus;
   initialOpen?: boolean;
@@ -155,6 +174,7 @@ interface WorkflowTimelineDrawerProps {
 export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
   workflowId,
   storyTitle,
+  workflow,
   stageStates,
   workflowStatus,
   initialOpen = true,
@@ -187,6 +207,240 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
     });
     return map;
   }, [stageStates]);
+
+  const clueDiagnostics: ClueDiagnostics | undefined = workflow?.meta?.clueDiagnostics as ClueDiagnostics | undefined;
+  const anchorsSummary: DraftAnchorsSummary | undefined = workflow?.meta?.anchorsSummary as DraftAnchorsSummary | undefined;
+  const revisionPlan: RevisionPlanSummary | undefined = useMemo(() => {
+    if (workflow?.storyDraft?.revisionPlan) {
+      return workflow.storyDraft.revisionPlan as RevisionPlanSummary;
+    }
+    return workflow?.meta?.stageResults?.stage4?.plan as RevisionPlanSummary | undefined;
+  }, [workflow]);
+  const stage5Snapshot: Stage5GateSnapshot | undefined = workflow?.meta?.stageResults?.stage5 as Stage5GateSnapshot | undefined;
+
+  const continuityNotes: string[] = Array.isArray(workflow?.storyDraft?.continuityNotes)
+    ? (workflow!.storyDraft!.continuityNotes as string[])
+    : [];
+  const autoContinuityNotes = continuityNotes.filter((note) => note.includes('自动补写'));
+  const manualContinuityNotes = continuityNotes.filter((note) => !note.includes('自动补写'));
+
+  const formatAnchorPreview = (anchors?: ClueAnchor[]) => {
+    if (!anchors || anchors.length === 0) return null;
+    const preview = anchors
+      .slice(0, 2)
+      .map((anchor) => `第${anchor.chapter}章·段落${anchor.paragraph}`)
+      .join('，');
+    return `（已定位：${preview}${anchors.length > 2 ? '…' : ''}）`;
+  };
+
+  const renderStageInsight = useCallback(
+    (stageId: string): React.ReactNode => {
+      switch (stageId) {
+        case 'stage1_planning': {
+          if (!clueDiagnostics) return null;
+          const { unsupportedInferences, orphanClues } = clueDiagnostics;
+          return (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 text-[11px] text-slate-600">
+              <p className="font-medium text-slate-700">线索公平性</p>
+              <p className="mt-1">
+                缺少支撑推论：
+                <span className={unsupportedInferences.length ? 'text-rose-600 font-semibold' : 'text-emerald-600'}>
+                  {unsupportedInferences.length}
+                </span>
+                ，孤立线索：
+                <span className={orphanClues.length ? 'text-amber-600 font-semibold' : 'text-emerald-600'}>
+                  {orphanClues.length}
+                </span>
+              </p>
+              {unsupportedInferences.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-rose-600">需补写支撑的推论：</p>
+                  <ul className="space-y-2">
+                    {unsupportedInferences.slice(0, 3).map((issue) => (
+                      <li key={issue.id} className="leading-5">
+                        <p>
+                          <span className="font-medium">{issue.id}</span> · {issue.text || '（无描述）'}{' '}
+                          {formatAnchorPreview(issue.anchors)}
+                        </p>
+                        {issue.missingSupports && issue.missingSupports.length > 0 && (
+                          <p className="text-slate-500">
+                            缺少支撑：{issue.missingSupports.slice(0, 4).join('、')}
+                            {issue.missingSupports.length > 4 ? '…' : ''}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                    {unsupportedInferences.length > 3 && (
+                      <li className="text-rose-500">…… 还有 {unsupportedInferences.length - 3} 条待处理</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+              {orphanClues.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-amber-600">未被消费的线索：</p>
+                  <ul className="space-y-2">
+                    {orphanClues.slice(0, 3).map((issue) => (
+                      <li key={issue.id} className="leading-5">
+                        <p>
+                          <span className="font-medium">{issue.id}</span> · {issue.text || '（无描述）'}{' '}
+                          {formatAnchorPreview(issue.anchors)}
+                        </p>
+                        {issue.consumers && issue.consumers.length > 0 && (
+                          <p className="text-slate-500">
+                            尚未引用：{issue.consumers.slice(0, 4).join('、')}
+                            {issue.consumers.length > 4 ? '…' : ''}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                    {orphanClues.length > 3 && (
+                      <li className="text-amber-600">…… 还有 {orphanClues.length - 3} 条待回收</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+              {!unsupportedInferences.length && !orphanClues.length && (
+                <p className="mt-2 text-emerald-600">当前线索图已通过公平性自检。</p>
+              )}
+            </div>
+          );
+        }
+        case 'stage2_writing': {
+          if (!anchorsSummary) return null;
+          const { unresolvedClues, unresolvedInferences, mappedClues, mappedInferences } = anchorsSummary;
+          return (
+            <div className="rounded-lg border border-slate-100 bg-white/70 p-3 text-[11px] text-slate-600">
+              <p className="font-medium text-slate-700">锚点同步情况</p>
+              <p className="mt-1">
+                已定位线索 {mappedClues} 条，推论 {mappedInferences} 条。
+                {unresolvedClues.length || unresolvedInferences.length ? ' 待补锚点：' : ' 已全部落地。'}
+              </p>
+              {(unresolvedClues.length > 0 || unresolvedInferences.length > 0) && (
+                <ul className="mt-2 space-y-1">
+                  {unresolvedClues.slice(0, 3).map((id) => (
+                    <li key={id} className="text-amber-600">线索未落地：{id}</li>
+                  ))}
+                  {unresolvedClues.length > 3 && (
+                    <li className="text-amber-600">…… 还有 {unresolvedClues.length - 3} 条线索待补</li>
+                  )}
+                  {unresolvedInferences.slice(0, 3).map((id) => (
+                    <li key={id} className="text-rose-600">推论未落地：{id}</li>
+                  ))}
+                  {unresolvedInferences.length > 3 && (
+                    <li className="text-rose-600">…… 还有 {unresolvedInferences.length - 3} 条推论待补</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          );
+        }
+        case 'stage4_revision': {
+          if (!revisionPlan) return null;
+          const { mustFix, warnings, suggestions } = revisionPlan;
+          return (
+            <div className="rounded-lg border border-purple-100 bg-purple-50/60 p-3 text-[11px] text-purple-700">
+              <p className="font-medium text-purple-800">修订计划</p>
+              <p className="mt-1">
+                Must Fix：<span className={mustFix.length ? 'font-semibold text-rose-600' : 'text-emerald-700'}>{mustFix.length}</span>
+                ，警告：<span className={warnings.length ? 'font-semibold text-amber-600' : 'text-emerald-700'}>{warnings.length}</span>
+              </p>
+              {mustFix.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {mustFix.slice(0, 3).map((item) => (
+                    <li key={item.id} className="leading-5 text-rose-700">
+                      <span className="font-medium">{item.id}</span> · {item.detail}
+                    </li>
+                  ))}
+                  {mustFix.length > 3 && (
+                    <li className="text-rose-600">…… 还有 {mustFix.length - 3} 条必修项</li>
+                  )}
+                </ul>
+              )}
+              {warnings.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {warnings.slice(0, 2).map((item) => (
+                    <li key={item.id} className="leading-5 text-amber-700">
+                      <span className="font-medium">{item.id}</span> · {item.detail}
+                    </li>
+                  ))}
+                  {warnings.length > 2 && (
+                    <li className="text-amber-600">…… 还有 {warnings.length - 2} 条警告待核对</li>
+                  )}
+                </ul>
+              )}
+              {suggestions.length > 0 && mustFix.length === 0 && warnings.length === 0 && (
+                <p className="mt-2 text-purple-600">建议：{suggestions[0]}</p>
+              )}
+              {autoContinuityNotes.length > 0 && (
+                <div className="mt-2 border-t border-purple-100 pt-2 text-emerald-700">
+                  <p className="font-medium">系统已自动补写</p>
+                  <ul className="mt-1 space-y-1">
+                    {autoContinuityNotes.slice(0, 3).map((note, index) => (
+                      <li key={`auto-${index}`} className="leading-5">
+                        {note}
+                      </li>
+                    ))}
+                    {autoContinuityNotes.length > 3 && (
+                      <li>…… 还有 {autoContinuityNotes.length - 3} 项自动修复</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+              {manualContinuityNotes.length > 0 && (
+                <div className="mt-2 border-t border-purple-100 pt-2 text-slate-600">
+                  <p className="font-medium text-purple-800">连贯性提醒</p>
+                  <ul className="mt-1 space-y-1">
+                    {manualContinuityNotes.slice(0, 3).map((note, index) => (
+                      <li key={`manual-${index}`} className="leading-5">
+                        {note}
+                      </li>
+                    ))}
+                    {manualContinuityNotes.length > 3 && (
+                      <li>…… 还有 {manualContinuityNotes.length - 3} 条待人工确认</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          );
+        }
+        case 'stage5_validation': {
+          const gates = stage5Snapshot?.gates ?? [];
+          if (gates.length === 0 && !clueDiagnostics) return null;
+          return (
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 p-3 text-[11px] text-emerald-700">
+              <p className="font-medium text-emerald-800">终局 Gate 结果</p>
+              {gates.length > 0 ? (
+                <ul className="mt-1 space-y-1">
+                  {gates.map((gate) => {
+                    const verdict = gate.verdict;
+                    const color = verdict === 'pass' ? 'text-emerald-700' : verdict === 'warn' ? 'text-amber-700' : 'text-rose-700';
+                    return (
+                      <li key={gate.name} className={`leading-5 ${color}`}>
+                        <span className="font-semibold">{gate.name}</span> · {verdict.toUpperCase()}
+                        {gate.reason ? `：${gate.reason}` : ''}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="mt-1">暂无 Gate 记录。</p>
+              )}
+              {clueDiagnostics && (clueDiagnostics.unsupportedInferences.length > 0 || clueDiagnostics.orphanClues.length > 0) && (
+                <p className="mt-2 text-rose-700">
+                  仍需处理推论 {clueDiagnostics.unsupportedInferences.length} 条、孤立线索 {clueDiagnostics.orphanClues.length} 条。
+                </p>
+              )}
+            </div>
+          );
+        }
+        default:
+          return null;
+      }
+    },
+    [anchorsSummary, clueDiagnostics, revisionPlan, stage5Snapshot, autoContinuityNotes, manualContinuityNotes],
+  );
 
   const statusPriority = useCallback((status: WorkflowStageStatus | 'idle' | undefined) => {
     switch (status) {
@@ -483,6 +737,7 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
                     : undefined;
                   const recentLogs = activity?.logs ? activity.logs.slice(-5) : [];
                   const artifacts = activity?.artifacts ?? [];
+                  const insights = renderStageInsight(stageId);
                   const hasDetails =
                     Boolean(currentCommand) || commands.length > 0 || recentLogs.length > 0 || artifacts.length > 0;
 
@@ -512,6 +767,11 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
                       <div className="mt-3">
                         <StageEventList events={stageEvents} onEventAction={handleEventAction} />
                       </div>
+                      {insights && (
+                        <div className="mt-4 text-xs text-slate-600 space-y-3">
+                          {insights}
+                        </div>
+                      )}
                       {hasDetails && (
                         <div className="mt-4 space-y-4 text-xs text-slate-600">
                           {currentCommand && (

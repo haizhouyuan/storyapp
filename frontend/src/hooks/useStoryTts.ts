@@ -62,6 +62,15 @@ const STATUS_POLL_MIN_INTERVAL_MS = 1000;
 
 const waitFor = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const API_BASE = (process.env.REACT_APP_API_URL || '').replace(/\/$/, '');
+const buildApiUrl = (path: string): string => {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  if (!API_BASE) {
+    return `/api${normalized}`;
+  }
+  return `${API_BASE}${normalized}`;
+};
+
 export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult {
   const [status, setStatus] = useState<TtsStatus>('idle');
   const [error, setError] = useState<string | undefined>();
@@ -154,7 +163,9 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
 
       let statusResponse: Response;
       try {
-        statusResponse = await fetch(`/api/tts/synthesize-story/status/${encodeURIComponent(storyKey)}`);
+        statusResponse = await fetch(
+          buildApiUrl(`/tts/synthesize-story/status/${encodeURIComponent(storyKey)}`),
+        );
       } catch (networkError) {
         attempt += 1;
         delayMs = Math.min(delayMs * STATUS_POLL_BACKOFF_FACTOR, STATUS_POLL_MAX_INTERVAL_MS);
@@ -242,7 +253,7 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
       setStatus('loading');
       setError(undefined);
 
-      const response = await fetch('/api/tts/synthesize-story', {
+      const response = await fetch(buildApiUrl('/tts/synthesize-story'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -255,7 +266,19 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
         }),
       });
 
-      const data: StoryTtsBatchStatusResponse | StoryTtsBatchResponse | { success?: boolean; message?: string; error?: string } = await response.json();
+      if (response.status === 404) {
+        const message = '朗读服务暂未配置，请稍后再试';
+        const error = new Error(message);
+        (error as any).code = 'TTS_NOT_AVAILABLE';
+        throw error;
+      }
+
+      let data: StoryTtsBatchStatusResponse | StoryTtsBatchResponse | { success?: boolean; message?: string; error?: string; status?: string };
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
 
       const isPending = response.status === 202 || (data as StoryTtsBatchStatusResponse).status === 'pending';
 

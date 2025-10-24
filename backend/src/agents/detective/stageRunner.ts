@@ -18,6 +18,7 @@ import type {
   LightHypothesisSnapshot,
   DraftAnchorsSummary,
   MotivePatchCandidate,
+  RevisionPlanSummary,
 } from '@storyapp/shared';
 import { createHash } from 'crypto';
 import {
@@ -40,6 +41,7 @@ import { createQuickOutline, synthMockChapter } from './mockUtils';
 import { buildClueGraphFromOutline, scoreFairPlay, CLUE_GRAPH_VERSION } from './clueGraph';
 import { enforceFocalization, applyStylePackToDraft, throttleTemplates, applyClicheGuard } from './styleToolkit';
 import { planDenouement, assertPlantPayoffCompleteness } from './structureToolkit';
+import { runStage4Validation } from './validators';
 
 const logger = createLogger('detective:stages');
 const lightHypothesisCache = new Map<string, { inserted: number; ranks: LightHypothesisRank[] }>();
@@ -70,6 +72,25 @@ const CRITICAL_VALIDATION_RULES = new Set([
   'misdirection-deployment',
   'ending-resolution',
 ]);
+
+const KEYWORD_STOP_TERMS = [
+  '如何',
+  '怎样',
+  '怎么',
+  '利用',
+  '计划',
+  '准备',
+  '打开',
+  '通过',
+  '借助',
+  '需要',
+  '必须',
+  '导致',
+  '为了',
+  '最终',
+  '完成',
+  '使得',
+];
 
 const REVISION_NOTE_CATEGORY_VALUES: DetectiveRevisionNoteCategory[] = ['model', 'system', 'validation', 'manual'];
 
@@ -208,6 +229,7 @@ export interface Stage4RevisionResult {
   draft: DetectiveStoryDraft;
   plan: RevisionPlan;
   skipped: boolean;
+  validation?: ValidationReport;
 }
 
 type ChatMessage = {
@@ -627,6 +649,8 @@ export const __testing = {
     callDeepseekDelegate = mock ?? defaultCallDeepseek;
   },
   runLightHypothesisEvalForTest: runLightHypothesisEval,
+  ensureEndingResolutionForTest: ensureEndingResolution,
+  buildEndingResolutionParagraphForTest: buildEndingResolutionParagraph,
 };
 function extractJson(content: string): any {
   const cleaned = String(content || '')
@@ -642,11 +666,15 @@ function extractJson(content: string): any {
       .replace(/，\\"/g, '","')
       .replace(/\\"，/g, '","')
       .replace(/\\",\\s*([\\u4e00-\\u9fa5])/g, '","$1');
+    const numericSafe = tolerant
+      .replace(/(-?\d+)\.(?=\s*[,}\]])/g, '$1.0')
+      .replace(/(:\s*)\.(\d+)/g, '$10.$2')
+      .replace(/([\[,]\s*)\.(\d+)/g, '$10.$2');
 
-    const firstBrace = tolerant.indexOf('{');
-    const lastBrace = tolerant.lastIndexOf('}');
+    const firstBrace = numericSafe.indexOf('{');
+    const lastBrace = numericSafe.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      const candidate = tolerant.slice(firstBrace, lastBrace + 1);
+      const candidate = numericSafe.slice(firstBrace, lastBrace + 1);
       try {
         return JSON.parse(candidate);
       } catch (secondError) {
@@ -655,7 +683,7 @@ function extractJson(content: string): any {
       }
     }
 
-    logger.error({ preview: tolerant.slice(0, 200), firstError }, '无法解析模型输出为 JSON');
+    logger.error({ preview: numericSafe.slice(0, 200), firstError }, '无法解析模型输出为 JSON');
     throw new Error('无法解析模型输出为有效 JSON');
   }
 }
@@ -925,6 +953,74 @@ function ensureSuspectMotiveMetadata(outline: DetectiveOutline): DetectiveOutlin
   };
 }
 
+function ensureChapterBlueprints(outline: DetectiveOutline): DetectiveOutline {
+  const acts = Array.isArray(outline.acts) ? outline.acts : [];
+  const existingBlueprints = Array.isArray((outline as any)?.chapterBlueprints)
+    ? (outline as any).chapterBlueprints
+    : [];
+  const beatEntries: Array<{ act: any; beat: any }> = [];
+  acts.forEach((act) => {
+    const beats = Array.isArray((act as any)?.beats) ? (act as any).beats : [];
+    beats.forEach((beat: any) => {
+      beatEntries.push({ act, beat });
+    });
+  });
+  const chapterAnchorCount = Array.isArray((outline as any)?.chapterAnchors)
+    ? (outline as any).chapterAnchors.length
+    : 0;
+  const chapterCount = Math.max(beatEntries.length, chapterAnchorCount, existingBlueprints.length);
+  if (chapterCount === 0) {
+    return outline;
+  }
+  const existingMap = new Map<number, any>();
+  existingBlueprints.forEach((bp: any) => {
+    const index = parseChapterIndex(bp?.chapter);
+    if (index !== null && index !== undefined) {
+      existingMap.set(index, { ...bp });
+    }
+  });
+  const nextBlueprints: any[] = [];
+  for (let idx = 0; idx < chapterCount; idx += 1) {
+    const base = existingMap.get(idx) ?? {};
+    const entry = beatEntries[idx];
+    const actFocus =
+      entry && typeof entry.act?.focus === 'string' ? entry.act.focus.trim() : undefined;
+    const beatSummary =
+      entry && typeof entry.beat?.summary === 'string' ? entry.beat.summary.trim() : undefined;
+    const backgroundNeeded = Array.isArray(entry?.beat?.backgroundNeeded)
+      ? entry.beat.backgroundNeeded.filter(
+          (item: unknown): item is string => typeof item === 'string' && item.trim().length > 0,
+        )
+      : undefined;
+    const emotionalBeat =
+      typeof entry?.beat?.emotionalBeat === 'string' && entry.beat.emotionalBeat.trim()
+        ? entry.beat.emotionalBeat.trim()
+        : typeof entry?.beat?.tone === 'string' && entry.beat.tone.trim()
+          ? entry.beat.tone.trim()
+          : undefined;
+    const wordTarget =
+      typeof base.wordTarget === 'number' && base.wordTarget > 0
+        ? base.wordTarget
+        : 1500 + (idx % 3) * 120;
+    nextBlueprints.push({
+      chapter: base.chapter ?? `Chapter ${idx + 1}`,
+      wordTarget,
+      conflictGoal: base.conflictGoal ?? beatSummary ?? actFocus ?? '推进案件线索',
+      backgroundNeeded:
+        Array.isArray(base.backgroundNeeded) && base.backgroundNeeded.length > 0
+          ? base.backgroundNeeded
+          : backgroundNeeded && backgroundNeeded.length > 0
+            ? backgroundNeeded
+            : undefined,
+      emotionalBeat: base.emotionalBeat ?? emotionalBeat ?? actFocus ?? beatSummary ?? undefined,
+    });
+  }
+  return {
+    ...outline,
+    chapterBlueprints: nextBlueprints,
+  };
+}
+
 function ensureChineseNames(outline: DetectiveOutline): DetectiveOutline {
   const pool = ['林澜', '顾星', '程翊', '苏瑾', '赵岚', '陆沉', '叶霖', '江岚', '闻笙', '唐溯', '白屿', '秦霁', '杭越', '莫黎', '夏禾'];
   const replacements = new Map<string, string>();
@@ -972,8 +1068,9 @@ function ensureChineseNames(outline: DetectiveOutline): DetectiveOutline {
   outline.acts = (outline.acts || []).map((act) => ({
     ...act,
     focus: replaceText(act.focus),
-    beats: (act.beats || []).map((beat) => ({
+    beats: (act.beats || []).map((beat, beatIndex) => ({
       ...beat,
+      beat: typeof (beat as any)?.beat === 'number' ? (beat as any).beat : beatIndex + 1,
       summary: replaceText(beat.summary),
       cluesRevealed: (beat.cluesRevealed || []).map(replaceText),
       redHerring: replaceText(beat.redHerring),
@@ -1029,6 +1126,163 @@ const DAY_PATTERN = /Day\s*(\d+)/i;
 function computeWordCount(text: string | undefined): number {
   if (!text) return 0;
   return text.replace(/\s+/g, '').length;
+}
+
+const ENDING_PARAGRAPH_KEYWORDS = ['后来', '事后', '几天后', '最终', '恢复', '再次', '重新', '平复'];
+
+function pickDetectiveName(outline: DetectiveOutline): string {
+  const candidates = Array.isArray(outline?.characters)
+    ? outline.characters.filter(
+        (character) => typeof character?.role === 'string' && /detective/i.test(character.role),
+      )
+    : [];
+  if (candidates.length > 0) {
+    const byLength = [...candidates].sort((a, b) => (b?.name?.length ?? 0) - (a?.name?.length ?? 0));
+    const preferred = byLength[0];
+    if (preferred?.name && preferred.name.trim().length > 0) {
+      return preferred.name.trim();
+    }
+  }
+  return '侦探';
+}
+
+function pickCompanionLabel(outline: DetectiveOutline): string | null {
+  const witnesses = Array.isArray(outline?.characters)
+    ? outline.characters.filter(
+        (character) => typeof character?.role === 'string' && /witness|sidekick/i.test(character.role),
+      )
+    : [];
+  if (witnesses.length > 0) {
+    const candidate = witnesses.find((item) => typeof item?.name === 'string' && item.name.trim().length > 0);
+    if (candidate?.name) {
+      return candidate.name.trim();
+    }
+  }
+  return null;
+}
+
+function pickLocationName(outline: DetectiveOutline, draft: DetectiveStoryDraft): string {
+  const locations = (outline as any)?.locations;
+  if (Array.isArray(locations) && locations.length > 0) {
+    const first = locations.find((item: any) => typeof item?.name === 'string' && item.name.trim().length > 0);
+    if (first?.name) {
+      return first.name.trim();
+    }
+  }
+  const summaries = Array.isArray(draft?.chapters)
+    ? draft.chapters.map((chapter) => chapter?.summary || chapter?.content || '').join('\n')
+    : '';
+  const match = summaries.match(/在([^\n]{2,8})/);
+  if (match && match[1]) {
+    return match[1].replace(/[^一-龥0-9A-Za-z··]/g, '').slice(0, 8) || '案发地';
+  }
+  return '案发地';
+}
+
+function sanitizeFragment(text?: string | null): string | undefined {
+  if (!text) return undefined;
+  const cleaned = text.replace(/[。！？!?]+$/g, '').trim();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function buildEndingResolutionParagraph(
+  outline: DetectiveOutline,
+  draft: DetectiveStoryDraft,
+  minLength = 140,
+): string {
+  const detective = pickDetectiveName(outline);
+  const companion = pickCompanionLabel(outline);
+  const culprit = sanitizeFragment((outline as any)?.solution?.culprit) || '真凶';
+  const motive = sanitizeFragment((outline as any)?.solution?.motiveCore);
+  const mechanism = sanitizeFragment(outline?.centralTrick?.mechanism);
+  const victimFamily = sanitizeFragment(outline?.caseSetup?.victim) || '居民';
+  const location = pickLocationName(outline, draft);
+  const theme = Array.isArray(outline?.themes) && outline!.themes!.length > 0 ? outline!.themes![0] : null;
+  const reliefLabel = victimFamily.includes('家') ? victimFamily : `${victimFamily}的家人`;
+
+  const guidance: string[] = [];
+  guidance.push(
+    `后来，${location}逐渐恢复平静，${reliefLabel}不再提心吊胆，街坊之间重新互相问候。`,
+  );
+  guidance.push(
+    `最终，${detective}${companion ? `与${companion}` : ''}向大家详细解释${culprit}${
+      motive ? `的真正动机——${motive}` : '的所作所为'
+    }，并协助警方妥善收尾${mechanism ? `，彻底封存${mechanism}` : '，确保不再留下安全隐患'}。`,
+  );
+  guidance.push(
+    `孩子们再次在${location}追逐嬉戏，${detective}提醒大家铭记${theme ? `“${theme}”的教训` : '彼此守望'}，让事件留下的阴影慢慢散去。`,
+  );
+
+  let paragraph = guidance.map(ensureSentence).join('');
+  let guardAttempts = 0;
+  while (computeWordCount(paragraph) < minLength && guardAttempts < 3) {
+    guardAttempts += 1;
+    const extra = ensureSentence(
+      guardAttempts === 1
+        ? `几天后，案发地重新开放，${reliefLabel}整理好生活，感谢${detective}持续的关怀`
+        : `在社区聚会上，${detective}${companion ? `和${companion}` : ''}与大家约定定期交流，让安全与信任重新扎根`,
+    );
+    paragraph += extra;
+  }
+  return paragraph;
+}
+
+export function ensureEndingResolution(
+  outline: DetectiveOutline,
+  draft: DetectiveStoryDraft,
+  options?: { minParagraphLength?: number },
+): { draft: DetectiveStoryDraft; appended: boolean } {
+  const chapters = Array.isArray(draft?.chapters) ? draft!.chapters.map((chapter) => ({ ...chapter })) : [];
+  if (chapters.length === 0) {
+    return { draft, appended: false };
+  }
+  const minLength = Math.max(120, options?.minParagraphLength ?? 130);
+  const finalIndex = chapters.length - 1;
+  const finalChapter = { ...chapters[finalIndex] };
+  const originalContent = String(finalChapter.content ?? '');
+  const paragraphs = originalContent
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+  const hasClosure = paragraphs.some((paragraph) => {
+    const trimmed = paragraph.replace(/\s+/g, '');
+    if (trimmed.length < minLength) {
+      return false;
+    }
+    return ENDING_PARAGRAPH_KEYWORDS.some((keyword) => paragraph.includes(keyword));
+  });
+  if (hasClosure) {
+    chapters[finalIndex] = finalChapter;
+    return {
+      draft: {
+        ...draft,
+        chapters,
+      },
+      appended: false,
+    };
+  }
+  const endingParagraph = buildEndingResolutionParagraph(outline, draft, Math.max(minLength + 8, 140));
+  const patchedContent = originalContent.trim()
+    ? `${originalContent.trimEnd()}\n\n${endingParagraph}`
+    : endingParagraph;
+  const updatedChapter = {
+    ...finalChapter,
+    content: patchedContent,
+    wordCount: computeWordCount(patchedContent),
+  };
+  chapters[finalIndex] = updatedChapter;
+  const continuitySet = new Set<string>(
+    Array.isArray(draft?.continuityNotes) ? draft!.continuityNotes!.filter(Boolean) : [],
+  );
+  continuitySet.add('自动补写结尾善后段，覆盖事件收束与人物情绪。');
+  return {
+    draft: {
+      ...draft,
+      chapters,
+      continuityNotes: Array.from(continuitySet),
+    },
+    appended: true,
+  };
 }
 
 function canonicalDayCode(value?: string | null): string | undefined {
@@ -1383,6 +1637,41 @@ function normalizeClauseText(input: string | undefined, fallback: string): strin
   return value.replace(/[，。、；;\s]+$/g, '');
 }
 
+function deriveKeywordAlias(raw: string): { short: string; subject: string; emphasis: string } {
+  const sanitized = typeof raw === 'string' ? raw.replace(/[“”"']/g, '').trim() : '';
+  if (!sanitized) {
+    return {
+      short: '那个话题',
+      subject: '那个话题',
+      emphasis: '那个话题',
+    };
+  }
+  const segments =
+    sanitized
+      .match(/[\u4e00-\u9fa5]{2,6}/g)
+      ?.map((seg) => seg.trim())
+      .filter((seg) => seg.length > 1) ?? [];
+  const filtered = segments.filter(
+    (seg) => !KEYWORD_STOP_TERMS.some((term) => term && seg.includes(term)),
+  );
+  const alias = (filtered[0] || '').trim() || sanitized.slice(0, Math.min(4, sanitized.length));
+  const secondary = (filtered[1] || '').trim();
+  const short = alias || '那个话题';
+  const baseSubject = secondary ? `${alias}和${secondary}` : alias;
+  const subject =
+    !baseSubject || baseSubject.length <= 4
+      ? `${baseSubject || '那个话题'}的事`
+      : baseSubject;
+  const emphasis = secondary
+    ? `${alias}与${secondary}之间的细节`
+    : `${alias || '那件事'}的细节`;
+  return {
+    short,
+    subject,
+    emphasis,
+  };
+}
+
 function buildSuspectMotiveSentence(options: {
   suspectName: string;
   keyword: string;
@@ -1393,11 +1682,12 @@ function buildSuspectMotiveSentence(options: {
 }): string {
   const { suspectName, keyword, reaction, cue, diversionTopic, variationSeed } = options;
   const seed = Math.abs(variationSeed);
+  const topic = deriveKeywordAlias(keyword);
   const introVariants = [
-    `${suspectName}听到“${keyword}”时`,
-    `当话题触及“${keyword}”`,
-    `只要有人提到“${keyword}”，${suspectName}`,
-    `一说到“${keyword}”，${suspectName}`,
+    `${suspectName}听到别人提到${topic.subject}`,
+    `当话题绕到${topic.subject}`,
+    `只要有人碰到${topic.short}，${suspectName}`,
+    `一提起${topic.short}，${suspectName}`,
   ];
   const intro = introVariants[seed % introVariants.length];
   const reactionClause = normalizeClauseText(reaction, '语气突然一滞');
@@ -1415,8 +1705,9 @@ function buildSuspectMotiveSentence(options: {
   const sentenceTemplates: Array<() => string> = [
     () => `${intro}，先是${reactionClause}，随即${cueClause}${diversionClause}`,
     () => `${intro}，${reactionClause}，${cueClause}${diversionClause}`,
-    () => `${intro}的瞬间，${cueClause}，而且${reactionClause}${diversionClause}`,
+    () => `${intro}时，${cueClause}，而且${reactionClause}${diversionClause}`,
     () => `${intro}就显得${reactionClause.replace(/^语气/, '语气')}，${cueClause}${diversionClause}`,
+    () => `${intro}后，他刻意把${topic.emphasis}掩在玩笑里${diversionClause}`,
   ];
   const rawSentence = sentenceTemplates[(seed >> 1) % sentenceTemplates.length]();
   return ensureSentence(rawSentence.replace(/，{2,}/g, '，'));
@@ -1428,13 +1719,14 @@ function buildSolutionForeshadowSentence(options: {
   variationSeed: number;
 }): string {
   const { detectiveName, token, variationSeed } = options;
+  const topic = deriveKeywordAlias(token);
   const templates: Array<() => string> = [
-    () => `${detectiveName}听到“${token}”这个词，眉头一紧，悄悄在笔记本上做了标记`,
-    () => `谈话一触及“${token}”，${detectiveName}和助手交换了眼神，示意稍后追问`,
-    () => `“${token}”这两个字让${detectiveName}的笔尖顿了一下，他意识到这里可能藏着关键`,
-    () => `${detectiveName}表面顺着话题，却把“${token}”记在心底，准备夜里独自核对`,
-    () => `${detectiveName}若无其事地笑着，可手指却在桌面轻敲“${token}”的节奏`,
-    () => `当人群随口提到“${token}”，${detectiveName}把杯子放缓，暗暗记起要回去翻案卷`,
+    () => `${detectiveName}听到关于${topic.subject}的只言片语，眉头一紧，悄悄在笔记本上做了标记`,
+    () => `谈话一触及${topic.subject}，${detectiveName}和助手交换了眼神，示意稍后追问`,
+    () => `${topic.short}这几个字让${detectiveName}的笔尖顿了一下，他意识到这里可能藏着关键`,
+    () => `${detectiveName}表面顺着话题，却把${topic.emphasis}记在心底，准备夜里独自核对`,
+    () => `${detectiveName}若无其事地笑着，可手指却在桌面轻敲与${topic.short}相关的节奏`,
+    () => `当人群随口提到${topic.subject}，${detectiveName}把杯子放缓，暗暗记起要回去翻案卷`,
   ];
   return ensureSentence(templates[variationSeed % templates.length]());
 }
@@ -1874,7 +2166,8 @@ export async function runStage1Planning(
           command: 'ensureChineseNames',
         });
         const outlineWithNames = ensureChineseNames(outlineRaw);
-        const outline = ensureSuspectMotiveMetadata(outlineWithNames);
+        const outlineWithMotives = ensureSuspectMotiveMetadata(outlineWithNames);
+        const outline = ensureChapterBlueprints(outlineWithMotives);
         if (normalizeCommand) {
           telemetry?.completeCommand?.(normalizeCommand, {
             resultSummary: `角色 ${outline.characters?.length ?? 0} 人`,
@@ -2335,6 +2628,23 @@ export async function runStage3Review(
       type: 'json',
       preview: JSON.stringify(betaInsight, null, 2),
     });
+    if (betaInsight.confidence >= 0.85 && (!betaInsight.competingSuspects || betaInsight.competingSuspects.length === 0)) {
+      const issues = Array.isArray((review as any).issues) ? ((review as any).issues as any[]) : [];
+      issues.push({
+        id: 'beta-reader-overconfidence',
+        detail: `Beta Reader 基于已公开章节已将 ${betaInsight.topSuspect} 判定为真凶（置信度 ${(betaInsight.confidence * 100).toFixed(0)}%），需补强误导或竞争线索。`,
+        severity: 'critical',
+        category: 'uniqueness',
+      });
+      (review as any).issues = issues;
+      const mustFixBeforePublish = Array.isArray((review as any).mustFixBeforePublish)
+        ? ((review as any).mustFixBeforePublish as any[])
+        : [];
+      mustFixBeforePublish.push(
+        `Beta Reader 置信度 ${(betaInsight.confidence * 100).toFixed(0)}% 锁定 ${betaInsight.topSuspect}，请新增误导或替代嫌疑线索。`,
+      );
+      (review as any).mustFixBeforePublish = Array.from(new Set(mustFixBeforePublish));
+    }
   }
 
   let hypothesisEval: HypothesisEvaluation | null = null;
@@ -2361,6 +2671,20 @@ export async function runStage3Review(
       type: 'json',
       preview: JSON.stringify(hypothesisEval, null, 2),
     });
+  } else {
+    const issues = Array.isArray((review as any).issues) ? ((review as any).issues as any[]) : [];
+    issues.push({
+      id: 'hypothesis-missing',
+      detail: '多解评估未返回有效假设，需补写竞争嫌疑人与破局线索。',
+      severity: 'critical',
+      category: 'uniqueness',
+    });
+    (review as any).issues = issues;
+    const mustFixBeforePublish = Array.isArray((review as any).mustFixBeforePublish)
+      ? ((review as any).mustFixBeforePublish as any[])
+      : [];
+    mustFixBeforePublish.push('多解评估未生成竞争假设，请补写误导与替代解线索后再提交。');
+    (review as any).mustFixBeforePublish = Array.from(new Set(mustFixBeforePublish));
   }
 
   if (hypothesisEval?.candidates?.length) {
@@ -2370,24 +2694,34 @@ export async function runStage3Review(
     const reviewIssues = Array.isArray((review as any).issues)
       ? ((review as any).issues as any[])
       : [];
+    const mustFixBeforePublish = Array.isArray((review as any).mustFixBeforePublish)
+      ? ((review as any).mustFixBeforePublish as any[])
+      : [];
     if (runnerUp) {
       const gap = Math.abs(primary.confidence - runnerUp.confidence);
       if (gap < 0.2) {
         reviewIssues.push({
           id: 'hypothesis-competition',
           detail: `多解竞争：${primary.suspect} 与 ${runnerUp.suspect} 的置信度差距仅 ${(gap * 100).toFixed(0)}%，需增写独有矛盾线索。`,
-          severity: 'warn',
+          severity: 'critical',
           category: 'uniqueness',
         });
+        mustFixBeforePublish.push('多名嫌疑人仍可自洽，请补充独有矛盾或破同像线索。');
       }
-    } else if (primary && primary.confidence < 0.5) {
+    } else if (primary) {
+      const detail =
+        primary.confidence < 0.5
+          ? `主要解法置信度仅 ${(primary.confidence * 100).toFixed(0)}%，需补充指向真凶的强制线索。`
+          : `仅存在单一解法 ${primary.suspect}，缺乏竞争嫌疑，请补写误导或替代路径。`;
       reviewIssues.push({
         id: 'hypothesis-weak-solution',
-        detail: `主要解法置信度 ${(primary.confidence * 100).toFixed(0)}%，需补充指向真凶的强制线索。`,
-        severity: 'warn',
+        detail,
+        severity: 'critical',
         category: 'uniqueness',
       });
+      mustFixBeforePublish.push('主要解法缺乏竞争，请补充强制线索或新增替代嫌疑人。');
     }
+    (review as any).mustFixBeforePublish = Array.from(new Set(mustFixBeforePublish));
     (review as any).issues = reviewIssues;
   }
 
@@ -2571,10 +2905,82 @@ export async function runStage4Revision(
           createdAt: revisionTimestamp,
         });
         const revisionNotes = mergeRevisionNotes([modelRevisionNotes, continuityRevisionNotes]);
-        const finalDraft: DetectiveStoryDraft = {
+        let finalDraft: DetectiveStoryDraft = {
           ...rehydrated.draft,
           revisionNotes,
           ttsAssets: storyDraft.ttsAssets ?? rehydrated.draft.ttsAssets,
+        };
+        const validationAfter = runStage4Validation(outline, finalDraft);
+        const refreshedPlan = deriveRevisionPlan(reviewWorking, validationAfter);
+        const dedupeIssues = (issues: RevisionPlanIssue[]) => {
+          const seen = new Set<string>();
+          return issues.filter((issue) => {
+            if (!issue?.detail) return false;
+            const key = `${issue.id ?? ''}::${issue.detail}`;
+            if (seen.has(key)) {
+              return false;
+            }
+            seen.add(key);
+            return true;
+          });
+        };
+        const suggestionSet = new Set<string>([
+          ...(plan.suggestions ?? []),
+          ...(refreshedPlan.suggestions ?? []),
+        ]);
+        if (!suggestionSet.has('请参考自动生成的揭示脚本，完善聚众揭示流程')) {
+          suggestionSet.add('请参考自动生成的揭示脚本，完善聚众揭示流程');
+        }
+        const planAfterRevision: RevisionPlan = {
+          mustFix: dedupeIssues([...refreshedPlan.mustFix]),
+          warnings: dedupeIssues([...refreshedPlan.warnings]),
+          suggestions: Array.from(suggestionSet),
+        };
+        if (anchorSummary && Array.isArray(anchorSummary.unresolvedClues) && anchorSummary.unresolvedClues.length > 0) {
+          const detail = `以下线索仍未在正文找到锚点：${anchorSummary.unresolvedClues.join('、')}，请在对应章节补齐显式呈现。`;
+          planAfterRevision.mustFix.push({
+            id: 'anchor-unresolved-clues',
+            detail,
+            category: 'fair_play',
+          });
+        }
+        if (anchorSummary && Array.isArray(anchorSummary.unresolvedInferences) && anchorSummary.unresolvedInferences.length > 0) {
+          const detail = `以下推论尚未在正文落地：${anchorSummary.unresolvedInferences.join('、')}，补写支持该推论的场景或对白。`;
+          planAfterRevision.mustFix.push({
+            id: 'anchor-unresolved-inferences',
+            detail,
+            category: 'structure',
+          });
+        }
+        if (plantIssues.length > 0) {
+          plantIssues.forEach((detail, index) => {
+            planAfterRevision.mustFix.push({
+              id: `structure-plant-payoff-${index + 1}`,
+              detail,
+              category: 'structure',
+            });
+          });
+        }
+        planAfterRevision.mustFix = dedupeIssues(planAfterRevision.mustFix);
+        planAfterRevision.warnings = dedupeIssues(planAfterRevision.warnings);
+        finalDraft = {
+          ...finalDraft,
+          revisionPlan: {
+            mustFix: planAfterRevision.mustFix.map((issue, index) => ({
+              id: issue.id ?? `mustfix-${index + 1}`,
+              detail: issue.detail,
+              category: issue.category,
+              chapterRef: issue.chapterRef,
+            })),
+            warnings: planAfterRevision.warnings.map((issue, index) => ({
+              id: issue.id ?? `warn-${index + 1}`,
+              detail: issue.detail,
+              category: issue.category,
+              chapterRef: issue.chapterRef,
+            })),
+            suggestions: [...planAfterRevision.suggestions],
+            generatedAt: validationAfter.generatedAt,
+          },
         };
         telemetry?.registerArtifact?.({
           label: '阶段四修订后的草稿',
@@ -2591,8 +2997,9 @@ export async function runStage4Revision(
         });
         return {
           draft: finalDraft,
-          plan,
+          plan: planAfterRevision,
           skipped: false,
+          validation: validationAfter,
         };
       } catch (parseError: any) {
         if (parseCommand) {

@@ -114,26 +114,37 @@ describe('structureToolkit', () => {
 });
 
 describe('validation gates', () => {
-  test('computeFairPlayGate flags unsupported inferences', () => {
+  test('computeFairPlayGate blocks unsupported inferences', () => {
     const report: FairPlayReport = {
       unsupportedInferences: ['i:missing'],
       orphanClues: [],
       economyScore: 0.5,
     };
     const gate = computeFairPlayGate(report, { autoFixAttempted: false });
-    expect(gate.verdict).toBe('warn');
+    expect(gate.verdict).toBe('block');
     expect(gate.reason).toMatch(/推论/);
     expect(gate.nextAction).toBe('auto_patch');
   });
 
-  test('computeFairPlayGate passes when all inferences supported', () => {
+  test('computeFairPlayGate passes when线索完整', () => {
+    const report: FairPlayReport = {
+      unsupportedInferences: [],
+      orphanClues: [],
+      economyScore: 0.8,
+    };
+    const gate = computeFairPlayGate(report, { autoFixAttempted: true });
+    expect(gate.verdict).toBe('pass');
+    expect(gate.nextAction).toBe('none');
+  });
+
+  test('computeFairPlayGate blocks orphan clues after auto fix attempt', () => {
     const report: FairPlayReport = {
       unsupportedInferences: [],
       orphanClues: ['c:unused'],
       economyScore: 0.8,
     };
     const gate = computeFairPlayGate(report, { autoFixAttempted: true });
-    expect(gate.verdict).toBe('warn');
+    expect(gate.verdict).toBe('block');
     expect(gate.nextAction).toBe('notify');
   });
 

@@ -24,10 +24,19 @@ import type {
   GateLog,
   WorkflowStageCode,
   Stage3AnalysisSnapshot,
+  BetaReaderInsight,
+  HypothesisEvaluation,
   FairPlayReport,
   LightHypothesisSnapshot,
   DraftAnchorsSummary,
   MotivePatchCandidate,
+  ClueDiagnostics,
+  ClueIssueDetail,
+  ClueGraph,
+  RevisionPlanSummary,
+  RevisionPlanIssueSummary,
+  Stage4RevisionSnapshot,
+  Stage5GateSnapshot,
 } from '@storyapp/shared';
 import {
   createWorkflowDocument,
@@ -54,6 +63,7 @@ import {
   mapAnchorsToDraft,
   evaluateLightHypothesesSeries,
   type StageTelemetry,
+  ensureEndingResolution,
 } from '../agents/detective';
 import { runStage4Validation } from '../agents/detective/validators';
 import { enforceCluePolicy } from '../agents/detective/clueEnforcer';
@@ -215,6 +225,44 @@ function upsertStageLog(meta: DetectiveWorkflowMeta | undefined, log: StageLog):
   };
 }
 
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractBetaReaderInsight(source: unknown): BetaReaderInsight | undefined {
+  if (!isRecord(source)) return undefined;
+  const candidates = [
+    source.betaReader,
+    isRecord(source.analysis) ? source.analysis.betaReader : undefined,
+    isRecord(source.review) ? source.review.betaReader : undefined,
+  ];
+  for (const candidate of candidates) {
+    if (
+      isRecord(candidate) &&
+      typeof candidate.topSuspect === 'string' &&
+      typeof candidate.confidence === 'number'
+    ) {
+      return candidate as BetaReaderInsight;
+    }
+  }
+  return undefined;
+}
+
+function extractHypothesisEvaluation(source: unknown): HypothesisEvaluation | undefined {
+  if (!isRecord(source)) return undefined;
+  const candidates = [
+    source.hypotheses,
+    isRecord(source.analysis) ? source.analysis.hypotheses : undefined,
+    isRecord(source.review) ? source.review.hypotheses : undefined,
+  ];
+  for (const candidate of candidates) {
+    if (isRecord(candidate) && Array.isArray(candidate.candidates)) {
+      return candidate as HypothesisEvaluation;
+    }
+  }
+  return undefined;
+}
+
 function setStage3Analysis(
   meta: DetectiveWorkflowMeta | undefined,
   analysis: Stage3AnalysisSnapshot | undefined,
@@ -226,6 +274,110 @@ function setStage3Analysis(
   return {
     ...(meta ?? {}),
     stageResults,
+  };
+}
+
+function setStage4RevisionSummary(
+  meta: DetectiveWorkflowMeta | undefined,
+  plan: RevisionPlanSummary | undefined,
+): DetectiveWorkflowMeta {
+  if (!plan) {
+    const stageResults = { ...(meta?.stageResults ?? {}) };
+    if (stageResults.stage4) {
+      delete stageResults.stage4;
+    }
+    return {
+      ...(meta ?? {}),
+      stageResults: Object.keys(stageResults).length > 0 ? stageResults : undefined,
+    };
+  }
+  const stageResults = {
+    ...(meta?.stageResults ?? {}),
+    stage4: { plan } satisfies Stage4RevisionSnapshot,
+  };
+  return {
+    ...(meta ?? {}),
+    stageResults,
+  };
+}
+
+function setStage5GateSnapshot(
+  meta: DetectiveWorkflowMeta | undefined,
+  gates: GateLog[],
+  generatedAt: string,
+): DetectiveWorkflowMeta {
+  const stageResults = {
+    ...(meta?.stageResults ?? {}),
+    stage5: {
+      gates,
+      generatedAt,
+    } satisfies Stage5GateSnapshot,
+  };
+  return {
+    ...(meta ?? {}),
+    stageResults,
+  };
+}
+
+function inferIssueKindFromId(id: string): ClueIssueDetail['kind'] {
+  if (id.startsWith('c:')) return 'clue';
+  if (id.startsWith('f:')) return 'fact';
+  if (id.startsWith('i:')) return 'inference';
+  return 'inference';
+}
+
+function buildClueDiagnosticsSnapshot(graph: ClueGraph, report: FairPlayReport): ClueDiagnostics {
+  const nodeMap = new Map(graph.nodes.map((node) => [node.id, node]));
+  const incomingMap = new Map<string, string[]>();
+  const outgoingMap = new Map<string, string[]>();
+
+  graph.edges.forEach((edge) => {
+    if (!incomingMap.has(edge.to)) {
+      incomingMap.set(edge.to, []);
+    }
+    incomingMap.get(edge.to)!.push(edge.from);
+
+    if (!outgoingMap.has(edge.from)) {
+      outgoingMap.set(edge.from, []);
+    }
+    outgoingMap.get(edge.from)!.push(edge.to);
+  });
+
+  const toIssueDetail = (id: string): ClueIssueDetail => {
+    const node = nodeMap.get(id);
+    return {
+      id,
+      kind: node?.kind ?? inferIssueKindFromId(id),
+      text: node?.text ?? '',
+      sourceRef: node?.sourceRef,
+      chapterHint: node?.chapterHint,
+      anchorStatus: node?.anchorStatus,
+      anchors: node?.anchors ?? [],
+    };
+  };
+
+  const unsupportedInferences = report.unsupportedInferences.map((id) => {
+    const detail = toIssueDetail(id);
+    const supports = incomingMap.get(id) ?? [];
+    return {
+      ...detail,
+      missingSupports: supports,
+    };
+  });
+
+  const orphanClues = report.orphanClues.map((id) => {
+    const detail = toIssueDetail(id);
+    const consumers = outgoingMap.get(id) ?? [];
+    return {
+      ...detail,
+      consumers,
+    };
+  });
+
+  return {
+    updatedAt: new Date().toISOString(),
+    unsupportedInferences,
+    orphanClues,
   };
 }
 
@@ -265,17 +417,15 @@ export function computeFairPlayGate(report: FairPlayReport, options?: { autoFixA
   const hasUnsupported = report.unsupportedInferences.length > 0;
   const hasOrphans = report.orphanClues.length > 0;
   const hasIssues = hasUnsupported || hasOrphans;
-  let verdict: GateLog['verdict'] = hasIssues ? 'warn' : 'pass';
+  const verdict: GateLog['verdict'] = hasIssues ? 'block' : 'pass';
   const reason = hasIssues
     ? `仍有 ${report.unsupportedInferences.length} 条推论缺乏显式线索支撑，孤立线索 ${report.orphanClues.length} 条`
     : undefined;
-  let nextAction: GateLog['nextAction'] = 'none';
-  if (hasIssues) {
-    nextAction = options?.autoFixAttempted ? 'notify' : 'auto_patch';
-    if (options?.autoFixAttempted && hasUnsupported) {
-      verdict = 'warn';
-    }
-  }
+  const nextAction: GateLog['nextAction'] = hasIssues
+    ? options?.autoFixAttempted
+      ? 'notify'
+      : 'auto_patch'
+    : 'none';
   return {
     name: 'fairPlay.final',
     verdict,
@@ -326,6 +476,39 @@ export function computeComplexityGate(analysis?: Stage3AnalysisSnapshot | null):
   };
 }
 
+export function computeRevisionGate(plan?: RevisionPlanSummary | null): GateLog {
+  const outstanding = plan?.mustFix?.length ?? 0;
+  const warningCount = plan?.warnings?.length ?? 0;
+  if (!plan) {
+    return {
+      name: 'revision.mustFix',
+      verdict: 'pass',
+      metrics: {
+        outstanding,
+        warnings: warningCount,
+      },
+      nextAction: 'none',
+    };
+  }
+  const verdict: GateLog['verdict'] = outstanding > 0 ? 'block' : warningCount > 0 ? 'warn' : 'pass';
+  const reason =
+    verdict === 'block'
+      ? `仍有 ${outstanding} 条 must-fix 未处理，请补充修订后再验证`
+      : warningCount > 0
+        ? `仍有 ${warningCount} 条警告待人工确认`
+        : undefined;
+  return {
+    name: 'revision.mustFix',
+    verdict,
+    reason,
+    metrics: {
+      outstanding,
+      warnings: warningCount,
+    },
+    nextAction: verdict === 'pass' ? 'none' : 'notify',
+  };
+}
+
 function ensureChapterAnchorsCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): string[] {
   const chapters = draft?.chapters ?? [];
   if (chapters.length === 0) return [];
@@ -359,6 +542,9 @@ function ensureChapterAnchorsCompliance(outline: DetectiveOutline, draft: Detect
 function ensureMotiveCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): string[] {
   const chapters = draft?.chapters ?? [];
   if (chapters.length === 0) return [];
+  const candidates: MotivePatchCandidate[] = Array.isArray(draft?.motivePatchCandidates)
+    ? draft.motivePatchCandidates
+    : [];
   const earlyText = chapters
     .slice(0, Math.min(2, chapters.length))
     .map((chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`)
@@ -373,6 +559,42 @@ function ensureMotiveCompliance(outline: DetectiveOutline, draft: DetectiveStory
       : [];
     if (keywords.length === 0) return;
     const missing = keywords.filter((keyword) => !earlyText.includes(keyword));
+    if (missing.length > 0 && candidates.length > 0) {
+      const suspectName = suspect.name || 'suspect';
+      const stillMissing = missing.filter((keyword) => {
+        const normalized = keyword.trim();
+        if (!normalized) return false;
+        const candidateHit = candidates.some((candidate) => {
+          if (!candidate) return false;
+          const candidateKeyword = (candidate.keyword || '').trim();
+          if (!candidateKeyword || candidateKeyword !== normalized) {
+            return false;
+          }
+          const candidateSuspect = (candidate.suspect || '').trim() || 'suspect';
+          const matchesSuspect =
+            candidateSuspect === suspectName ||
+            candidateSuspect === 'solution' ||
+            candidateSuspect === 'all';
+          if (!matchesSuspect) {
+            return false;
+          }
+          if (candidate.status === 'applied') {
+            return true;
+          }
+          const sentence = (candidate.suggestedSentence || '').trim();
+          if (!sentence) {
+            return false;
+          }
+          return earlyText.includes(sentence);
+        });
+        return !candidateHit;
+      });
+      if (stillMissing.length === 0) {
+        return;
+      }
+      errors.push(`[${MOTIVE_RULE_ID}] 嫌疑人 ${suspect.name || '未知'} 的动机关键词缺失：${stillMissing.join('、')}`);
+      return;
+    }
     if (missing.length > 0) {
       errors.push(`[${MOTIVE_RULE_ID}] 嫌疑人 ${suspect.name || '未知'} 的动机关键词缺失：${missing.join('、')}`);
     }
@@ -888,6 +1110,7 @@ async function executeWorkflowPipeline(
     try {
       const clueGraph = buildClueGraphFromOutline(workingDoc.outline as DetectiveOutline);
       const fairPlayReport = scoreFairPlay(clueGraph);
+      const diagnostics = buildClueDiagnosticsSnapshot(clueGraph, fairPlayReport);
       const generatedAt = new Date().toISOString();
 
       let nextMeta: DetectiveWorkflowMeta = {
@@ -898,6 +1121,7 @@ async function executeWorkflowPipeline(
           report: fairPlayReport,
           version: CLUE_GRAPH_VERSION,
         },
+        clueDiagnostics: diagnostics,
       };
 
       nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE1, PROMPT_VERSION_STAGE1);
@@ -1051,21 +1275,25 @@ async function executeWorkflowPipeline(
         ? mapAnchorsToDraft(existingSnapshot.graph, storyDraft)
         : null;
       if (anchorResult) {
+        const refreshedReport = scoreFairPlay(anchorResult.graph);
+        const diagnostics = buildClueDiagnosticsSnapshot(anchorResult.graph, refreshedReport);
         const updatedSnapshot = existingSnapshot
           ? {
               ...existingSnapshot,
               graph: anchorResult.graph,
+              report: refreshedReport,
             }
           : {
               generatedAt: anchorResult.summary.updatedAt,
               graph: anchorResult.graph,
-              report: scoreFairPlay(anchorResult.graph),
+              report: refreshedReport,
               version: CLUE_GRAPH_VERSION,
             };
         nextMeta = {
           ...nextMeta,
           clueGraphSnapshot: updatedSnapshot,
           anchorsSummary: anchorResult.summary,
+          clueDiagnostics: diagnostics,
         };
       }
       let lightSnapshots: LightHypothesisSnapshot[] = [];
@@ -1164,10 +1392,14 @@ async function executeWorkflowPipeline(
   if (workingDoc.review) {
     try {
       const reviewObj = workingDoc.review as Record<string, unknown>;
-      const analysis: Stage3AnalysisSnapshot = {
-        betaReader: reviewObj?.betaReader as any,
-        hypotheses: reviewObj?.hypotheses as any,
-      };
+      const previousAnalysis =
+        (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.stageResults?.stage3;
+      const betaReader = extractBetaReaderInsight(reviewObj) ?? previousAnalysis?.betaReader;
+      const hypotheses = extractHypothesisEvaluation(reviewObj) ?? previousAnalysis?.hypotheses;
+      const analysis: Stage3AnalysisSnapshot | undefined =
+        betaReader || hypotheses
+          ? { ...(betaReader ? { betaReader } : {}), ...(hypotheses ? { hypotheses } : {}) }
+          : previousAnalysis;
       let nextMeta = setStage3Analysis(workingDoc.meta, analysis);
       nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE3, PROMPT_VERSION_STAGE3);
       let modelCalls: number | undefined;
@@ -1184,6 +1416,22 @@ async function executeWorkflowPipeline(
       }
       const gates: GateLog[] = [computeHypothesisGate(analysis)];
       const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage3_review');
+      const notes: string[] = [];
+      if (betaReader?.topSuspect) {
+        notes.push(
+          `BetaReader：${betaReader.topSuspect} ${(betaReader.confidence * 100).toFixed(0)}%`,
+        );
+      }
+      const hypothesisCount = analysis?.hypotheses?.candidates?.length ?? 0;
+      if (hypothesisCount > 0) {
+        notes.push(`竞争假说 ${hypothesisCount} 个`);
+      }
+      const mustFixCount = Array.isArray((reviewObj as any)?.mustFixBeforePublish)
+        ? (reviewObj as any).mustFixBeforePublish.length
+        : 0;
+      if (mustFixCount > 0) {
+        notes.push(`Must-fix 提示 ${mustFixCount} 项`);
+      }
       const stageLog: StageLog = {
         stage: mapStageCode('stage3_review'),
         stageId: 'stage3_review',
@@ -1191,6 +1439,7 @@ async function executeWorkflowPipeline(
         gates,
         durationMs,
         modelCalls,
+        notes: notes.length > 0 ? notes : undefined,
         timestamp: new Date().toISOString(),
       };
       nextMeta = upsertStageLog(nextMeta, stageLog);
@@ -1378,17 +1627,42 @@ async function executeWorkflowPipeline(
         2,
       ),
     });
+    const planSummary: RevisionPlanSummary = {
+      mustFix: revision.plan.mustFix.map((item, index) => ({
+        id: item.id ?? `mustfix-${index + 1}`,
+        detail: item.detail,
+        category: item.category,
+        chapterRef: item.chapterRef,
+      })),
+      warnings: revision.plan.warnings.map((item, index) => ({
+        id: item.id ?? `warn-${index + 1}`,
+        detail: item.detail,
+        category: item.category,
+        chapterRef: item.chapterRef,
+      })),
+      suggestions: [...revision.plan.suggestions],
+      generatedAt: revisionTimestamp,
+    };
     const mergedDraft: DetectiveStoryDraft = {
       ...enforced.draft,
       continuityNotes,
       revisionNotes,
+      revisionPlan: planSummary,
       ttsAssets: enforced.draft.ttsAssets ?? storyDraft.ttsAssets,
     };
-    return { storyDraft: mergedDraft, outline: harmonized.outline };
+    const endingResult = ensureEndingResolution(harmonized.outline || outline, mergedDraft);
+    if (endingResult.appended) {
+      telemetry?.log?.('info', '自动补写结尾善后段，避免 Stage5 再次告警');
+    }
+    return { storyDraft: endingResult.draft, outline: harmonized.outline };
   });
 
   try {
     let nextMeta = upsertPromptVersion(workingDoc.meta, PROMPT_VERSION_KEY_STAGE4, PROMPT_VERSION_STAGE4);
+    const revisionPlanSummary = workingDoc.storyDraft?.revisionPlan;
+    if (revisionPlanSummary) {
+      nextMeta = setStage4RevisionSummary(nextMeta, revisionPlanSummary);
+    }
     workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
     await persistWorkflow(workingDoc);
   } catch (metaError) {
@@ -1405,11 +1679,26 @@ async function executeWorkflowPipeline(
     if (totalCandidates > 0) {
       stageNotes.push(`动机伏笔候选：已应用 ${appliedCandidates}/${totalCandidates}`);
     }
+    const revisionPlanSummary = workingDoc.storyDraft?.revisionPlan;
+    const outstandingMustFix = revisionPlanSummary?.mustFix?.length ?? 0;
+    const outstandingWarnings = revisionPlanSummary?.warnings?.length ?? 0;
+    if (outstandingMustFix > 0) {
+      stageNotes.push(`修订必修项剩余 ${outstandingMustFix} 条`);
+    }
+    if (outstandingWarnings > 0) {
+      stageNotes.push(`修订警告待处理 ${outstandingWarnings} 条`);
+    }
     const continuityCount = Array.isArray(workingDoc.storyDraft?.continuityNotes)
       ? workingDoc.storyDraft!.continuityNotes!.length
       : 0;
     if (continuityCount > 0) {
       stageNotes.push(`连续性提示 ${continuityCount} 条`);
+    }
+    const appendedEnding = Array.isArray(workingDoc.storyDraft?.continuityNotes)
+      ? workingDoc.storyDraft!.continuityNotes!.some((note) => typeof note === 'string' && note.includes('结尾善后段'))
+      : false;
+    if (appendedEnding) {
+      stageNotes.push('结尾善后段：系统已自动补写');
     }
     const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage4_revision');
     let modelCalls: number | undefined;
@@ -1434,7 +1723,9 @@ async function executeWorkflowPipeline(
   }
 
   // Stage 5
-  workingDoc = await runStageWithUpdate(workingDoc, 'stage5_validation', async (telemetry) => {
+  let stage5Error: unknown = null;
+  try {
+    workingDoc = await runStageWithUpdate(workingDoc, 'stage5_validation', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
     let storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
     let outlineForValidation = outline;
@@ -1482,6 +1773,11 @@ async function executeWorkflowPipeline(
       mechanismKeywords: mechanismPreset.keywords,
     });
     outlineForValidation = harmonized.outline;
+    const endingResult = ensureEndingResolution(outlineForValidation, storyDraft);
+    if (endingResult.appended) {
+      telemetry?.log?.('info', '校验前补写结尾善后段');
+    }
+    storyDraft = endingResult.draft;
     if (harmonizeCommand) {
       telemetry?.completeCommand?.(harmonizeCommand, {
         resultSummary: '同步完成，准备校验',
@@ -1509,11 +1805,69 @@ async function executeWorkflowPipeline(
       type: 'json',
       preview: JSON.stringify(validation, null, 2).slice(0, 2000),
     });
-    const clueGraph = buildClueGraphFromOutline(outlineForValidation);
-    const fairPlayReport = scoreFairPlay(clueGraph);
+    const previousSnapshot =
+      (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.clueGraphSnapshot ?? null;
+    const previousAnchorsSummary =
+      (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.anchorsSummary ?? null;
+    let clueGraph = buildClueGraphFromOutline(outlineForValidation);
+    let anchorResultFinal = mapAnchorsToDraft(clueGraph, storyDraft);
+    if (anchorResultFinal) {
+      clueGraph = anchorResultFinal.graph;
+    } else if ((!clueGraph.nodes || clueGraph.nodes.length === 0) && previousSnapshot?.graph) {
+      clueGraph = previousSnapshot.graph;
+    }
+    let fairPlayReport = scoreFairPlay(clueGraph);
+    const clueDiagnostics = buildClueDiagnosticsSnapshot(clueGraph, fairPlayReport);
     const stage3Analysis = (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.stageResults?.stage3;
+    let revisionPlan = storyDraft.revisionPlan;
+    if (revisionPlan) {
+      const existingMustFix = Array.isArray(revisionPlan.mustFix) ? [...revisionPlan.mustFix] : [];
+      const existingIds = new Set(existingMustFix.map((item) => item.id));
+      const fairnessIssues: RevisionPlanIssueSummary[] = [];
+      clueDiagnostics.unsupportedInferences.forEach((issue) => {
+        const issueId = `fair-play-${issue.id}`;
+        if (existingIds.has(issueId)) return;
+        const supports =
+          Array.isArray(issue.missingSupports) && issue.missingSupports.length > 0
+            ? Array.from(
+                new Set(
+                  issue.missingSupports.filter((value): value is string => Boolean(value)),
+                ),
+              ).join('、')
+            : '';
+        fairnessIssues.push({
+          id: issueId,
+          detail: supports
+            ? `推论 ${issue.id} 缺少显式支撑，请补写 ${supports} 对应的场景或对白。`
+            : `推论 ${issue.id} 缺少显式支撑，请补写对应证据场景。`,
+          category: 'fair_play',
+        });
+      });
+      clueDiagnostics.orphanClues.forEach((issue) => {
+        const issueId = `fair-play-orphan-${issue.id}`;
+        if (existingIds.has(issueId)) return;
+        fairnessIssues.push({
+          id: issueId,
+          detail: `线索 ${issue.id} 尚未被推理消费，请在正文安排其被引用或调整布置位置。`,
+          category: 'fair_play',
+        });
+      });
+      if (fairnessIssues.length > 0) {
+        revisionPlan = {
+          ...revisionPlan,
+          mustFix: [...existingMustFix, ...fairnessIssues],
+        };
+        storyDraft = {
+          ...storyDraft,
+          revisionPlan,
+        };
+      }
+    }
     const fairGate = computeFairPlayGate(fairPlayReport, { autoFixAttempted: enableAutoFix });
     const complexityGate = computeComplexityGate(stage3Analysis);
+    const revisionGate = computeRevisionGate(revisionPlan);
+    const anchorsSummaryFinal =
+      anchorResultFinal?.summary ?? previousAnchorsSummary ?? undefined;
     const validationWithMetrics: ValidationReport = {
       ...validation,
       metrics: {
@@ -1522,11 +1876,27 @@ async function executeWorkflowPipeline(
         unsupportedInferences: fairPlayReport.unsupportedInferences.length,
         inevitabilityIndex: (complexityGate.metrics?.inevitability as number | undefined) ?? 0,
         competitorCount: (complexityGate.metrics?.competitors as number | undefined) ?? 0,
+        outstandingMustFix: revisionPlan?.mustFix?.length ?? 0,
       },
     };
 
+    const gateTimestamp = new Date().toISOString();
     let nextMeta = upsertPromptVersion(workingDoc.meta, PROMPT_VERSION_KEY_STAGE5, PROMPT_VERSION_STAGE5);
-    const gates: GateLog[] = [fairGate, complexityGate];
+    nextMeta = {
+      ...nextMeta,
+      clueGraphSnapshot: {
+        generatedAt: gateTimestamp,
+        graph: clueGraph,
+        report: fairPlayReport,
+        version: CLUE_GRAPH_VERSION,
+      },
+      clueDiagnostics,
+      ...(anchorsSummaryFinal ? { anchorsSummary: anchorsSummaryFinal } : {}),
+    };
+    if (storyDraft.revisionPlan) {
+      nextMeta = setStage4RevisionSummary(nextMeta, storyDraft.revisionPlan);
+    }
+    const gates: GateLog[] = [fairGate, complexityGate, revisionGate];
     if (workflowIdString) {
       gates
         .filter((gate) => gate.verdict !== 'pass')
@@ -1544,15 +1914,35 @@ async function executeWorkflowPipeline(
       gates,
       durationMs,
     };
+    nextMeta = setStage5GateSnapshot(nextMeta, gates, gateTimestamp);
     workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
     await persistWorkflow(workingDoc);
 
+    if (revisionGate.verdict === 'block') {
+      throw new Error(revisionGate.reason ?? '修订计划仍存在 must-fix 未处理');
+    }
     if (fairGate.verdict === 'block') {
       throw new Error(fairGate.reason ?? 'Fair-Play Gate 未通过，请补充线索支撑');
     }
 
     return { validation: validationWithMetrics, outline: outlineForValidation, storyDraft };
   });
+  } catch (error) {
+    stage5Error = error;
+    if (workingDoc._id) {
+      try {
+        const db = getDatabase();
+        const freshDoc = await db
+          .collection<DetectiveWorkflowDocument>(COLLECTIONS.STORY_WORKFLOWS)
+          .findOne({ _id: workingDoc._id });
+        if (freshDoc) {
+          workingDoc = freshDoc;
+        }
+      } catch (reloadError) {
+        logger.warn({ err: reloadError }, 'Stage5 失败后刷新工作流文档失败');
+      }
+    }
+  }
 
   try {
     let nextMeta: DetectiveWorkflowMeta = workingDoc.meta ?? {};
@@ -1587,6 +1977,10 @@ async function executeWorkflowPipeline(
     await persistWorkflow(workingDoc);
   } catch (stageLogError) {
     logger.warn({ err: stageLogError }, 'Stage4/Stage5 日志记录失败');
+  }
+
+  if (stage5Error) {
+    throw stage5Error;
   }
 
   const revision = createWorkflowRevision({

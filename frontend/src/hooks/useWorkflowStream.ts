@@ -19,6 +19,15 @@ const STAGE_ORDER = [
   'stage5_validation',
 ];
 
+const API_BASE = (process.env.REACT_APP_API_URL || '').replace(/\/$/, '');
+const buildApiUrl = (path: string): string => {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  if (!API_BASE) {
+    return `/api${normalized}`;
+  }
+  return `${API_BASE}${normalized}`;
+};
+
 type StageStatusMap = Record<string, WorkflowEvent>;
 type StageActivityMap = Record<string, WorkflowStageExecution>;
 
@@ -50,6 +59,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
   const [reconnectVersion, setReconnectVersion] = useState(0);
   const hadInitialConnectionRef = useRef(false);
   const connectionInterruptedRef = useRef(false);
+  const failureRefreshRef = useRef(false);
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
   
   // 🔧 统一 SSE 日志管理
@@ -172,6 +182,28 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
     setStageActivity(map);
   }, []);
 
+  const fetchStageActivity = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!workflowId) {
+        return;
+      }
+      try {
+        const response = await fetch(buildApiUrl(`/story-workflows/${workflowId}/stage-activity`), {
+          signal,
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        applyStageSummary(data?.data as WorkflowStageExecutionSummary | undefined);
+      } catch (err: any) {
+        if (signal?.aborted) return;
+        console.warn('获取阶段活动失败', err);
+      }
+    },
+    [workflowId, applyStageSummary],
+  );
+
   const refresh = useCallback(() => {
     setError(undefined);
     setIsConnected(false);
@@ -194,7 +226,9 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
 
     async function loadHistory() {
       try {
-        const response = await fetch(`/api/story-workflows/${workflowId}/events`, { signal: controller.signal });
+        const response = await fetch(buildApiUrl(`/story-workflows/${workflowId}/events`), {
+          signal: controller.signal,
+        });
         if (!response.ok) {
           throw new Error(`加载工作流事件失败：${response.statusText}`);
         }
@@ -206,38 +240,22 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
       } catch (err: any) {
         if (!aborted) {
           setError(err?.message || '获取工作流事件失败');
-          toast.error(err?.message || '获取工作流事件失败');
+          toast.error(err?.message || '获取工作流事件失败', { id: 'workflow-stream-history' });
         }
       }
     }
 
     loadHistory();
-    async function loadStageActivity(signal: AbortSignal) {
-      try {
-        const response = await fetch(`/api/story-workflows/${workflowId}/stage-activity`, { signal });
-        if (!response.ok) {
-          return;
-        }
-        const data = await response.json();
-        if (!aborted) {
-          applyStageSummary(data?.data as WorkflowStageExecutionSummary | undefined);
-        }
-      } catch (err) {
-        if (!aborted) {
-          console.warn('获取阶段活动失败', err);
-        }
-      }
-    }
-    loadStageActivity(controller.signal);
+    fetchStageActivity(controller.signal);
 
-    const es = new EventSource(`/api/story-workflows/${workflowId}/stream`);
+    const es = new EventSource(buildApiUrl(`/story-workflows/${workflowId}/stream`));
     setEventSource(es); // 🔧 设置 EventSource 以便 useSseLogger 监控
     
     es.onopen = () => {
       setIsConnected(true);
       setError(undefined);
       if (connectionInterruptedRef.current) {
-        toast.success('事件流已重新连接');
+        toast.success('事件流已重新连接', { id: 'workflow-stream-status' });
         connectionInterruptedRef.current = false;
       }
       hadInitialConnectionRef.current = true;
@@ -249,7 +267,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         applyStageDetailEvent(parsed);
       } catch (err: any) {
         setError(err?.message || '解析工作流事件失败');
-        toast.error(err?.message || '解析工作流事件失败');
+        toast.error(err?.message || '解析工作流事件失败', { id: 'workflow-stream-parse' });
       }
     };
     es.onerror = () => {
@@ -258,7 +276,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         setError('事件流连接断开，稍后将自动重连');
       }
       if (hadInitialConnectionRef.current && !connectionInterruptedRef.current) {
-        toast.error('事件流连接断开，稍后将自动重连');
+        toast.error('事件流连接断开，稍后将自动重连', { id: 'workflow-stream-status' });
       }
       connectionInterruptedRef.current = true;
       es.close();
@@ -283,7 +301,23 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         reconnectTimeoutRef.current = null;
       }
     };
-  }, [workflowId, refresh, reconnectVersion, applyStageDetailEvent, applyStageSummary]);
+  }, [workflowId, refresh, reconnectVersion, applyStageDetailEvent, applyStageSummary, fetchStageActivity]);
+
+  useEffect(() => {
+    if (!workflowId) {
+      failureRefreshRef.current = false;
+      return;
+    }
+    const hasFailedStage = STAGE_ORDER.some((stageId) => stageStatus[stageId]?.status === 'failed');
+    if (hasFailedStage) {
+      if (!failureRefreshRef.current) {
+        failureRefreshRef.current = true;
+        fetchStageActivity();
+      }
+    } else {
+      failureRefreshRef.current = false;
+    }
+  }, [workflowId, stageStatus, fetchStageActivity]);
 
   const stageStatus = useMemo<StageStatusMap>(() => {
     const map: StageStatusMap = {};

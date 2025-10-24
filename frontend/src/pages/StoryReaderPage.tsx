@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -146,9 +146,22 @@ export default function StoryReaderPage() {
     }
   }, [error]);
 
+  const lastTtsErrorRef = useRef<string | null>(null);
   useEffect(() => {
-    if (ttsError) {
-      toast.error(ttsError);
+    if (!ttsError) {
+      lastTtsErrorRef.current = null;
+      toast.dismiss('tts-error');
+      return;
+    }
+    if (lastTtsErrorRef.current === ttsError) {
+      return;
+    }
+    lastTtsErrorRef.current = ttsError;
+    const isPlaceholder = /未配置|未启用|暂未/.test(ttsError);
+    if (isPlaceholder) {
+      toast(ttsError, { id: 'tts-error', icon: 'ℹ️' });
+    } else {
+      toast.error(ttsError, { id: 'tts-error' });
     }
   }, [ttsError]);
 
@@ -487,6 +500,7 @@ export default function StoryReaderPage() {
       <WorkflowTimelineDrawer
         workflowId={timelineWorkflowId}
         storyTitle={storyTitle}
+        workflow={workflow}
         stageStates={workflow?.stageStates}
         workflowStatus={workflow?.status}
         initialOpen={defaultTimelineOpen}

@@ -43,6 +43,13 @@ export interface DetectiveTimelineEvent {
   participants?: string[];
 }
 
+export interface DetectiveLocation {
+  name: string;
+  description?: string;
+  functionHint?: string;
+  relatedClues?: string[];
+}
+
 export interface DetectiveChapterAnchor {
   chapter: string; // "Chapter 1"
   dayCode?: string; // "Day1"
@@ -65,8 +72,16 @@ export interface DetectiveOutline {
   characters?: DetectiveCharacter[];
   acts?: DetectiveAct[];
   clueMatrix?: DetectiveClue[];
+  locations?: DetectiveLocation[];
   timeline?: DetectiveTimelineEvent[];
   chapterAnchors?: DetectiveChapterAnchor[];
+  chapterBlueprints?: Array<{
+    chapter?: string;
+    wordTarget?: number;
+    conflictGoal?: string;
+    backgroundNeeded?: string[];
+    emotionalBeat?: string;
+  }>;
   themes?: string[];
   logicChecklist?: string[];
 }
@@ -115,12 +130,27 @@ export interface MotivePatchCandidate {
   status: 'pending' | 'applied';
 }
 
+export interface RevisionPlanIssueSummary {
+  id: string;
+  detail: string;
+  category?: string;
+  chapterRef?: string;
+}
+
+export interface RevisionPlanSummary {
+  mustFix: RevisionPlanIssueSummary[];
+  warnings: RevisionPlanIssueSummary[];
+  suggestions: string[];
+  generatedAt: string;
+}
+
 export interface DetectiveStoryDraft {
   chapters: DetectiveChapter[];
   overallWordCount?: number;
   narrativeStyle?: string;
   continuityNotes?: string[];
   revisionNotes?: DetectiveRevisionNote[];
+  revisionPlan?: RevisionPlanSummary;
   ttsAssets?: DetectiveStoryAudioAsset[];
   motivePatchCandidates?: MotivePatchCandidate[];
 }
@@ -186,6 +216,18 @@ export interface ClueNode {
   anchorStatus?: 'pending' | 'resolved' | 'stale';
 }
 
+export interface ClueIssueDetail {
+  id: string;
+  kind: 'clue' | 'fact' | 'inference' | 'denouement';
+  text: string;
+  sourceRef?: string;
+  chapterHint?: number;
+  anchorStatus?: 'pending' | 'resolved' | 'stale';
+  anchors?: ClueAnchor[];
+  missingSupports?: string[];
+  consumers?: string[];
+}
+
 export interface ClueEdge {
   from: string;
   to: string;
@@ -201,6 +243,12 @@ export interface FairPlayReport {
   unsupportedInferences: string[];
   orphanClues: string[];
   economyScore: number;
+}
+
+export interface ClueDiagnostics {
+  updatedAt: string;
+  unsupportedInferences: ClueIssueDetail[];
+  orphanClues: ClueIssueDetail[];
 }
 
 export interface BetaReaderInsight {
@@ -286,6 +334,15 @@ export interface Stage3AnalysisSnapshot {
   hypotheses?: HypothesisEvaluation;
 }
 
+export interface Stage4RevisionSnapshot {
+  plan: RevisionPlanSummary;
+}
+
+export interface Stage5GateSnapshot {
+  gates: GateLog[];
+  generatedAt: string;
+}
+
 export interface LightHypothesisSnapshot {
   chapterIndex: number;
   rank: Array<{ name: string; score: number; evidenceIds: string[] }>;
@@ -312,10 +369,13 @@ export interface DraftAnchorsSummary {
 export type DetectiveWorkflowMeta = {
   mechanismPreset?: unknown;
   clueGraphSnapshot?: ClueGraphSnapshot;
+  clueDiagnostics?: ClueDiagnostics;
   telemetry?: WorkflowTelemetry;
   promptVersions?: Record<string, string>;
   stageResults?: {
     stage3?: Stage3AnalysisSnapshot;
+    stage4?: Stage4RevisionSnapshot;
+    stage5?: Stage5GateSnapshot;
   };
   mysteryContract?: MysteryContract;
   mysteryPattern?: MysteryPatternProfile;
@@ -453,7 +513,7 @@ export interface DetectiveWorkflowRecord {
   history?: WorkflowRevision[];
   terminatedAt?: string;
   terminationReason?: string;
-  meta?: Record<string, unknown>;
+  meta?: DetectiveWorkflowMeta;
 }
 
 export interface CreateWorkflowRequest {
