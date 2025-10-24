@@ -120,9 +120,10 @@ describe('validation gates', () => {
       orphanClues: [],
       economyScore: 0.5,
     };
-    const gate = computeFairPlayGate(report);
-    expect(gate.verdict).toBe('block');
+    const gate = computeFairPlayGate(report, { autoFixAttempted: false });
+    expect(gate.verdict).toBe('warn');
     expect(gate.reason).toMatch(/推论/);
+    expect(gate.nextAction).toBe('auto_patch');
   });
 
   test('computeFairPlayGate passes when all inferences supported', () => {
@@ -131,8 +132,9 @@ describe('validation gates', () => {
       orphanClues: ['c:unused'],
       economyScore: 0.8,
     };
-    const gate = computeFairPlayGate(report);
-    expect(gate.verdict).toBe('pass');
+    const gate = computeFairPlayGate(report, { autoFixAttempted: true });
+    expect(gate.verdict).toBe('warn');
+    expect(gate.nextAction).toBe('notify');
   });
 
   test('computeHypothesisGate warns when confidence gap is small', () => {

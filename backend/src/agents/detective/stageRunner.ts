@@ -15,7 +15,11 @@ import type {
   DetectiveRevisionNoteCategory,
   BetaReaderInsight,
   HypothesisEvaluation,
+  LightHypothesisSnapshot,
+  DraftAnchorsSummary,
+  MotivePatchCandidate,
 } from '@storyapp/shared';
+import { createHash } from 'crypto';
 import {
   buildStage1Prompt,
   buildStage1PromptProfile,
@@ -38,15 +42,23 @@ import { enforceFocalization, applyStylePackToDraft, throttleTemplates, applyCli
 import { planDenouement, assertPlantPayoffCompleteness } from './structureToolkit';
 
 const logger = createLogger('detective:stages');
+const lightHypothesisCache = new Map<string, { inserted: number; ranks: LightHypothesisRank[] }>();
+const LIGHT_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 小时缓存
+
+type DeepseekExecutor = (options: DeepseekCallOptions) => Promise<DeepseekCallResult>;
+
+let callDeepseekDelegate: DeepseekExecutor;
 
 const DETECTIVE_CONFIG = {
   planningModel: process.env.DETECTIVE_PLANNING_MODEL || DEEPSEEK_CONFIG.REASONER_MODEL,
   writingModel: process.env.DETECTIVE_WRITING_MODEL || DEEPSEEK_CONFIG.CHAT_MODEL,
   reviewModel: process.env.DETECTIVE_REVIEW_MODEL || DEEPSEEK_CONFIG.REASONER_MODEL,
+  reviewModelLight: process.env.DETECTIVE_REVIEW_MODEL_LIGHT || DEEPSEEK_CONFIG.CHAT_MODEL,
   maxTokens: Number.parseInt(process.env.DETECTIVE_MAX_TOKENS || '6000', 10),
   planningTemperature: Number.parseFloat(process.env.DETECTIVE_PLANNING_TEMPERATURE || '0.3'),
   writingTemperature: Number.parseFloat(process.env.DETECTIVE_WRITING_TEMPERATURE || '0.6'),
   reviewTemperature: Number.parseFloat(process.env.DETECTIVE_REVIEW_TEMPERATURE || '0.2'),
+  lightReviewTemperature: Number.parseFloat(process.env.DETECTIVE_LIGHT_REVIEW_TEMPERATURE || '0.1'),
 };
 
 const CRITICAL_VALIDATION_RULES = new Set([
@@ -224,29 +236,25 @@ function ensureApiKey() {
   }
 }
 
-async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallResult> {
+const defaultCallDeepseek: DeepseekExecutor = async (options) => {
   ensureApiKey();
-  
-  // 根据模型类型选择超时时间
-  const timeout = options.model === 'deepseek-reasoner' 
-    ? DEEPSEEK_TIMEOUTS.REASONER 
+
+  const timeout = options.model === 'deepseek-reasoner'
+    ? DEEPSEEK_TIMEOUTS.REASONER
     : DEEPSEEK_TIMEOUTS.CHAT;
-  
+
   const startTime = Date.now();
   const isReasonerModel =
     options.model === DEEPSEEK_CONFIG.REASONER_MODEL ||
-    typeof options.model === 'string' && options.model.toLowerCase().includes('reasoner');
+    (typeof options.model === 'string' && options.model.toLowerCase().includes('reasoner'));
   const reasoningMaxTokensEnv = process.env.DEEPSEEK_REASONER_MAX_COT_TOKENS;
   const reasoningMaxTokens =
     options.reasoningTokensOverride ??
     (reasoningMaxTokensEnv ? Number.parseInt(reasoningMaxTokensEnv, 10) : 1024);
-  
+
   try {
-    logger.info(
-      { model: options.model, timeout: `${timeout}ms` },
-      'DeepSeek API 调用开始',
-    );
-    
+    logger.info({ model: options.model, timeout: `${timeout}ms` }, 'DeepSeek API 调用开始');
+
     const requestBody: Record<string, any> = {
       model: options.model,
       messages: options.messages,
@@ -262,15 +270,15 @@ async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallR
     }
 
     const response = await deepseekClient.post('/chat/completions', requestBody, {
-      timeout, // 单独设置超时
+      timeout,
     });
 
     const duration = Date.now() - startTime;
-    
+
     let content = response?.data?.choices?.[0]?.message?.content;
     if (!content) {
       const rc = response?.data?.choices?.[0]?.message?.reasoning_content;
-      if (rc && typeof rc === "string") {
+      if (rc && typeof rc === 'string') {
         content = rc;
       }
     }
@@ -279,10 +287,7 @@ async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallR
       throw new Error('DeepSeek 响应缺少内容');
     }
 
-    logger.info(
-      { model: options.model, duration: `${duration}ms` },
-      'DeepSeek API 调用成功',
-    );
+    logger.info({ model: options.model, duration: `${duration}ms` }, 'DeepSeek API 调用成功');
 
     return {
       content,
@@ -290,14 +295,12 @@ async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallR
     };
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    
-    // 判断是否超时错误
     const isTimeout = error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED';
-    
+
     logger.error(
-      { 
-        err: error, 
-        model: options.model, 
+      {
+        err: error,
+        model: options.model,
         duration: `${duration}ms`,
         timeout: `${timeout}ms`,
         isTimeout,
@@ -305,14 +308,19 @@ async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallR
       },
       isTimeout ? 'DeepSeek API 调用超时' : 'DeepSeek API 调用失败',
     );
-    
-    // 抛出更友好的错误信息
+
     if (isTimeout) {
-      throw new Error(`AI模型响应超时（${timeout/1000}秒），请稍后重试`);
+      throw new Error(`AI模型响应超时（${timeout / 1000}秒），请稍后重试`);
     }
-    
+
     throw error;
   }
+};
+
+callDeepseekDelegate = defaultCallDeepseek;
+
+async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallResult> {
+  return callDeepseekDelegate(options);
 }
 
 function clampConfidence(value: unknown): number {
@@ -492,6 +500,134 @@ async function enumerateHypotheses(
     return null;
   }
 }
+
+interface LightHypothesisRank {
+  name: string;
+  score: number;
+  evidenceIds: string[];
+}
+
+async function runLightHypothesisEval(
+  payload: string,
+): Promise<LightHypothesisRank[] | null> {
+  try {
+    const systemPrompt = [
+      '你是一名快速假设评估器，只根据提供的证据包给出当前最可疑的两名嫌疑人。',
+      '请避免长篇推理，仅输出 JSON。',
+    ].join('\n');
+    const userPrompt = [
+      '证据包：',
+      payload,
+      '',
+      '输出 JSON：',
+      '{ "rank": [ { "name": "", "score": 0-1, "evidence_ids": [] } ] }',
+    ].join('\n');
+    const cacheKey = createHash('sha1').update(payload).digest('hex');
+    const cached = lightHypothesisCache.get(cacheKey);
+    if (cached && Date.now() - cached.inserted < LIGHT_CACHE_TTL_MS) {
+      return cached.ranks;
+    }
+    const { content } = await callDeepseek({
+      model: DETECTIVE_CONFIG.reviewModelLight || DETECTIVE_CONFIG.reviewModel,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      maxTokens: 400,
+      temperature: DETECTIVE_CONFIG.lightReviewTemperature ?? 0.1,
+    });
+    const parsed = extractJson(content) as { rank?: Array<{ name?: string; score?: number; evidence_ids?: string[] }> };
+    if (!parsed || !Array.isArray(parsed.rank)) return null;
+    const ranks: LightHypothesisRank[] = parsed.rank
+      .map((item) => {
+        const name = typeof item.name === 'string' ? item.name.trim() : '';
+        if (!name) return null;
+        const score = clampConfidence(item.score);
+        const evidenceIds = Array.isArray(item.evidence_ids)
+          ? item.evidence_ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+          : [];
+        return { name, score, evidenceIds };
+      })
+      .filter((rank): rank is LightHypothesisRank => Boolean(rank));
+    if (!ranks.length) return null;
+    lightHypothesisCache.set(cacheKey, { inserted: Date.now(), ranks });
+    return ranks;
+  } catch (error) {
+    logger.warn({ err: error }, 'runLightHypothesisEval 执行失败');
+    return null;
+  }
+}
+
+export interface LightHypothesisOptions {
+  chapterLimit?: number;
+  runner?: (payload: string) => Promise<LightHypothesisRank[] | null>;
+  concurrency?: number;
+}
+
+export async function evaluateLightHypothesesSeries(
+  outline: DetectiveOutline,
+  draft: DetectiveStoryDraft,
+  options?: LightHypothesisOptions,
+): Promise<LightHypothesisSnapshot[]> {
+  if (!outline || !draft?.chapters?.length) {
+    return [];
+  }
+  const results: LightHypothesisSnapshot[] = [];
+  const limit = Math.min(
+    draft.chapters.length - 1,
+    Math.max(0, options?.chapterLimit ?? draft.chapters.length - 1),
+  );
+  const runner = options?.runner ?? runLightHypothesisEval;
+  const tasks: Array<{ chapterIndex: number; payload: string }> = [];
+  for (let chapterIndex = 0; chapterIndex <= limit; chapterIndex += 1) {
+    tasks.push({
+      chapterIndex,
+      payload: buildChapterEvidencePack(outline, draft, chapterIndex, 2800),
+    });
+  }
+  const concurrency = Math.max(1, Math.min(options?.concurrency ?? 2, tasks.length || 1));
+  const executing: Promise<void>[] = [];
+  const schedule = async ({ chapterIndex, payload }: { chapterIndex: number; payload: string }) => {
+    const ranks = await runner(payload);
+    if (!ranks) {
+      return;
+    }
+    results.push({
+      chapterIndex,
+      rank: ranks,
+      generatedAt: new Date().toISOString(),
+    });
+  };
+  for (const task of tasks) {
+    const wrapped = schedule(task).finally(() => {
+      const idx = executing.indexOf(wrapped);
+      if (idx >= 0) {
+        executing.splice(idx, 1);
+      }
+    });
+    executing.push(wrapped);
+    if (executing.length >= concurrency) {
+      await Promise.race(executing);
+    }
+  }
+  if (executing.length > 0) {
+    await Promise.all(executing);
+  }
+  return results.sort((a, b) => a.chapterIndex - b.chapterIndex);
+}
+
+export const __testing = {
+  resetLightHypothesisCache() {
+    lightHypothesisCache.clear();
+  },
+  getLightHypothesisCacheSize() {
+    return lightHypothesisCache.size;
+  },
+  setCallDeepseekMock(mock: DeepseekExecutor | null) {
+    callDeepseekDelegate = mock ?? defaultCallDeepseek;
+  },
+  runLightHypothesisEvalForTest: runLightHypothesisEval,
+};
 function extractJson(content: string): any {
   const cleaned = String(content || '')
     .replace(/```json\s*/gi, '')
@@ -1306,11 +1442,11 @@ function buildSolutionForeshadowSentence(options: {
 function ensureMotivesForDraft(
   outline: DetectiveOutline,
   draft: DetectiveStoryDraft,
-): { chapters: DetectiveStoryDraft['chapters']; notes: string[] } {
+): { draft: DetectiveStoryDraft; notes: string[] } {
   const characters = outline?.characters ?? [];
   const suspects = characters.filter((char) => typeof char?.role === 'string' && /suspect/i.test(char.role));
   if (suspects.length === 0) {
-    return { chapters: draft.chapters, notes: [] };
+    return { draft, notes: [] };
   }
   const blueprintMap = collectChapterBlueprints(outline);
   const emotionalBeats = Array.isArray((outline as any)?.emotionalBeats)
@@ -1319,7 +1455,6 @@ function ensureMotivesForDraft(
   const backstories = Array.isArray((outline as any)?.characterBackstories)
     ? (outline as any).characterBackstories
     : [];
-  const chapters = [...draft.chapters];
   const detectiveName = (() => {
     const detective = characters.find((char) => typeof char?.role === 'string' && /detective/i.test(char.role));
     if (detective?.name && /[\u4e00-\u9fa5]/.test(detective.name)) {
@@ -1327,11 +1462,15 @@ function ensureMotivesForDraft(
     }
     return '李明';
   })();
+  const chapters = draft.chapters;
   const combinedEarlyText = chapters
     .slice(0, Math.min(2, chapters.length))
     .map((chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`)
     .join('\n');
   const notes: string[] = [];
+  const existingCandidates: MotivePatchCandidate[] = Array.isArray(draft.motivePatchCandidates)
+    ? draft.motivePatchCandidates.map((candidate) => ({ ...candidate }))
+    : [];
 
   suspects.forEach((suspect) => {
     const keywords = Array.isArray(suspect.motiveKeywords)
@@ -1384,14 +1523,25 @@ function ensureMotivesForDraft(
       diversionTopic,
       variationSeed: notes.length + targetIndex,
     });
-    const chapter = chapters[targetIndex];
-    const newContent = insertSentenceAfterIntro(chapter.content, sentence);
-    chapters[targetIndex] = {
-      ...chapter,
-      content: newContent,
-      wordCount: newContent.replace(/\s+/g, '').length,
-    };
-    notes.push(`自动补写动机伏笔：${suspect.name}（关键词：${missingKeyword}） → Chapter ${targetIndex + 1}`);
+    const candidateKey = `${suspect.name || 'suspect'}::${missingKeyword}::${targetIndex}`;
+    const exists = existingCandidates.some(
+      (candidate) =>
+        candidate.suspect === (suspect.name || 'suspect') &&
+        candidate.keyword === missingKeyword &&
+        candidate.chapterIndex === targetIndex,
+    );
+    if (!exists) {
+      existingCandidates.push({
+        suspect: suspect.name || 'suspect',
+        keyword: missingKeyword,
+        chapterIndex: targetIndex,
+        suggestedSentence: sentence,
+        status: 'pending' as const,
+      });
+    }
+    notes.push(
+      `待补动机伏笔：${suspect.name}（关键词：${missingKeyword}），建议在 Chapter ${targetIndex + 1} 自然呈现。`,
+    );
   });
 
   const solutionTokens = collectSolutionMotiveTokens(outline);
@@ -1416,25 +1566,100 @@ function ensureMotivesForDraft(
       token: normalized,
       variationSeed: idx,
     });
-    const newContent = insertSentenceAfterIntro(chapter.content, sentence);
-    chapters[targetIndex] = {
-      ...chapter,
-      content: newContent,
-      wordCount: newContent.replace(/\s+/g, '').length,
-    };
-    notes.push(`自动补写动机伏笔：线索提示“${normalized}” → Chapter ${targetIndex + 1}`);
+    const exists = existingCandidates.some(
+      (candidate) =>
+        candidate.suspect === 'solution' &&
+        candidate.keyword === normalized &&
+        candidate.chapterIndex === targetIndex,
+    );
+    if (!exists) {
+      existingCandidates.push({
+        suspect: 'solution',
+        keyword: normalized,
+        chapterIndex: targetIndex,
+        suggestedSentence: sentence,
+        status: 'pending' as const,
+      });
+    }
+    notes.push(`待补动机伏笔：线索提示“${normalized}” → 建议在 Chapter ${targetIndex + 1} 暗示。`);
   });
 
-  return { chapters, notes };
+  const dedupedCandidates: MotivePatchCandidate[] = existingCandidates.filter(
+    (candidate, idx, arr) =>
+      arr.findIndex(
+        (item) =>
+          item.suspect === candidate.suspect &&
+          item.keyword === candidate.keyword &&
+          item.chapterIndex === candidate.chapterIndex,
+      ) === idx,
+  );
+
+  const updatedDraft: DetectiveStoryDraft = {
+    ...draft,
+    motivePatchCandidates: dedupedCandidates,
+  };
+
+  return { draft: updatedDraft, notes };
+}
+
+function applyMotiveCandidatesToDraft(
+  draft: DetectiveStoryDraft,
+): { draft: DetectiveStoryDraft; notes: string[] } {
+  if (!draft?.motivePatchCandidates || draft.motivePatchCandidates.length === 0) {
+    return { draft, notes: [] };
+  }
+  const chapters = Array.isArray(draft.chapters) ? [...draft.chapters] : [];
+  const notes: string[] = [];
+  const updatedCandidates = draft.motivePatchCandidates.map((candidate) => {
+    if (!candidate || candidate.status === 'applied') {
+      return candidate;
+    }
+    const idx = Math.max(0, Math.min(candidate.chapterIndex ?? 0, Math.max(chapters.length - 1, 0)));
+    const chapter = chapters[idx];
+    if (!chapter) {
+      return candidate;
+    }
+    const keyword = candidate.keyword?.trim();
+    const sentence = candidate.suggestedSentence?.trim();
+    const combined = `${chapter.summary || ''}\n${chapter.content || ''}`;
+    if (keyword && combined.includes(keyword)) {
+      if (!sentence || combined.includes(sentence)) {
+        return { ...candidate, status: 'applied' as const };
+      }
+    }
+    if (!sentence) {
+      return candidate;
+    }
+    const updatedContent = insertSentenceAfterIntro(chapter.content, sentence);
+    if (updatedContent !== chapter.content) {
+      chapters[idx] = {
+        ...chapter,
+        content: updatedContent,
+        wordCount: updatedContent.replace(/\s+/g, '').length,
+      };
+      notes.push(`自动插入动机伏笔：${keyword || '关键提示'} → Chapter ${idx + 1}`);
+      return { ...candidate, status: 'applied' as const };
+    }
+    return candidate;
+  });
+  return {
+    draft: {
+      ...draft,
+      chapters,
+      motivePatchCandidates: updatedCandidates,
+    },
+    notes,
+  };
 }
 
 function applyAnchorsAndMotives(outline: DetectiveOutline, draft: DetectiveStoryDraft) {
   const anchorResult = ensureAnchorsForDraft(outline, draft);
   const motiveResult = ensureMotivesForDraft(outline, { ...draft, chapters: anchorResult.chapters });
-  const continuityNotes = [...anchorResult.notes, ...motiveResult.notes];
-  const sanitized = sanitizeChapters(motiveResult.chapters);
+  const motiveApplied = applyMotiveCandidatesToDraft(motiveResult.draft);
+  const continuityNotes = [...anchorResult.notes, ...motiveResult.notes, ...motiveApplied.notes];
+  const sanitized = sanitizeChapters(motiveApplied.draft.chapters);
   const mergedDraft: DetectiveStoryDraft = {
-    ...draft,
+    ...motiveApplied.draft,
     chapters: sanitized,
     ttsAssets: draft.ttsAssets,
   };
@@ -2181,6 +2406,7 @@ export async function runStage4Revision(
   validation: ValidationReport | null | undefined,
   promptOpts?: PromptBuildOptions,
   telemetry?: StageTelemetry,
+  anchorSummary?: DraftAnchorsSummary | null,
 ): Promise<Stage4RevisionResult> {
   const clueGraph = buildClueGraphFromOutline(outline);
   const denouementScript = planDenouement(outline, storyDraft, clueGraph);
@@ -2210,6 +2436,22 @@ export async function runStage4Revision(
   }
 
   const plan = deriveRevisionPlan(reviewWorking, validation);
+  if (anchorSummary && Array.isArray(anchorSummary.unresolvedClues) && anchorSummary.unresolvedClues.length > 0) {
+    const detail = `以下线索仍未在正文找到锚点：${anchorSummary.unresolvedClues.join('、')}，请在对应章节补齐显式呈现。`;
+    plan.mustFix.push({
+      id: 'anchor-unresolved-clues',
+      detail,
+      category: 'fair_play',
+    });
+  }
+  if (anchorSummary && Array.isArray(anchorSummary.unresolvedInferences) && anchorSummary.unresolvedInferences.length > 0) {
+    const detail = `以下推论尚未在正文落地：${anchorSummary.unresolvedInferences.join('、')}，补写支持该推论的场景或对白。`;
+    plan.mustFix.push({
+      id: 'anchor-unresolved-inferences',
+      detail,
+      category: 'structure',
+    });
+  }
   if (plantIssues.length > 0) {
     plantIssues.forEach((detail, index) => {
       plan.mustFix.push({
@@ -2653,4 +2895,27 @@ export async function runSceneEditing(chapter: { title: string; content: string;
 
   const approxWordCount = editedText ? editedText.replace(/\s+/g, '').length : (chapter.wordCount ?? 0);
   return { ...chapter, content: editedText, wordCount: approxWordCount };
+}
+function buildChapterEvidencePack(
+  outline: DetectiveOutline,
+  draft: DetectiveStoryDraft,
+  chapterIndex: number,
+  maxChars = 2800,
+): string {
+  const suspectsLine = suspectsSummary(outline);
+  const chapters = Array.isArray(draft?.chapters) ? draft.chapters : [];
+  const slices: string[] = [];
+  const limit = Math.max(0, chapterIndex);
+  for (let i = 0; i <= limit && i < chapters.length; i += 1) {
+    const chapter = chapters[i];
+    if (!chapter?.content) continue;
+    const label = `【第${i + 1}章】${chapter.title ?? ''}`;
+    slices.push(`${label}\n${chapter.content}`);
+  }
+  let combined = slices.join('\n\n---\n\n');
+  if (combined.length > maxChars) {
+    const head = combined.slice(-maxChars);
+    combined = head;
+  }
+  return [`嫌疑人一览：`, suspectsLine, '', '章节节选：', combined].join('\n');
 }

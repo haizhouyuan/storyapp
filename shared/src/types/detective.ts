@@ -107,6 +107,14 @@ export interface DetectiveStoryAudioAsset {
   metadata?: Record<string, unknown>;
 }
 
+export interface MotivePatchCandidate {
+  suspect: string;
+  keyword: string;
+  chapterIndex: number;
+  suggestedSentence: string;
+  status: 'pending' | 'applied';
+}
+
 export interface DetectiveStoryDraft {
   chapters: DetectiveChapter[];
   overallWordCount?: number;
@@ -114,6 +122,46 @@ export interface DetectiveStoryDraft {
   continuityNotes?: string[];
   revisionNotes?: DetectiveRevisionNote[];
   ttsAssets?: DetectiveStoryAudioAsset[];
+  motivePatchCandidates?: MotivePatchCandidate[];
+}
+
+export interface MysteryContractClause {
+  id: string;
+  title: string;
+  description: string;
+  category?: 'fair_play' | 'narrative' | 'pov' | 'spoiler_control' | string;
+}
+
+export interface MysteryContract {
+  id: string;
+  title: string;
+  detectiveCode?: string;
+  summary: string;
+  clauses: MysteryContractClause[];
+  observables?: string[];
+  enforcementNotes?: string[];
+  references?: string[];
+  version?: string;
+}
+
+export interface MysteryPatternTrick {
+  id: string;
+  label: string;
+  description: string;
+  requiredObservables?: string[];
+  verificationHints?: string[];
+}
+
+export interface MysteryPatternProfile {
+  id: string;
+  label: string;
+  synopsis: string;
+  trickSet: MysteryPatternTrick[];
+  structuralBeats?: string[];
+  constraints?: string[];
+  detectorHints?: string[];
+  compatibleMechanisms?: string[];
+  version?: string;
 }
 
 export type ClueType = 'true' | 'red_herring' | 'character';
@@ -205,6 +253,7 @@ export interface GateLog {
   verdict: GateVerdict;
   reason?: string;
   metrics?: Record<string, number | string>;
+  nextAction?: 'none' | 'auto_patch' | 'notify';
   durationMs?: number;
   tokens?: {
     input?: number;
@@ -237,11 +286,27 @@ export interface Stage3AnalysisSnapshot {
   hypotheses?: HypothesisEvaluation;
 }
 
+export interface LightHypothesisSnapshot {
+  chapterIndex: number;
+  rank: Array<{ name: string; score: number; evidenceIds: string[] }>;
+  generatedAt: string;
+}
+
 export interface ClueGraphSnapshot {
   generatedAt: string;
   graph: ClueGraph;
   report: FairPlayReport;
   version?: string;
+}
+
+export interface DraftAnchorsSummary {
+  chapterCount: number;
+  mappedClues: number;
+  unresolvedClues: string[];
+  mappedFacts: number;
+  mappedInferences: number;
+  unresolvedInferences: string[];
+  updatedAt: string;
 }
 
 export type DetectiveWorkflowMeta = {
@@ -252,6 +317,10 @@ export type DetectiveWorkflowMeta = {
   stageResults?: {
     stage3?: Stage3AnalysisSnapshot;
   };
+  mysteryContract?: MysteryContract;
+  mysteryPattern?: MysteryPatternProfile;
+  anchorsSummary?: DraftAnchorsSummary;
+  lightHypotheses?: LightHypothesisSnapshot[];
 } & Record<string, unknown>;
 
 export interface ValidationRuleDetail {

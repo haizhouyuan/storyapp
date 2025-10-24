@@ -639,6 +639,19 @@ export function buildStage4RevisionPrompt(
   const requiresEmotions = mustFixRuleIds.includes('emotional-beats');
   const requiresMisdirection = mustFixRuleIds.includes('misdirection-deployment');
   const requiresEnding = mustFixRuleIds.includes('ending-resolution');
+  const pendingMotiveCandidates = Array.isArray(draftJson.motivePatchCandidates)
+    ? draftJson.motivePatchCandidates.filter((candidate) => candidate.status === 'pending')
+    : [];
+  const motiveCandidateText = pendingMotiveCandidates.length
+    ? pendingMotiveCandidates
+        .map(
+          (candidate, idx) =>
+            `${idx + 1}. Chapter ${candidate.chapterIndex + 1}｜${candidate.suspect || '嫌疑人'}｜关键词「${
+              candidate.keyword
+            }」→ ${candidate.suggestedSentence}`,
+        )
+        .join('\n')
+    : '（无）';
   const criticalLines = [
     requiresTimeline
       ? '为所有章节首段补写 DayX HH:MM 的自然语言时间提示，并对照 timeline 更新 continuityNotes 说明理由。'
@@ -681,6 +694,9 @@ ${formatRevisionItems(plan.warnings)}
 可选优化建议：
 ${plan.suggestions.length ? plan.suggestions.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '（无）'}
 
+动机伏笔候选（可基于下述提示改写为自然场景）：
+${motiveCandidateText}
+
 重点修复提示：
 ${criticalGuidance}
 
@@ -688,7 +704,7 @@ ${criticalGuidance}
 1. 必须逐条解决 Must Fix 问题，并优先完成“重点修复提示”中的校验项目；若存在时间线或线索矛盾，请在正文修正并记录 revisionNotes。
 2. 优先处理逻辑与公平性相关警告；若发现原始大纲信息不足，可在 continuityNotes 中记录补充设定，但正文必须自洽。
 3. 仅在必要章节进行增删改，保持原有结构与篇幅；禁止删除已确认的关键线索。
-4. 若需补写时间或动机伏笔，请在章节首段与 Chapter 1-2 中自然融入 DayX HH:MM 与动机关键词，并同步更新 cluesEmbedded/redHerringsEmbedded 与 continuityNotes。
+4. 若需补写时间或动机伏笔，请在章节首段与 Chapter 1-2 中自然融入 DayX HH:MM 与动机关键词，可参考“动机伏笔候选”列表，并同步更新 cluesEmbedded/redHerringsEmbedded 与 continuityNotes。
 5. 使用第三人称中文叙述，保持 middle_grade 读者可读性；新增线索或伏笔后需更新相关字段。
 6. 输出完整的故事 JSON，字段同 Stage2（chapters、overallWordCount、narrativeStyle、continuityNotes），并额外提供 revisionNotes 描述所做改动。
 仅返回 JSON。`.trim();
@@ -716,6 +732,19 @@ export function buildStage4RevisionPromptProfile(
   const requiresEmotions = mustFixRuleIds.includes('emotional-beats');
   const requiresMisdirection = mustFixRuleIds.includes('misdirection-deployment');
   const requiresEnding = mustFixRuleIds.includes('ending-resolution');
+  const pendingMotiveCandidates = Array.isArray(draftJson.motivePatchCandidates)
+    ? draftJson.motivePatchCandidates.filter((candidate) => candidate.status === 'pending')
+    : [];
+  const motiveCandidateText = pendingMotiveCandidates.length
+    ? pendingMotiveCandidates
+        .map(
+          (candidate, idx) =>
+            `${idx + 1}. Chapter ${candidate.chapterIndex + 1}｜${candidate.suspect || '嫌疑人'}｜关键词「${
+              candidate.keyword
+            }」→ ${candidate.suggestedSentence}`,
+        )
+        .join('\n')
+    : '（无）';
   const criticalLines = [
     requiresTimeline
       ? '补齐章节首段的 DayX HH:MM 时间提示，并在 Continuity Notes 记录差异原因。'
@@ -750,6 +779,9 @@ export function buildStage4RevisionPromptProfile(
     '',
     '可选建议：',
     plan.suggestions.length ? plan.suggestions.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '（无）',
+    '',
+    '动机伏笔候选（可基于下述提示改写为自然场景）：',
+    motiveCandidateText,
     '',
     '重点修复提示：',
     criticalGuidance,

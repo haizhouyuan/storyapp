@@ -47,6 +47,16 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
   const readingLevel = typeof vars.readingLevel === 'string' ? vars.readingLevel : undefined;
   const storyLength = typeof vars.storyLength === 'string' ? vars.storyLength : undefined;
   const wordsPerScene = get(vars, 'targets.wordsPerScene');
+  const contractSnippetRaw = typeof vars.mysteryContractSnippet === 'string'
+    ? String(vars.mysteryContractSnippet).trim()
+    : undefined;
+  const contractPrelude = contractSnippetRaw
+    ? [
+        '【创作契约与诡计模式（遵循福尔摩斯/波洛范式）】',
+        contractSnippetRaw,
+        '',
+      ]
+    : [];
 
   const blueprintSkeleton = [
     '{',
@@ -66,6 +76,7 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
   ].join('\n');
 
   const instructionLines: string[] = [
+    ...contractPrelude,
     `主题：${topic}`,
     '仅返回 StoryBlueprint JSON（禁止额外说明、注释或代码块）。',
     '必须包含字段：centralTrick、caseSetup、characters（≥6）、locations、acts（三幕）、clueMatrix、timeline（使用 "DayX HH:MM"）、solution、fairnessNotes、logicChecklist。',

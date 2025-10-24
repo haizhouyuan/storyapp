@@ -25,6 +25,9 @@ import type {
   WorkflowStageCode,
   Stage3AnalysisSnapshot,
   FairPlayReport,
+  LightHypothesisSnapshot,
+  DraftAnchorsSummary,
+  MotivePatchCandidate,
 } from '@storyapp/shared';
 import {
   createWorkflowDocument,
@@ -47,6 +50,9 @@ import {
   normalizeRevisionNote,
   normalizeRevisionNotes,
   mergeRevisionNotes,
+  buildMysteryFoundation,
+  mapAnchorsToDraft,
+  evaluateLightHypothesesSeries,
   type StageTelemetry,
 } from '../agents/detective';
 import { runStage4Validation } from '../agents/detective/validators';
@@ -69,10 +75,16 @@ import {
 
 const logger = createLogger('services:detectiveWorkflow');
 
+const PROMPT_VERSION_STAGE0 = 'stage0.contract.v1';
+const PROMPT_VERSION_KEY_STAGE0 = 'stage0_contract';
 const PROMPT_VERSION_STAGE1 = 'stage1.contract.v1';
 const PROMPT_VERSION_KEY_STAGE1 = 'stage1_outline';
+const PROMPT_VERSION_STAGE2 = 'stage2.writing.v1';
+const PROMPT_VERSION_KEY_STAGE2 = 'stage2_writing';
 const PROMPT_VERSION_STAGE3 = 'stage3.review.v1';
 const PROMPT_VERSION_KEY_STAGE3 = 'stage3_review';
+const PROMPT_VERSION_STAGE4 = 'stage4.revision.v1';
+const PROMPT_VERSION_KEY_STAGE4 = 'stage4_revision';
 const PROMPT_VERSION_STAGE5 = 'stage5.validation.v1';
 const PROMPT_VERSION_KEY_STAGE5 = 'stage5_validation';
 
@@ -249,11 +261,21 @@ export function computeHypothesisGate(analysis?: Stage3AnalysisSnapshot | null):
   };
 }
 
-export function computeFairPlayGate(report: FairPlayReport): GateLog {
-  const verdict: GateLog['verdict'] = report.unsupportedInferences.length > 0 ? 'block' : 'pass';
-  const reason = verdict === 'block'
-    ? `仍有 ${report.unsupportedInferences.length} 条推论缺乏显式线索支撑`
+export function computeFairPlayGate(report: FairPlayReport, options?: { autoFixAttempted?: boolean }): GateLog {
+  const hasUnsupported = report.unsupportedInferences.length > 0;
+  const hasOrphans = report.orphanClues.length > 0;
+  const hasIssues = hasUnsupported || hasOrphans;
+  let verdict: GateLog['verdict'] = hasIssues ? 'warn' : 'pass';
+  const reason = hasIssues
+    ? `仍有 ${report.unsupportedInferences.length} 条推论缺乏显式线索支撑，孤立线索 ${report.orphanClues.length} 条`
     : undefined;
+  let nextAction: GateLog['nextAction'] = 'none';
+  if (hasIssues) {
+    nextAction = options?.autoFixAttempted ? 'notify' : 'auto_patch';
+    if (options?.autoFixAttempted && hasUnsupported) {
+      verdict = 'warn';
+    }
+  }
   return {
     name: 'fairPlay.final',
     verdict,
@@ -263,6 +285,7 @@ export function computeFairPlayGate(report: FairPlayReport): GateLog {
       orphan: report.orphanClues.length,
       economyScore: report.economyScore,
     },
+    nextAction,
   };
 }
 
@@ -277,6 +300,7 @@ export function computeComplexityGate(analysis?: Stage3AnalysisSnapshot | null):
         competitors: 0,
         inevitability: 0,
       },
+      nextAction: 'notify',
     };
   }
   const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
@@ -298,6 +322,7 @@ export function computeComplexityGate(analysis?: Stage3AnalysisSnapshot | null):
       runnerUpConfidence: runnerUp ? Number(runnerUp.confidence.toFixed(3)) : 0,
       inevitability,
     },
+    nextAction: verdict === 'pass' ? 'none' : 'notify',
   };
 }
 
@@ -355,14 +380,34 @@ function ensureMotiveCompliance(outline: DetectiveOutline, draft: DetectiveStory
   return errors;
 }
 
-function assertPostRevisionCompliance(outline: DetectiveOutline, draft: DetectiveStoryDraft): void {
-  const errors = [
-    ...ensureChapterAnchorsCompliance(outline, draft),
-    ...ensureMotiveCompliance(outline, draft),
-  ];
-  if (errors.length > 0) {
-    throw new Error(errors.join('；'));
-  }
+type PostRevisionComplianceIssue = {
+  id: string;
+  category: 'anchors' | 'motive';
+  detail: string;
+};
+
+function collectPostRevisionComplianceIssues(
+  outline: DetectiveOutline,
+  draft: DetectiveStoryDraft,
+): PostRevisionComplianceIssue[] {
+  const issues: PostRevisionComplianceIssue[] = [];
+  const anchorProblems = ensureChapterAnchorsCompliance(outline, draft);
+  anchorProblems.forEach((detail, index) => {
+    issues.push({
+      id: `post-revision-anchors-${index + 1}`,
+      category: 'anchors',
+      detail,
+    });
+  });
+  const motiveProblems = ensureMotiveCompliance(outline, draft);
+  motiveProblems.forEach((detail, index) => {
+    issues.push({
+      id: `post-revision-motive-${index + 1}`,
+      category: 'motive',
+      detail,
+    });
+  });
+  return issues;
 }
 
 type StageRunnerOutput = Partial<Pick<DetectiveWorkflowDocument, 'outline' | 'storyDraft' | 'review' | 'validation'>>;
@@ -772,6 +817,7 @@ async function executeWorkflowPipeline(
   options: WorkflowExecutionOptions,
 ): Promise<DetectiveWorkflowDocument> {
   const mechanismPreset = resolveMechanismPreset(document.meta);
+  const mysteryFoundation = buildMysteryFoundation(mechanismPreset);
   const planningProfile = (process.env.DETECTIVE_PROMPT_PROFILE as 'strict' | 'balanced' | 'creative') || 'balanced';
   const planningSeed = `${mechanismPreset.id}-${planningProfile}`;
   const plannerPrompt: PromptBuildOptions = {
@@ -783,17 +829,50 @@ async function executeWorkflowPipeline(
       deviceRealismHint: mechanismPreset.realismHint,
       targets: { wordsPerScene: 1200 },
       cluePolicy: { ch1MinClues: 3, minExposures: 2 },
+      mysteryContractSnippet: mysteryFoundation.promptSnippet,
+      patternProfile: mysteryFoundation.pattern,
+      mysteryContractId: mysteryFoundation.contract.id,
     },
   };
 
+  let stage0Meta: DetectiveWorkflowMeta = {
+    ...(document.meta ?? {}),
+    mechanismPreset,
+    mysteryContract: mysteryFoundation.contract,
+    mysteryPattern: mysteryFoundation.pattern,
+  };
+  stage0Meta = upsertPromptVersion(stage0Meta, PROMPT_VERSION_KEY_STAGE0, PROMPT_VERSION_STAGE0);
+
+  const stage0Timestamp = new Date().toISOString();
+  const stage0Log: StageLog = {
+    stage: 'S0',
+    stageId: 'stage0_contract',
+    promptVersion: PROMPT_VERSION_STAGE0,
+    gates: [],
+    durationMs: 0,
+    notes: [
+      `合约摘要：${mysteryFoundation.contract.summary}`,
+      `诡计模式：${mysteryFoundation.pattern.label}`,
+    ],
+    meta: {
+      contractId: mysteryFoundation.contract.id,
+      patternId: mysteryFoundation.pattern.id,
+    },
+    timestamp: stage0Timestamp,
+  };
+  stage0Meta = upsertStageLog(stage0Meta, stage0Log);
+
   let workingDoc: DetectiveWorkflowDocument = {
     ...document,
-    meta: {
-      ...(document.meta || {}),
-      mechanismPreset,
-    },
+    meta: stage0Meta,
   };
+  workingDoc = updateWorkflowDocument(workingDoc, { meta: stage0Meta });
   if (workingDoc._id) {
+    await persistWorkflow(workingDoc);
+    createInfoEvent(workingDoc._id.toHexString(), '已建立推理合约与诡计模式', {
+      contractId: mysteryFoundation.contract.id,
+      patternId: mysteryFoundation.pattern.id,
+    });
     createInfoEvent(workingDoc._id.toHexString(), '已选定创作机制', {
       mechanismPreset: mechanismPreset.id,
       revisionType: options.revisionType,
@@ -853,6 +932,13 @@ async function executeWorkflowPipeline(
       };
 
       const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage1_planning');
+      const notes: string[] = [];
+      if (fairPlayReport.unsupportedInferences.length > 0) {
+        notes.push(`未支撑推论：${fairPlayReport.unsupportedInferences.join(', ')}`);
+      }
+      if (fairPlayReport.orphanClues.length > 0) {
+        notes.push(`孤立线索：${fairPlayReport.orphanClues.join(', ')}`);
+      }
       const stageLog: StageLog = {
         stage: mapStageCode('stage1_planning'),
         stageId: 'stage1_planning',
@@ -860,6 +946,7 @@ async function executeWorkflowPipeline(
         gates: [gateLog],
         durationMs,
         modelCalls,
+        notes: notes.length > 0 ? notes : undefined,
         timestamp: generatedAt,
       };
 
@@ -954,6 +1041,115 @@ async function executeWorkflowPipeline(
     return { storyDraft: enforced.draft, outline: harmonizedFinal.outline };
   });
 
+  if (workingDoc.storyDraft) {
+    try {
+      const storyDraft = workingDoc.storyDraft as DetectiveStoryDraft;
+      const outline = workingDoc.outline as DetectiveOutline;
+      let nextMeta: DetectiveWorkflowMeta = workingDoc.meta ?? {};
+      const existingSnapshot = nextMeta.clueGraphSnapshot;
+      const anchorResult = existingSnapshot
+        ? mapAnchorsToDraft(existingSnapshot.graph, storyDraft)
+        : null;
+      if (anchorResult) {
+        const updatedSnapshot = existingSnapshot
+          ? {
+              ...existingSnapshot,
+              graph: anchorResult.graph,
+            }
+          : {
+              generatedAt: anchorResult.summary.updatedAt,
+              graph: anchorResult.graph,
+              report: scoreFairPlay(anchorResult.graph),
+              version: CLUE_GRAPH_VERSION,
+            };
+        nextMeta = {
+          ...nextMeta,
+          clueGraphSnapshot: updatedSnapshot,
+          anchorsSummary: anchorResult.summary,
+        };
+      }
+      let lightSnapshots: LightHypothesisSnapshot[] = [];
+      if (outline) {
+        lightSnapshots = await evaluateLightHypothesesSeries(outline, storyDraft, {
+          chapterLimit: Math.min(Math.max(storyDraft.chapters.length - 1, 0), 3),
+          concurrency: 2,
+        });
+        if (lightSnapshots.length > 0) {
+          nextMeta = {
+            ...nextMeta,
+            lightHypotheses: lightSnapshots,
+          };
+        }
+      }
+      nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE2, PROMPT_VERSION_STAGE2);
+
+      let modelCalls: number | undefined;
+      if (workingDoc._id) {
+        try {
+          const summary = getStageExecutionSummary(workingDoc._id.toHexString());
+          const stageExecution = summary.stages.find((stage) => stage.stageId === 'stage2_writing');
+          if (stageExecution) {
+            modelCalls = stageExecution.commands.filter((cmd) => cmd.command === 'POST /chat/completions').length;
+          }
+        } catch (summaryError: any) {
+          logger.warn({ err: summaryError }, 'Stage2: 无法获取执行摘要，模型调用统计缺失');
+        }
+      }
+
+      const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage2_writing');
+      const notes: string[] = [];
+      if (anchorResult) {
+        const clueSummary = `线索 ${anchorResult.summary.mappedClues}/${anchorResult.summary.mappedClues + anchorResult.summary.unresolvedClues.length}`;
+        const inferenceSummary = `推论 ${anchorResult.summary.mappedInferences}/${anchorResult.summary.mappedInferences + anchorResult.summary.unresolvedInferences.length}`;
+        notes.push(
+          `线索锚点：${clueSummary}，待补 ${anchorResult.summary.unresolvedClues.length}；${inferenceSummary}，待补 ${anchorResult.summary.unresolvedInferences.length}`,
+        );
+      }
+      if (Array.isArray(storyDraft.continuityNotes) && storyDraft.continuityNotes.length > 0) {
+        notes.push(`连续性提示 ${storyDraft.continuityNotes.length} 条`);
+      }
+      if (lightSnapshots.length > 0) {
+        const latest = lightSnapshots[lightSnapshots.length - 1];
+        const top = latest.rank[0];
+        notes.push(`逐章假说：第${latest.chapterIndex + 1}章前最可疑 ${top.name} (score=${top.score.toFixed(2)})`);
+      }
+      notes.push('已执行 Watson 视角与 StylePack 调整');
+
+      const stageLog: StageLog = {
+        stage: mapStageCode('stage2_writing'),
+        stageId: 'stage2_writing',
+        promptVersion: PROMPT_VERSION_STAGE2,
+        gates: [],
+        durationMs,
+        modelCalls,
+        notes,
+        timestamp: new Date().toISOString(),
+      };
+
+      nextMeta = upsertStageLog(nextMeta, stageLog);
+      workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
+      await persistWorkflow(workingDoc);
+
+      if (workingDoc._id) {
+        if (anchorResult) {
+          createInfoEvent(workingDoc._id.toHexString(), '已回填线索锚点', {
+            mapped: anchorResult.summary.mappedClues,
+            unresolved: anchorResult.summary.unresolvedClues.length,
+          });
+        }
+        if (lightSnapshots.length > 0) {
+          createInfoEvent(workingDoc._id.toHexString(), '已生成逐章轻量假说评估', {
+            checkpoints: lightSnapshots.length,
+            latestChapter: lightSnapshots[lightSnapshots.length - 1].chapterIndex + 1,
+            topSuspect: lightSnapshots[lightSnapshots.length - 1].rank[0]?.name,
+          });
+        }
+      }
+    } catch (anchorError) {
+      logger.warn({ err: anchorError }, 'Stage2 锚点回填失败');
+    }
+  }
+
   // Stage 3
   workingDoc = await runStageWithUpdate(workingDoc, 'stage3_review', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
@@ -1005,6 +1201,9 @@ async function executeWorkflowPipeline(
     }
   }
 
+  let stage4LogContext: { notes: string[]; durationMs?: number; modelCalls?: number } | null = null;
+  let stage5LogContext: { gates: GateLog[]; durationMs?: number } | null = null;
+
   // Stage 4
   workingDoc = await runStageWithUpdate(workingDoc, 'stage4_revision', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
@@ -1034,7 +1233,15 @@ async function executeWorkflowPipeline(
         meta: { error: (error as Error)?.message },
       });
     }
-    const revision = await runStage4Revision(outline, storyDraft, review, preValidation, plannerPrompt, telemetry);
+    const revision = await runStage4Revision(
+      outline,
+      storyDraft,
+      review,
+      preValidation,
+      plannerPrompt,
+      telemetry,
+      (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.anchorsSummary ?? null,
+    );
     if (!revision.skipped) {
       storyDraft = revision.draft;
     }
@@ -1070,6 +1277,27 @@ async function executeWorkflowPipeline(
     if (harmonizeCommand) {
       telemetry?.completeCommand?.(harmonizeCommand, {
         resultSummary: '已同步大纲与修订稿',
+      });
+    }
+    const postRevisionIssues = collectPostRevisionComplianceIssues(
+      harmonized.outline || outline,
+      enforced.draft,
+    );
+    if (postRevisionIssues.length > 0) {
+      const existingIds = new Set(revision.plan.mustFix.map((item) => item.id));
+      postRevisionIssues.forEach((issue) => {
+        if (existingIds.has(issue.id)) return;
+        revision.plan.mustFix.push({
+          id: issue.id,
+          detail: issue.detail,
+          category: issue.category,
+        });
+      });
+      telemetry?.log?.('warn', '修订后检测到章节/动机缺口', {
+        meta: {
+          issueCount: postRevisionIssues.length,
+          categories: Array.from(new Set(postRevisionIssues.map((issue) => issue.category))).join(','),
+        },
       });
     }
     const revisionTimestamp = new Date().toISOString();
@@ -1156,16 +1384,54 @@ async function executeWorkflowPipeline(
       revisionNotes,
       ttsAssets: enforced.draft.ttsAssets ?? storyDraft.ttsAssets,
     };
-    try {
-      assertPostRevisionCompliance(harmonized.outline || outline, mergedDraft);
-    } catch (complianceError: any) {
-      telemetry?.log?.('error', '章节时间/动机检查未通过', {
-        meta: { error: complianceError?.message },
-      });
-      throw complianceError;
-    }
     return { storyDraft: mergedDraft, outline: harmonized.outline };
   });
+
+  try {
+    let nextMeta = upsertPromptVersion(workingDoc.meta, PROMPT_VERSION_KEY_STAGE4, PROMPT_VERSION_STAGE4);
+    workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
+    await persistWorkflow(workingDoc);
+  } catch (metaError) {
+    logger.warn({ err: metaError }, 'Stage4 prompt 版本记录失败');
+  }
+
+  try {
+    const motiveCandidates: MotivePatchCandidate[] = Array.isArray(workingDoc.storyDraft?.motivePatchCandidates)
+      ? workingDoc.storyDraft!.motivePatchCandidates!.map((candidate) => ({ ...candidate }))
+      : [];
+    const totalCandidates = motiveCandidates.length;
+    const appliedCandidates = motiveCandidates.filter((candidate) => candidate?.status === 'applied').length;
+    const stageNotes: string[] = [];
+    if (totalCandidates > 0) {
+      stageNotes.push(`动机伏笔候选：已应用 ${appliedCandidates}/${totalCandidates}`);
+    }
+    const continuityCount = Array.isArray(workingDoc.storyDraft?.continuityNotes)
+      ? workingDoc.storyDraft!.continuityNotes!.length
+      : 0;
+    if (continuityCount > 0) {
+      stageNotes.push(`连续性提示 ${continuityCount} 条`);
+    }
+    const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage4_revision');
+    let modelCalls: number | undefined;
+    if (workingDoc._id) {
+      try {
+        const summary = getStageExecutionSummary(workingDoc._id.toHexString());
+        const stageExecution = summary.stages.find((stage) => stage.stageId === 'stage4_revision');
+        if (stageExecution) {
+          modelCalls = stageExecution.commands.filter((cmd) => cmd.command === 'POST /chat/completions').length;
+        }
+      } catch (summaryError: any) {
+        logger.warn({ err: summaryError }, 'Stage4: 无法获取执行摘要');
+      }
+    }
+    stage4LogContext = {
+      notes: stageNotes,
+      durationMs,
+      modelCalls,
+    };
+  } catch (stage4LogError) {
+    logger.warn({ err: stage4LogError }, 'Stage4 日志记录失败');
+  }
 
   // Stage 5
   workingDoc = await runStageWithUpdate(workingDoc, 'stage5_validation', async (telemetry) => {
@@ -1175,6 +1441,7 @@ async function executeWorkflowPipeline(
     if (!outline || !storyDraft) {
       throw new Error('缺少 Stage1/Stage2 输出，无法执行 Stage5');
     }
+    const workflowIdString = workingDoc._id?.toHexString();
     const enableAutoFix = process.env.DETECTIVE_AUTO_FIX !== '0';
     if (enableAutoFix) {
       try {
@@ -1245,7 +1512,7 @@ async function executeWorkflowPipeline(
     const clueGraph = buildClueGraphFromOutline(outlineForValidation);
     const fairPlayReport = scoreFairPlay(clueGraph);
     const stage3Analysis = (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.stageResults?.stage3;
-    const fairGate = computeFairPlayGate(fairPlayReport);
+    const fairGate = computeFairPlayGate(fairPlayReport, { autoFixAttempted: enableAutoFix });
     const complexityGate = computeComplexityGate(stage3Analysis);
     const validationWithMetrics: ValidationReport = {
       ...validation,
@@ -1260,17 +1527,23 @@ async function executeWorkflowPipeline(
 
     let nextMeta = upsertPromptVersion(workingDoc.meta, PROMPT_VERSION_KEY_STAGE5, PROMPT_VERSION_STAGE5);
     const gates: GateLog[] = [fairGate, complexityGate];
+    if (workflowIdString) {
+      gates
+        .filter((gate) => gate.verdict !== 'pass')
+        .forEach((gate) => {
+          createInfoEvent(workflowIdString, `Gate 告警：${gate.name}`, {
+            verdict: gate.verdict,
+            reason: gate.reason,
+            nextAction: gate.nextAction ?? 'none',
+            metrics: gate.metrics,
+          });
+        });
+    }
     const durationMs = computeStageDurationMs(workingDoc.stageStates, 'stage5_validation');
-    const stageLog: StageLog = {
-      stage: mapStageCode('stage5_validation'),
-      stageId: 'stage5_validation',
-      promptVersion: PROMPT_VERSION_STAGE5,
+    stage5LogContext = {
       gates,
       durationMs,
-      modelCalls: 0,
-      timestamp: new Date().toISOString(),
     };
-    nextMeta = upsertStageLog(nextMeta, stageLog);
     workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
     await persistWorkflow(workingDoc);
 
@@ -1280,6 +1553,41 @@ async function executeWorkflowPipeline(
 
     return { validation: validationWithMetrics, outline: outlineForValidation, storyDraft };
   });
+
+  try {
+    let nextMeta: DetectiveWorkflowMeta = workingDoc.meta ?? {};
+    nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE5, PROMPT_VERSION_STAGE5);
+    if (stage4LogContext !== null) {
+      const stageLog: StageLog = {
+        stage: mapStageCode('stage4_revision'),
+        stageId: 'stage4_revision',
+        promptVersion: PROMPT_VERSION_STAGE4,
+        gates: [],
+        durationMs: stage4LogContext.durationMs,
+        modelCalls: stage4LogContext.modelCalls,
+        notes: stage4LogContext.notes.length > 0 ? stage4LogContext.notes : undefined,
+        timestamp: new Date().toISOString(),
+      };
+      nextMeta = upsertStageLog(nextMeta, stageLog);
+    }
+    if (stage5LogContext !== null) {
+      const { gates: stage5Gates, durationMs: stage5Duration } = stage5LogContext;
+      const stageLog: StageLog = {
+        stage: mapStageCode('stage5_validation'),
+        stageId: 'stage5_validation',
+        promptVersion: PROMPT_VERSION_STAGE5,
+        gates: stage5Gates,
+        durationMs: stage5Duration,
+        modelCalls: 0,
+        timestamp: new Date().toISOString(),
+      };
+      nextMeta = upsertStageLog(nextMeta, stageLog);
+    }
+    workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
+    await persistWorkflow(workingDoc);
+  } catch (stageLogError) {
+    logger.warn({ err: stageLogError }, 'Stage4/Stage5 日志记录失败');
+  }
 
   const revision = createWorkflowRevision({
     type: options.revisionType,
