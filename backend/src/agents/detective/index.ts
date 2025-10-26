@@ -6,3 +6,6 @@ export * from './structureToolkit';
 export * from './clueGraph';
 export * from './mysteryToolkit';
 export * from './anchorToolkit';
+export * from './complexityToolkit';
+export * from './characterToolkit';
+export * from './misdirectionToolkit';

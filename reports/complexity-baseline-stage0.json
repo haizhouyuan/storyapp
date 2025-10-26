@@ -1,0 +1,92 @@
+{
+  "generatedAt": "2025-10-25T13:45:27.882Z",
+  "sampleCount": 5,
+  "metrics": {
+    "clueDensity": {
+      "count": 3,
+      "average": 1,
+      "min": 1,
+      "max": 1
+    },
+    "clueCount": {
+      "count": 5,
+      "average": 3.2,
+      "min": 0,
+      "max": 4
+    },
+    "timelineCount": {
+      "count": 5,
+      "average": 4.4,
+      "min": 0,
+      "max": 7
+    },
+    "chapterCount": {
+      "count": 3,
+      "average": 4,
+      "min": 4,
+      "max": 4
+    },
+    "suspectCount": {
+      "count": 5,
+      "average": 2.4,
+      "min": 0,
+      "max": 3
+    }
+  },
+  "samples": [
+    {
+      "workflow": "6435b990-b75c-4877-b772-4ecab9fd4422-1760441455684",
+      "hasInteractive": true,
+      "chapterCount": null,
+      "clueCount": 0,
+      "clueDensity": null,
+      "timelineCount": 0,
+      "suspectCount": 0,
+      "notes": [
+        "无法识别章节数量（story.txt 不存在或缺少章节标题）"
+      ]
+    },
+    {
+      "workflow": "68f597243506cb6732668a65-1760926232767",
+      "hasInteractive": true,
+      "chapterCount": 4,
+      "clueCount": 4,
+      "clueDensity": 1,
+      "timelineCount": 7,
+      "suspectCount": 3,
+      "notes": []
+    },
+    {
+      "workflow": "68f61306866e2b688d6f02b8-1760957640681",
+      "hasInteractive": true,
+      "chapterCount": 4,
+      "clueCount": 4,
+      "clueDensity": 1,
+      "timelineCount": 6,
+      "suspectCount": 3,
+      "notes": []
+    },
+    {
+      "workflow": "68f61306866e2b688d6f02b8-1760957663224",
+      "hasInteractive": true,
+      "chapterCount": 4,
+      "clueCount": 4,
+      "clueDensity": 1,
+      "timelineCount": 6,
+      "suspectCount": 3,
+      "notes": []
+    },
+    {
+      "workflow": "manual-proj-1760444022505",
+      "hasInteractive": true,
+      "chapterCount": null,
+      "clueCount": 4,
+      "clueDensity": null,
+      "timelineCount": 3,
+      "suspectCount": 3,
+      "notes": [
+        "无法识别章节数量（story.txt 不存在或缺少章节标题）"
+      ]
+    }
+  ]
+}

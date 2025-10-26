@@ -76,8 +76,9 @@
           "mustForeshadow": { "type": "boolean" },
           "explicitForeshadowChapters": {
             "type": "array",
-            "items": { "type": "string", "enum": ["Chapter 1", "Chapter 2", "Chapter 3"] }
-          }
+            "items": { "type": "string" }
+          },
+          "isRedHerring": { "type": "boolean" }
         },
         "additionalProperties": true
       }
@@ -91,6 +92,107 @@
           "time": { "type": "string" },
           "event": { "type": "string" },
           "participants": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "actsCount": { "type": "integer", "minimum": 3 },
+    "falseSolution": { "type": "string" },
+    "twists": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "summary": { "type": "string" },
+              "chapter": { "type": "string" },
+              "type": { "type": "string" },
+              "impact": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "secondaryMysteries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question"],
+        "properties": {
+          "id": { "type": "string" },
+          "question": { "type": "string" },
+          "foreshadowing": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolution": { "type": "string" },
+          "payoffChapter": { "type": "string" },
+          "stakes": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "chapterAnchors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "chapter": { "type": "string" },
+          "dayCode": { "type": "string" },
+          "time": { "type": "string" },
+          "label": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "chapterBlueprints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "chapter": { "type": "string" },
+          "wordTarget": { "type": "integer" },
+          "conflictGoal": { "type": "string" },
+          "backgroundNeeded": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "emotionalBeat": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "emotionalBeats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "chapter": { "type": "string" },
+          "focus": { "type": "string" },
+          "delivery": { "type": "string" },
+          "keywords": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "misdirectionMoments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "chapter": { "type": "string" },
+          "setup": { "type": "string" },
+          "surfaceInterpretation": { "type": "string" },
+          "revealHint": { "type": "string" },
+          "suspect": { "type": "string" },
+          "intensity": { "type": "string" }
         },
         "additionalProperties": true
       }

@@ -12,6 +12,11 @@ export interface DetectiveCharacter {
   secrets?: string[];
   motiveKeywords?: string[];
   motiveScenes?: string[];
+  personality?: string;
+  arc?: string;
+  arcBeats?: DetectiveArcBeat[];
+  redHerring?: boolean;
+  traitKeywords?: string[];
 }
 
 export interface DetectiveActBeat {
@@ -19,12 +24,54 @@ export interface DetectiveActBeat {
   summary: string;
   cluesRevealed?: string[];
   redHerring?: string;
+  misleadPoint?: boolean;
+  emotionalShift?: string;
 }
 
 export interface DetectiveAct {
   act: number;
   focus: string;
   beats: DetectiveActBeat[];
+  payoff?: string;
+}
+
+export interface DetectiveArcBeat {
+  chapter?: string;
+  keyword?: string;
+  description?: string;
+  shift?: string;
+}
+
+export interface DetectiveSecondaryMystery {
+  id?: string;
+  question: string;
+  foreshadowing?: string[];
+  resolution?: string;
+  payoffChapter?: string;
+  stakes?: string;
+}
+
+export interface DetectiveTwist {
+  summary: string;
+  chapter?: string;
+  type?: string;
+  impact?: string;
+}
+
+export interface DetectiveEmotionalBeat {
+  chapter?: string;
+  focus?: string;
+  delivery?: string;
+  keywords?: string[];
+}
+
+export interface DetectiveMisdirectionMoment {
+  chapter?: string;
+  setup?: string;
+  surfaceInterpretation?: string;
+  revealHint?: string;
+  suspect?: string;
+  intensity?: 'low' | 'medium' | 'high' | string;
 }
 
 export interface DetectiveClue {
@@ -74,6 +121,12 @@ export interface DetectiveOutline {
   clueMatrix?: DetectiveClue[];
   locations?: DetectiveLocation[];
   timeline?: DetectiveTimelineEvent[];
+  actsCount?: number;
+  falseSolution?: string;
+  twists?: (string | DetectiveTwist)[];
+  secondaryMysteries?: DetectiveSecondaryMystery[];
+  emotionalBeats?: DetectiveEmotionalBeat[];
+  misdirectionMoments?: DetectiveMisdirectionMoment[];
   chapterAnchors?: DetectiveChapterAnchor[];
   chapterBlueprints?: Array<{
     chapter?: string;
@@ -82,6 +135,13 @@ export interface DetectiveOutline {
     backgroundNeeded?: string[];
     emotionalBeat?: string;
   }>;
+  solution?: {
+    culprit?: string;
+    motiveCore?: string;
+    keyReveals?: string[];
+    fairnessChecklist?: string[];
+  };
+  fairnessNotes?: string[];
   themes?: string[];
   logicChecklist?: string[];
 }
@@ -341,6 +401,7 @@ export interface Stage4RevisionSnapshot {
 export interface Stage5GateSnapshot {
   gates: GateLog[];
   generatedAt: string;
+  notes?: string[];
 }
 
 export interface LightHypothesisSnapshot {

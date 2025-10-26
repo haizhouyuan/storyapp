@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   deepseekClient,
   DEEPSEEK_CONFIG,
@@ -19,6 +21,7 @@ import type {
   DraftAnchorsSummary,
   MotivePatchCandidate,
   RevisionPlanSummary,
+  Stage3AnalysisSnapshot,
 } from '@storyapp/shared';
 import { createHash } from 'crypto';
 import {
@@ -35,13 +38,21 @@ import {
 } from './promptUtils';
 import { resolvePromptProfile } from './promptProfiles';
 import type { PromptBuildOptions } from './promptBuilder';
-import { buildWriterPrompt, buildEditorPrompt } from './promptBuilder';
+import { buildWriterPrompt, buildEditorPrompt, buildPlannerAdvisorPrompt } from './promptBuilder';
 import { validateDetectiveOutline } from '../../utils/schemaValidator';
 import { createQuickOutline, synthMockChapter } from './mockUtils';
 import { buildClueGraphFromOutline, scoreFairPlay, CLUE_GRAPH_VERSION } from './clueGraph';
 import { enforceFocalization, applyStylePackToDraft, throttleTemplates, applyClicheGuard } from './styleToolkit';
 import { planDenouement, assertPlantPayoffCompleteness } from './structureToolkit';
 import { runStage4Validation } from './validators';
+import { assessOutlineComplexity } from './complexityToolkit';
+import {
+  ensureSuspectPersonas,
+  enhanceCharacterIntroductions as enhanceIntroForCharacters,
+  evaluateArcBeats,
+} from './characterToolkit';
+import { generateRedHerringSuggestions, appendRedHerringSuggestionsToPlan } from './misdirectionToolkit';
+import { analyzeNarrativeRhythm, NarrativeRhythmReport } from './rhythmToolkit';
 
 const logger = createLogger('detective:stages');
 const lightHypothesisCache = new Map<string, { inserted: number; ranks: LightHypothesisRank[] }>();
@@ -94,8 +105,104 @@ const KEYWORD_STOP_TERMS = [
 
 const REVISION_NOTE_CATEGORY_VALUES: DetectiveRevisionNoteCategory[] = ['model', 'system', 'validation', 'manual'];
 
+const METRICS_DISABLED = process.env.DETECTIVE_METRICS_DISABLE === '1';
+const METRICS_DIR = path.resolve(
+  process.cwd(),
+  process.env.DETECTIVE_METRICS_DIR || path.join('reports', 'telemetry'),
+);
+const METRICS_RETENTION = Number.parseInt(process.env.DETECTIVE_METRICS_RETENTION || '50', 10);
+
+function pruneStageMetrics(dir: string, limit: number) {
+  try {
+    const files = fs.readdirSync(dir).filter((file) => file.endsWith('.json')).sort();
+    if (files.length <= limit) return;
+    const overflow = files.length - limit;
+    for (let i = 0; i < overflow; i += 1) {
+      const file = path.join(dir, files[i]);
+      fs.unlinkSync(file);
+    }
+  } catch (error) {
+    logger.warn({ err: error instanceof Error ? error.message : String(error) }, '清理历史 telemetry 文件失败');
+  }
+}
+
+function persistStageMetrics(stage: string, payload: Record<string, unknown>) {
+  if (METRICS_DISABLED) return;
+  try {
+    fs.mkdirSync(METRICS_DIR, { recursive: true });
+    const filename = `${String(payload.generatedAt ?? new Date().toISOString()).replace(/[:.]/g, '-')}-${stage}.json`;
+    const filePath = path.join(METRICS_DIR, filename);
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+    pruneStageMetrics(METRICS_DIR, Number.isFinite(METRICS_RETENTION) ? Math.max(METRICS_RETENTION, 1) : 50);
+  } catch (error) {
+    logger.warn({ err: error instanceof Error ? error.message : String(error) }, '写入阶段 telemetry 失败');
+  }
+}
+
+function recordStageMetrics(
+  stage: string,
+  metrics: Record<string, unknown>,
+  telemetry?: StageTelemetry,
+) {
+  const generatedAt = new Date().toISOString();
+  const payload = { stage, generatedAt, metrics };
+  telemetry?.registerArtifact?.({
+    label: `stage-metrics.${stage}`,
+    type: 'json',
+    preview: JSON.stringify(payload, null, 2),
+    meta: { stage, generatedAt },
+  });
+  persistStageMetrics(stage, payload);
+}
+
 function isRevisionNoteCategory(value: unknown): value is DetectiveRevisionNoteCategory {
   return typeof value === 'string' && REVISION_NOTE_CATEGORY_VALUES.includes(value as DetectiveRevisionNoteCategory);
+}
+
+function resolveDifficulty(promptOpts?: PromptBuildOptions): 'easy' | 'standard' | 'hard' {
+  const vars = promptOpts?.vars;
+  const extract = (input: unknown): string | null => {
+    if (typeof input === 'string' && input.trim()) return input.trim().toLowerCase();
+    return null;
+  };
+  if (vars && typeof vars === 'object') {
+    const direct = extract((vars as any).difficulty);
+    if (direct) return direct === 'hard' || direct === 'advanced' ? 'hard' : direct === 'easy' ? 'easy' : 'standard';
+    const workflow = extract((vars as any)?.workflow?.difficulty);
+    if (workflow) return workflow === 'hard' || workflow === 'advanced' ? 'hard' : workflow === 'easy' ? 'easy' : 'standard';
+  }
+  return 'standard';
+}
+
+function getBetaThreshold(difficulty: 'easy' | 'standard' | 'hard'): number {
+  switch (difficulty) {
+    case 'easy':
+      return 0.9;
+    case 'hard':
+      return 0.7;
+    default:
+      return 0.85;
+  }
+}
+
+type PlannerAdvisorPatch = Partial<
+  Pick<
+    DetectiveOutline,
+    | 'actsCount'
+    | 'falseSolution'
+    | 'twists'
+    | 'secondaryMysteries'
+    | 'misdirectionMoments'
+    | 'emotionalBeats'
+    | 'fairnessNotes'
+    | 'logicChecklist'
+  >
+>;
+
+interface PlannerAdvisorOutput {
+  diagnostics?: string[];
+  patch?: PlannerAdvisorPatch;
+  notes?: string[];
 }
 
 type RevisionNoteInput = string | Partial<DetectiveRevisionNote> | null | undefined;
@@ -258,6 +365,38 @@ function ensureApiKey() {
   }
 }
 
+export async function runStage5RhythmAnalysis(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+  options?: { applyPolish?: boolean },
+  telemetry?: StageTelemetry,
+): Promise<NarrativeRhythmReport> {
+  const applyPolish = options?.applyPolish === true || process.env.DETECTIVE_STAGE5_POLISH === '1';
+  telemetry?.log?.('info', '阶段五：节奏与语言观察', {
+    meta: { applyPolish },
+  });
+  const report = analyzeNarrativeRhythm(outline, storyDraft, { applyPolish });
+  telemetry?.registerArtifact?.({
+    label: 'Stage5 节奏指标',
+    type: 'json',
+    preview: JSON.stringify(report.metrics, null, 2),
+    meta: {
+      suspenseChapters: report.suspenseChapters,
+      notes: report.notes,
+    },
+  });
+  if (applyPolish && report.metrics.figurativeReplacements > 0) {
+    telemetry?.log?.('info', 'Stage5 已自动替换部分陈词滥调', {
+      meta: { replacements: report.metrics.figurativeReplacements },
+    });
+  }
+  recordStageMetrics('stage5_rhythm', {
+    ...report.metrics,
+    suspenseChapters: report.suspenseChapters,
+  }, telemetry);
+  return report;
+}
+
 const defaultCallDeepseek: DeepseekExecutor = async (options) => {
   ensureApiKey();
 
@@ -343,6 +482,76 @@ callDeepseekDelegate = defaultCallDeepseek;
 
 async function callDeepseek(options: DeepseekCallOptions): Promise<DeepseekCallResult> {
   return callDeepseekDelegate(options);
+}
+
+function cloneJson<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+function mergePlannerAdvisorPatch(outline: DetectiveOutline, patch?: PlannerAdvisorPatch | null): {
+  outline: DetectiveOutline;
+  applied: boolean;
+} {
+  if (!patch) {
+    return { outline, applied: false };
+  }
+  const merged: DetectiveOutline = { ...outline };
+  let applied = false;
+
+  const assignNumber = (key: keyof DetectiveOutline, value?: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const normalized = Math.max(3, Math.floor(value));
+      if ((merged as any)[key] !== normalized) {
+        (merged as any)[key] = normalized;
+        applied = true;
+      }
+    }
+  };
+  const assignString = (key: keyof DetectiveOutline, value?: unknown) => {
+    if (typeof value === 'string' && value.trim()) {
+      const trimmed = value.trim();
+      if ((merged as any)[key] !== trimmed) {
+        (merged as any)[key] = trimmed;
+        applied = true;
+      }
+    }
+  };
+  const assignArray = (key: keyof DetectiveOutline, value?: unknown) => {
+    if (Array.isArray(value) && value.length > 0) {
+      const snapshot = cloneJson(value);
+      (merged as any)[key] = snapshot;
+      applied = true;
+    }
+  };
+  const mergeStringArray = (key: keyof DetectiveOutline, value?: unknown) => {
+    if (!Array.isArray(value)) {
+      return;
+    }
+    const existing = Array.isArray((merged as any)[key]) ? ((merged as any)[key] as unknown[]) : [];
+    const normalizedExisting = existing
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item): item is string => item.length > 0);
+    const normalizedIncoming = value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item): item is string => item.length > 0);
+    if (!normalizedIncoming.length) {
+      return;
+    }
+    const next = Array.from(new Set([...normalizedExisting, ...normalizedIncoming]));
+    (merged as any)[key] = next;
+    applied = true;
+  };
+
+  assignNumber('actsCount', patch.actsCount);
+  assignString('falseSolution', patch.falseSolution);
+  assignArray('twists', patch.twists);
+  assignArray('secondaryMysteries', patch.secondaryMysteries);
+  assignArray('misdirectionMoments', patch.misdirectionMoments);
+  assignArray('emotionalBeats', patch.emotionalBeats);
+  mergeStringArray('fairnessNotes', patch.fairnessNotes);
+  mergeStringArray('logicChecklist', patch.logicChecklist);
+
+  return { outline: merged, applied };
 }
 
 function clampConfidence(value: unknown): number {
@@ -651,6 +860,8 @@ export const __testing = {
   runLightHypothesisEvalForTest: runLightHypothesisEval,
   ensureEndingResolutionForTest: ensureEndingResolution,
   buildEndingResolutionParagraphForTest: buildEndingResolutionParagraph,
+  insertMotiveSentenceIntoChapterForTest: insertMotiveSentenceIntoChapter,
+  applyMotiveCandidatesToDraftForTest: applyMotiveCandidatesToDraft,
 };
 function extractJson(content: string): any {
   const cleaned = String(content || '')
@@ -1534,6 +1745,83 @@ function insertSentenceAfterIntro(content: string | undefined, sentence: string)
   return `${normalizedSentence}\n${trimmed}`;
 }
 
+const SENTENCE_BOUNDARY = /[。！？!?]/;
+const TRAILING_WRAPPERS = /[”’"'）)】》』〕]/;
+
+function findSentenceBoundary(text: string, startIndex: number): number {
+  for (let idx = Math.max(0, startIndex); idx < text.length; idx += 1) {
+    const char = text[idx];
+    if (char === '\n') {
+      let cursor = idx;
+      while (cursor < text.length && text[cursor] === '\n') {
+        cursor += 1;
+      }
+      return cursor;
+    }
+    if (SENTENCE_BOUNDARY.test(char)) {
+      let cursor = idx + 1;
+      while (cursor < text.length && TRAILING_WRAPPERS.test(text[cursor])) {
+        cursor += 1;
+      }
+      while (cursor < text.length && text[cursor] === ' ') {
+        cursor += 1;
+      }
+      return cursor;
+    }
+  }
+  return text.length;
+}
+
+function insertMotiveSentenceIntoChapter(options: {
+  content: string | undefined;
+  sentence: string;
+  suspect?: string;
+  keyword?: string;
+}): { text: string; inserted: boolean } {
+  const { content, sentence, suspect, keyword } = options;
+  const base = content ?? '';
+  const normalizedSentence = ensureSentence(sentence);
+  if (!normalizedSentence) {
+    return { text: base, inserted: false };
+  }
+  if (!base.trim()) {
+    return { text: normalizedSentence, inserted: true };
+  }
+  if (base.includes(normalizedSentence)) {
+    return { text: base, inserted: false };
+  }
+  const alias = deriveKeywordAlias(keyword ?? '');
+  const cues = Array.from(
+    new Set(
+      [suspect, keyword, alias.short, alias.subject]
+        .map((cue) => (typeof cue === 'string' ? cue.trim() : ''))
+        .filter((cue) => cue.length > 0),
+    ),
+  );
+  for (const cue of cues) {
+    const cueIndex = base.indexOf(cue);
+    if (cueIndex === -1) {
+      continue;
+    }
+    const insertionIndex = findSentenceBoundary(base, cueIndex + cue.length);
+    const prefix = base.slice(0, insertionIndex);
+    const suffix = base.slice(insertionIndex);
+    const needsLeadingNewline = prefix.length > 0 && !prefix.endsWith('\n');
+    const needsTrailingNewline = suffix.length > 0 && !suffix.startsWith('\n');
+    const textSegment = [
+      prefix,
+      needsLeadingNewline ? '\n' : '',
+      normalizedSentence,
+      needsTrailingNewline ? '\n' : '',
+      suffix,
+    ]
+      .join('')
+      .replace(/\n{3,}/g, '\n\n');
+    return { text: textSegment, inserted: true };
+  }
+  return { text: base, inserted: false };
+}
+
 const META_SENTENCE_PATTERNS: RegExp[] = [
   /[“"']?侦探暗自记下[:：][^。！？!?]*[。！？!?]?/g,
   /[“"']?侦探立即记录在案[^。！？!?]*[。！？!?]?/g,
@@ -1922,14 +2210,29 @@ function applyMotiveCandidatesToDraft(
     if (!sentence) {
       return candidate;
     }
-    const updatedContent = insertSentenceAfterIntro(chapter.content, sentence);
-    if (updatedContent !== chapter.content) {
+    let updatedContent: string | null = null;
+    const contextual = insertMotiveSentenceIntoChapter({
+      content: chapter.content,
+      sentence,
+      suspect: candidate.suspect,
+      keyword,
+    });
+    if (contextual.inserted) {
+      updatedContent = contextual.text;
+      notes.push(`自动插入动机伏笔：${keyword || '关键提示'} → Chapter ${idx + 1}（对齐相关段落）`);
+    } else {
+      const fallback = insertSentenceAfterIntro(chapter.content, sentence);
+      if (fallback !== chapter.content) {
+        updatedContent = fallback;
+        notes.push(`自动插入动机伏笔：${keyword || '关键提示'} → Chapter ${idx + 1}`);
+      }
+    }
+    if (updatedContent) {
       chapters[idx] = {
         ...chapter,
         content: updatedContent,
         wordCount: updatedContent.replace(/\s+/g, '').length,
       };
-      notes.push(`自动插入动机伏笔：${keyword || '关键提示'} → Chapter ${idx + 1}`);
       return { ...candidate, status: 'applied' as const };
     }
     return candidate;
@@ -2111,6 +2414,16 @@ export async function runStage1Planning(
     });
   }
 
+  const approxPromptTokens = Math.ceil(prompt.length / 2);
+  if (approxPromptTokens > DETECTIVE_CONFIG.maxTokens * 0.85) {
+    telemetry?.log?.('warn', 'Stage1 Prompt 接近 token 上限，请关注字段长度约束', {
+      meta: {
+        approxTokens: approxPromptTokens,
+        maxTokens: DETECTIVE_CONFIG.maxTokens,
+      },
+    });
+  }
+
   const strict = process.env.DETECTIVE_STRICT_SCHEMA === '1';
   const RETRIES = 3;
   for (let attempt = 0; attempt < RETRIES; attempt += 1) {
@@ -2167,7 +2480,8 @@ export async function runStage1Planning(
         });
         const outlineWithNames = ensureChineseNames(outlineRaw);
         const outlineWithMotives = ensureSuspectMotiveMetadata(outlineWithNames);
-        const outline = ensureChapterBlueprints(outlineWithMotives);
+        const outlineWithBlueprints = ensureChapterBlueprints(outlineWithMotives);
+        const outline = ensureSuspectPersonas(outlineWithBlueprints);
         if (normalizeCommand) {
           telemetry?.completeCommand?.(normalizeCommand, {
             resultSummary: `角色 ${outline.characters?.length ?? 0} 人`,
@@ -2276,7 +2590,94 @@ export async function runStage1Planning(
           });
         }
 
-        return outline;
+        const advisorOutcome = await runPlannerAdvisorStage(outline, promptOpts, strict, telemetry);
+        let workingOutline = advisorOutcome.outline;
+        if (advisorOutcome.applied) {
+          telemetry?.log?.('info', 'Stage1.5 顾问已应用补丁', {
+            meta: { diagnostics: advisorOutcome.diagnostics, notes: advisorOutcome.notes },
+          });
+        }
+
+        const complexityAssessment = assessOutlineComplexity(workingOutline);
+        telemetry?.registerArtifact?.({
+          label: 'Stage2 复杂度评估',
+          type: 'json',
+          preview: JSON.stringify(
+            {
+              metrics: complexityAssessment.metrics,
+              thresholds: complexityAssessment.thresholds,
+              lacking: complexityAssessment.lacking,
+              status: complexityAssessment.status,
+            },
+            null,
+            2,
+          ),
+        });
+
+        const shouldAutoRetry = process.env.DETECTIVE_COMPLEXITY_AUTO_RETRY !== '0';
+        if (shouldAutoRetry && complexityAssessment.status !== 'pass') {
+          telemetry?.log?.('warn', '蓝图复杂度不足，尝试一次自动补强', {
+            meta: { lacking: complexityAssessment.lacking },
+          });
+          const baseVars = promptOpts?.vars ? cloneJson(promptOpts.vars) : {};
+          const advisorVars = {
+            ...(baseVars as Record<string, unknown>),
+            advisor: {
+              ...(typeof (baseVars as any).advisor === 'object' ? cloneJson((baseVars as any).advisor) : {}),
+              deficits: complexityAssessment.lacking,
+              metrics: complexityAssessment.metrics,
+            },
+          };
+          const retryOpts: PromptBuildOptions = {
+            ...promptOpts,
+            vars: advisorVars,
+          };
+          const retryOutcome = await runPlannerAdvisorStage(workingOutline, retryOpts, strict, telemetry);
+          if (retryOutcome.applied) {
+            telemetry?.log?.('info', '复杂度补强已应用', {
+              meta: { diagnostics: retryOutcome.diagnostics, notes: retryOutcome.notes },
+            });
+            workingOutline = retryOutcome.outline;
+            const reassessed = assessOutlineComplexity(workingOutline);
+            telemetry?.registerArtifact?.({
+              label: 'Stage2 复杂度补强后评估',
+              type: 'json',
+              preview: JSON.stringify(
+                {
+                  metrics: reassessed.metrics,
+                  thresholds: reassessed.thresholds,
+                  lacking: reassessed.lacking,
+                  status: reassessed.status,
+                },
+                null,
+                2,
+              ),
+            });
+            if (reassessed.status !== 'pass') {
+              telemetry?.log?.('warn', '复杂度补强后仍未满足阈值，标记人工复核', {
+                meta: { lacking: reassessed.lacking },
+              });
+            }
+          } else {
+            telemetry?.log?.('warn', '复杂度补强未能应用补丁', {
+              meta: { diagnostics: retryOutcome.diagnostics },
+            });
+          }
+        } else if (complexityAssessment.status !== 'pass') {
+          telemetry?.log?.('warn', '复杂度评估未通过（自动补强关闭）', {
+            meta: { lacking: complexityAssessment.lacking },
+          });
+        }
+
+        recordStageMetrics('stage1_planning', {
+          actsCount: workingOutline.actsCount ?? (workingOutline.acts?.length ?? null),
+          characters: workingOutline.characters?.length ?? 0,
+          complexityStatus: complexityAssessment.status,
+          deficits: complexityAssessment.lacking,
+          advisorApplied: advisorOutcome.applied,
+        }, telemetry);
+
+        return workingOutline;
       } catch (parseError: any) {
         if (parseCommand) {
           telemetry?.failCommand?.(parseCommand, {
@@ -2458,6 +2859,19 @@ export async function runStage2Writing(
       stylisticNotes.push(...clicheResult.notes);
       workingDraft = clicheResult.draft;
 
+      const introCommand = telemetry?.beginCommand?.({
+        label: '增强角色首章描写',
+        command: 'enhanceCharacterIntroductions',
+      });
+      const introResult = enhanceIntroForCharacters(outline, workingDraft);
+      if (introCommand) {
+        telemetry?.completeCommand?.(introCommand, {
+          resultSummary: introResult.notes.length > 0 ? introResult.notes.join('；') : '首章无需补充',
+        });
+      }
+      stylisticNotes.push(...introResult.notes);
+      workingDraft = introResult.draft;
+
       const vars = (promptOpts?.vars || {}) as any;
       const pick = (o: any, keys: string[]) => {
         for (const k of keys) {
@@ -2536,6 +2950,13 @@ export async function runStage2Writing(
         ),
       });
 
+      recordStageMetrics('stage2_writing', {
+        chapters: storyDraft.chapters.length,
+        totalWords: storyDraft.overallWordCount ?? null,
+        stylisticNotes: continuityNotes.length,
+        dialoguesTarget,
+      }, telemetry);
+
       return storyDraft;
     } catch (err: any) {
       telemetry?.log?.('warn', '写作输出解析失败', {
@@ -2604,6 +3025,11 @@ export async function runStage3Review(
   logger.info({ usage }, 'Stage3 Review 完成');
   const review = extractJson(content) as Record<string, unknown>;
 
+  const difficulty = resolveDifficulty(promptOpts);
+  const betaThreshold = getBetaThreshold(difficulty);
+  telemetry?.log?.('info', 'Beta Reader 阈值设定', {
+    meta: { difficulty, betaThreshold },
+  });
   let betaInsight: BetaReaderInsight | null = null;
   const betaCommand = telemetry?.beginCommand?.({
     label: 'Beta Reader 解题模拟',
@@ -2628,11 +3054,12 @@ export async function runStage3Review(
       type: 'json',
       preview: JSON.stringify(betaInsight, null, 2),
     });
-    if (betaInsight.confidence >= 0.85 && (!betaInsight.competingSuspects || betaInsight.competingSuspects.length === 0)) {
+    const competingCount = Array.isArray(betaInsight.competingSuspects) ? betaInsight.competingSuspects.length : 0;
+    if (betaInsight.confidence >= betaThreshold && competingCount === 0) {
       const issues = Array.isArray((review as any).issues) ? ((review as any).issues as any[]) : [];
       issues.push({
         id: 'beta-reader-overconfidence',
-        detail: `Beta Reader 基于已公开章节已将 ${betaInsight.topSuspect} 判定为真凶（置信度 ${(betaInsight.confidence * 100).toFixed(0)}%），需补强误导或竞争线索。`,
+        detail: `Beta Reader 在难度「${difficulty}」下以 ${(betaInsight.confidence * 100).toFixed(0)}% 置信度锁定 ${betaInsight.topSuspect}（阈值 ${(betaThreshold * 100).toFixed(0)}%），需补强误导或竞争线索。`,
         severity: 'critical',
         category: 'uniqueness',
       });
@@ -2641,7 +3068,7 @@ export async function runStage3Review(
         ? ((review as any).mustFixBeforePublish as any[])
         : [];
       mustFixBeforePublish.push(
-        `Beta Reader 置信度 ${(betaInsight.confidence * 100).toFixed(0)}% 锁定 ${betaInsight.topSuspect}，请新增误导或替代嫌疑线索。`,
+        `Beta Reader 置信度 ${(betaInsight.confidence * 100).toFixed(0)}% 锁定 ${betaInsight.topSuspect}（难度 ${difficulty}），请新增误导或替代嫌疑线索。`,
       );
       (review as any).mustFixBeforePublish = Array.from(new Set(mustFixBeforePublish));
     }
@@ -2725,6 +3152,14 @@ export async function runStage3Review(
     (review as any).issues = reviewIssues;
   }
 
+  recordStageMetrics('stage3_review', {
+    difficulty,
+    betaThreshold,
+    betaConfidence: betaInsight ? Number(betaInsight.confidence.toFixed(3)) : null,
+    competingSuspects: Array.isArray(betaInsight?.competingSuspects) ? betaInsight!.competingSuspects.length : 0,
+    hypothesisCount: hypothesisEval?.candidates?.length ?? 0,
+  }, telemetry);
+
   telemetry?.registerArtifact?.({
     label: '阶段三审稿结果',
     type: 'json',
@@ -2741,6 +3176,7 @@ export async function runStage4Revision(
   promptOpts?: PromptBuildOptions,
   telemetry?: StageTelemetry,
   anchorSummary?: DraftAnchorsSummary | null,
+  stage3Analysis?: Stage3AnalysisSnapshot | null,
 ): Promise<Stage4RevisionResult> {
   const clueGraph = buildClueGraphFromOutline(outline);
   const denouementScript = planDenouement(outline, storyDraft, clueGraph);
@@ -2769,7 +3205,52 @@ export async function runStage4Revision(
     (reviewWorking as any).issues = reviewIssues;
   }
 
-  const plan = deriveRevisionPlan(reviewWorking, validation);
+  let plan = deriveRevisionPlan(reviewWorking, validation);
+  if (stage3Analysis) {
+    const beta = stage3Analysis.betaReader;
+    const hypo = stage3Analysis.hypotheses;
+    if (beta && beta.confidence >= 0.85 && (!Array.isArray(beta.competingSuspects) || beta.competingSuspects.length === 0)) {
+      plan.mustFix.push({
+        id: 'uniqueness-beta-reader-overconfidence',
+        detail: `Beta Reader 高置信度锁定 ${beta.topSuspect}，需补充误导或替代嫌疑场景。`,
+        category: 'uniqueness',
+      });
+    }
+    const candidateCount = hypo?.candidates?.length ?? 0;
+    if (candidateCount === 0) {
+      plan.mustFix.push({
+        id: 'uniqueness-missing-hypotheses',
+        detail: '多解竞争性评估缺失，请补写至少一名具有完整 M/M/O 线索的竞争嫌疑人。',
+        category: 'uniqueness',
+      });
+    } else if (candidateCount === 1) {
+      plan.warnings.push({
+        id: 'uniqueness-single-candidate',
+        detail: '当前仅有单一假设，请补充第二个可自洽的嫌疑线索以维持竞争。',
+        category: 'uniqueness',
+      });
+    }
+  }
+  const redHerringSuggestions = generateRedHerringSuggestions(outline, stage3Analysis, storyDraft);
+  if (redHerringSuggestions.length > 0) {
+    telemetry?.registerArtifact?.({
+      label: '红鲱鱼增强建议',
+      type: 'json',
+      preview: JSON.stringify(redHerringSuggestions, null, 2),
+    });
+    plan = appendRedHerringSuggestionsToPlan(plan, redHerringSuggestions);
+  }
+  const arcGaps = evaluateArcBeats(outline, storyDraft);
+  if (arcGaps.length > 0) {
+    arcGaps.forEach((gap, index) => {
+      const detail = `${gap.character} 在 ${gap.chapter} 缺少情感/弧线描写${gap.description ? `（${gap.description}）` : ''}`;
+      plan.mustFix.push({
+        id: `character-arc-${index + 1}`,
+        detail,
+        category: 'character',
+      });
+    });
+  }
   if (anchorSummary && Array.isArray(anchorSummary.unresolvedClues) && anchorSummary.unresolvedClues.length > 0) {
     const detail = `以下线索仍未在正文找到锚点：${anchorSummary.unresolvedClues.join('、')}，请在对应章节补齐显式呈现。`;
     plan.mustFix.push({
@@ -2810,6 +3291,14 @@ export async function runStage4Revision(
 
   if (!hasActionableIssues) {
     telemetry?.log?.('info', '审稿未要求必修修改，跳过自动修订');
+    recordStageMetrics('stage4_revision', {
+      mustFix: plan.mustFix.length,
+      warnings: plan.warnings.length,
+      suggestions: plan.suggestions.length,
+      redHerringSuggestions: redHerringSuggestions.length,
+      arcGaps: arcGaps.length,
+      skipped: true,
+    }, telemetry);
     return {
       draft: storyDraft,
       plan,
@@ -2952,6 +3441,17 @@ export async function runStage4Revision(
             category: 'structure',
           });
         }
+        const arcGapsAfter = evaluateArcBeats(outline, finalDraft);
+        if (arcGapsAfter.length > 0) {
+          arcGapsAfter.forEach((gap, index) => {
+            const detail = `${gap.character} 在 ${gap.chapter} 仍缺少弧线落实${gap.description ? `（${gap.description}）` : ''}`;
+            planAfterRevision.mustFix.push({
+              id: `character-arc-${index + 1}`,
+              detail,
+              category: 'character',
+            });
+          });
+        }
         if (plantIssues.length > 0) {
           plantIssues.forEach((detail, index) => {
             planAfterRevision.mustFix.push({
@@ -2963,6 +3463,16 @@ export async function runStage4Revision(
         }
         planAfterRevision.mustFix = dedupeIssues(planAfterRevision.mustFix);
         planAfterRevision.warnings = dedupeIssues(planAfterRevision.warnings);
+
+        recordStageMetrics('stage4_revision', {
+          mustFix: planAfterRevision.mustFix.length,
+          warnings: planAfterRevision.warnings.length,
+          suggestions: planAfterRevision.suggestions.length,
+          redHerringSuggestions: redHerringSuggestions.length,
+          arcGaps,
+          arcGapsAfter: arcGapsAfter.length,
+        }, telemetry);
+
         finalDraft = {
           ...finalDraft,
           revisionPlan: {
@@ -3325,4 +3835,109 @@ function buildChapterEvidencePack(
     combined = head;
   }
   return [`嫌疑人一览：`, suspectsLine, '', '章节节选：', combined].join('\n');
+}
+async function runPlannerAdvisorStage(
+  outline: DetectiveOutline,
+  promptOpts: PromptBuildOptions | undefined,
+  strictSchema: boolean,
+  telemetry?: StageTelemetry,
+): Promise<{ outline: DetectiveOutline; applied: boolean; diagnostics: string[]; notes: string[] }> {
+  if (process.env.DETECTIVE_SKIP_STAGE1_ADVISOR === '1') {
+    return { outline, applied: false, diagnostics: [], notes: [] };
+  }
+
+  const ctx = buildPlannerAdvisorPrompt(outline, promptOpts);
+  const commandId = telemetry?.beginCommand?.({
+    label: 'Stage1.5 剧情顾问分析',
+    command: 'plannerAdvisor',
+    meta: { hasCustomProfile: Boolean(promptOpts?.profile) },
+  });
+  try {
+    const { content, usage } = await callDeepseek({
+      model: DETECTIVE_CONFIG.planningModel,
+      temperature: Math.min(DETECTIVE_CONFIG.planningTemperature + 0.1, 0.6),
+      maxTokens: Math.min(DETECTIVE_CONFIG.maxTokens, 4096),
+      messages: [
+        { role: 'system', content: ctx.system },
+        { role: 'user', content: ctx.user },
+      ],
+    });
+    if (commandId) {
+      telemetry?.completeCommand?.(commandId, {
+        resultSummary: `获取建议 ${content.length} 字符`,
+        meta: { usage },
+      });
+    }
+
+    let advisor: PlannerAdvisorOutput | null = null;
+    try {
+      advisor = extractJson(content) as PlannerAdvisorOutput;
+    } catch (err: any) {
+      telemetry?.log?.('warn', 'Stage1.5 顾问输出解析失败（忽略补强）', {
+        commandId,
+        meta: { error: err?.message },
+      });
+      return { outline, applied: false, diagnostics: [], notes: [] };
+    }
+
+    const diagnostics = Array.isArray(advisor?.diagnostics)
+      ? advisor!.diagnostics!
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter((item): item is string => item.length > 0)
+      : [];
+    const notes = Array.isArray(advisor?.notes)
+      ? advisor!.notes!
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter((item): item is string => item.length > 0)
+      : [];
+
+    const { outline: mergedOutline, applied } = mergePlannerAdvisorPatch(outline, advisor?.patch);
+    if (!applied) {
+      telemetry?.registerArtifact?.({
+        label: 'Stage1.5 顾问反馈',
+        type: 'json',
+        commandId,
+        preview: JSON.stringify({ diagnostics, notes, applied: false }, null, 2),
+      });
+      return { outline, applied: false, diagnostics, notes };
+    }
+
+    const validation = validateDetectiveOutline(mergedOutline);
+    if (!validation.valid && strictSchema) {
+      telemetry?.log?.('warn', 'Stage1.5 顾问补丁未通过 Schema 校验（已跳过应用）', {
+        commandId,
+        meta: { errors: validation.errors },
+      });
+      return { outline, applied: false, diagnostics, notes };
+    }
+
+    telemetry?.registerArtifact?.({
+      label: 'Stage1.5 顾问补丁',
+      type: 'json',
+      commandId,
+      preview: JSON.stringify(
+        {
+          diagnostics,
+          notes,
+          patch: advisor?.patch ?? {},
+        },
+        null,
+        2,
+      ),
+    });
+
+    return { outline: mergedOutline, applied: true, diagnostics, notes };
+  } catch (err: any) {
+    if (commandId) {
+      telemetry?.failCommand?.(commandId, {
+        errorMessage: err?.message || 'Stage1.5 顾问调用失败',
+        meta: { code: err?.code },
+      });
+    }
+    telemetry?.log?.('warn', 'Stage1.5 顾问阶段失败（忽略补强）', {
+      commandId,
+      meta: { error: err?.message },
+    });
+    return { outline, applied: false, diagnostics: [], notes: [] };
+  }
 }

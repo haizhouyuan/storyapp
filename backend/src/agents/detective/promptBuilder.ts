@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { resolvePromptProfile, PromptProfileName, PromptProfile } from './promptProfiles';
+import type { DetectiveOutline } from '@storyapp/shared';
 
 export interface PromptBuildOptions {
   profile?: PromptProfileName;
@@ -61,12 +62,20 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
   const blueprintSkeleton = [
     '{',
     '  "title": "...",',
+    '  "actsCount": 3,',
     '  "centralTrick": { "summary": "...", "mechanism": "...", "fairnessNotes": ["..."] },',
     '  "caseSetup": { "victim": "...", "crimeScene": "...", "initialMystery": "..." },',
-    '  "characters": [ { "id": "c1", "name": "...", "role": "detective|suspect|victim|witness", "motive": "...", "secrets": ["..."] } ],',
+    '  "characters": [ { "id": "c1", "name": "...", "role": "detective|suspect|victim|witness", "motive": "...", "personality": "...", "arc": "...", "arcBeats": [ { "chapter": "Chapter 2", "description": "..." } ], "secrets": ["..."], "redHerring": false } ],',
     '  "locations": [ { "id": "L1", "name": "...", "kind": "..." } ],',
-    '  "acts": [ { "act": 1, "focus": "...", "beats": [ { "scene_id": "S1", "summary": "...", "cluesRevealed": ["..."], "redHerring": "..." } ] } ],',
-    '  "clueMatrix": [ { "clue": "...", "surfaceMeaning": "...", "realMeaning": "...", "appearsAtAct": 1, "mustForeshadow": true, "explicitForeshadowChapters": ["Chapter 1","Chapter 2"] } ],',
+    '  "secondaryMysteries": [ { "id": "M1", "question": "...", "foreshadowing": ["..."], "resolution": "...", "payoffChapter": "Chapter 3" } ],',
+    '  "falseSolution": "Chapter 3 侦探误指嫌疑人A，后在结局澄清其无罪。",',
+    '  "twists": [ "嫌疑人A的证词被推翻是真相突破口", { "summary": "密室是伪装，真正案发地点在地下室", "chapter": "Chapter 4" } ],',
+    '  "acts": [ { "act": 1, "focus": "...", "beats": [ { "scene_id": "S1", "summary": "...", "cluesRevealed": ["..."], "redHerring": "...", "misleadPoint": false } ] } ],',
+    '  "chapterAnchors": [ { "chapter": "Chapter 1", "dayCode": "Day1", "time": "10:00", "label": "...", "summary": "..." } ],',
+    '  "chapterBlueprints": [ { "chapter": "Chapter 1", "wordTarget": 1600, "conflictGoal": "...", "backgroundNeeded": ["..."], "emotionalBeat": "..." } ],',
+    '  "emotionalBeats": [ { "chapter": "Chapter 2", "focus": "侦探陷入怀疑", "delivery": "内心独白", "keywords": ["怀疑", "焦虑"] } ],',
+    '  "misdirectionMoments": [ { "chapter": "Chapter 2", "setup": "...", "surfaceInterpretation": "...", "revealHint": "...", "suspect": "...", "intensity": "medium" } ],',
+    '  "clueMatrix": [ { "clue": "...", "surfaceMeaning": "...", "realMeaning": "...", "appearsAtAct": 1, "mustForeshadow": true, "explicitForeshadowChapters": ["Chapter 1","Chapter 3"], "isRedHerring": false } ],',
     '  "timeline": [ { "time": "Day1 20:00", "event": "...", "participants": ["..."] } ],',
     '  "solution": { "culprit": "...", "motiveCore": "...", "keyReveals": ["..."], "fairnessChecklist": ["..."] },',
     '  "fairnessNotes": ["..."],',
@@ -79,12 +88,12 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
     ...contractPrelude,
     `主题：${topic}`,
     '仅返回 StoryBlueprint JSON（禁止额外说明、注释或代码块）。',
-    '必须包含字段：centralTrick、caseSetup、characters（≥6）、locations、acts（三幕）、clueMatrix、timeline（使用 "DayX HH:MM"）、solution、fairnessNotes、logicChecklist。',
-    '根级字段只能包含：title、centralTrick、caseSetup、characters、locations、acts、clueMatrix、timeline、solution、fairnessNotes、logicChecklist、themes。禁止添加其他根级键。',
+    '必须包含字段：centralTrick、caseSetup、characters（≥6）、locations、actsCount、acts、secondaryMysteries、falseSolution、twists、chapterAnchors、chapterBlueprints、emotionalBeats、misdirectionMoments、clueMatrix、timeline（使用 "DayX HH:MM"）、solution、fairnessNotes、logicChecklist、themes。',
+    '根级字段只能包含：title、actsCount、centralTrick、caseSetup、characters、locations、secondaryMysteries、falseSolution、twists、acts、chapterAnchors、chapterBlueprints、emotionalBeats、misdirectionMoments、clueMatrix、timeline、solution、fairnessNotes、logicChecklist、themes。禁止添加其他根级键。',
     '所有键名必须使用双引号包裹（例如 "locations": [...]），严禁出现 locations: [...]、acts: [...] 等未加引号的写法；所有字符串也必须使用双引号。',
     '即使某些字段暂时没有实体（如 fairnessNotes、logicChecklist、themes），也必须输出对应键并赋值为空数组 []，不得省略或保留空白。',
     'solution 字段必须完整给出 culptit、motiveCore、keyReveals、fairnessChecklist，并在其后紧跟 fairnessNotes、logicChecklist、themes 三个数组字段，顺序不可更改。',
-    '字段格式示例：centralTrick 要含 summary、mechanism、fairnessNotes；acts 是包含 act、focus、beats 的数组，其中 beats 需提供 scene_id、summary、cluesRevealed、redHerring；clueMatrix 要含 clue、surfaceMeaning、realMeaning、appearsAtAct、mustForeshadow、explicitForeshadowChapters（例如 ["Chapter 1","Chapter 2"]）。',
+    '字段格式示例：centralTrick 要含 summary、mechanism、fairnessNotes；acts 是包含 act、focus、beats 的数组，其中 beats 需提供 scene_id、summary、cluesRevealed、redHerring、misleadPoint；clueMatrix 要含 clue、surfaceMeaning、realMeaning、appearsAtAct、mustForeshadow、explicitForeshadowChapters（可写 "Chapter 1"~"Chapter 6"）、isRedHerring。',
     'timeline 必须为数组，每项包含 time（如 "Day1 20:00"）、event、participants（字符串数组，可写涉事角色或 "Chapter N"）。',
     '严格遵循以下 StoryBlueprint 骨架（字段不可缺失、不可改名、不可额外扩展）：',
     blueprintSkeleton,
@@ -102,6 +111,38 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
     instructionLines.push(`机关现实提示：${deviceRealismHint}`);
   }
   instructionLines.push('centralTrick.summary 与 centralTrick.mechanism 必须写成完整句子，严禁留空或使用“待定”等占位描述。');
+
+  const rawActsCountInput = get(vars, 'actsCount');
+  let actsCount: number | undefined;
+  if (typeof rawActsCountInput === 'number' && Number.isFinite(rawActsCountInput)) {
+    actsCount = rawActsCountInput;
+  } else if (typeof rawActsCountInput === 'string' && rawActsCountInput.trim()) {
+    const parsed = Number(rawActsCountInput.trim());
+    if (Number.isFinite(parsed)) {
+      actsCount = parsed;
+    }
+  }
+  if (typeof actsCount === 'number') {
+    actsCount = Math.max(3, Math.floor(actsCount));
+  }
+  const normalizedStoryLength = typeof storyLength === 'string' ? storyLength.toLowerCase() : '';
+  if (actsCount === undefined) {
+    if (normalizedStoryLength.includes('长') || normalizedStoryLength.includes('long')) {
+      actsCount = 4;
+    } else if (normalizedStoryLength.includes('短') || normalizedStoryLength.includes('micro')) {
+      actsCount = 3;
+    }
+  }
+  if (!actsCount) {
+    actsCount = 3;
+  }
+  instructionLines.push(`本故事采用 ${actsCount} 幕结构，每幕≥2个 beats，actsCount 字段请写为 ${actsCount}。`);
+
+  instructionLines.push('characters[].personality、arc 字数≤60，arcBeats 至少包含 1 个节点并说明章节。');
+  instructionLines.push('falseSolution 字数≤120，用 2-3 句描述错误推理与澄清节点。');
+  instructionLines.push('twists 至少 1 项，单项≤80 字，可混合字符串或对象；确保至少一个反转位于中后段。');
+  instructionLines.push('secondaryMysteries 至少 1 条，question 与 resolution 均≤80 字，并提供 payoffChapter。');
+  instructionLines.push('acts[].beats[].summary ≤120 字；clueMatrix 的 clue/surfaceMeaning/realMeaning 均≤80 字。');
 
   if (profile.planner.requireCh1Foreshadow) {
     instructionLines.push('Chapter 1 必须显式铺垫至少 2 条关键线索，并在 clueMatrix.explicitForeshadowChapters 中标注。');
@@ -147,6 +188,69 @@ export function buildPlannerPrompt(topic: string, options?: PromptBuildOptions):
     user = render(userTpl, ctx);
   } else {
     user = instructionLines.join('\n');
+  }
+
+  return { system, user, profile };
+}
+
+export function buildPlannerAdvisorPrompt(
+  outline: DetectiveOutline,
+  options?: PromptBuildOptions,
+): { system: string; user: string; profile: PromptProfile } {
+  const profile = resolvePromptProfile(options?.profile);
+  const systemTpl = readTemplate('planner.advisor.system.hbs');
+  const userTpl = readTemplate('planner.advisor.user.hbs');
+  const system =
+    systemTpl ||
+    '你是一名推理小说剧情顾问。阅读现有蓝图，识别复杂度不足或误导缺失的问题，并以 JSON 形式给出改进建议。禁止输出解释性文字。';
+
+  const diagnosticsLimit = Number(get(options?.vars || {}, 'advisor.maxDiagnostics')) || 5;
+  const advisorVars = ((options?.vars || {}) as Record<string, unknown>).advisor as Record<string, unknown> | undefined;
+  const deficits = Array.isArray(advisorVars?.deficits)
+    ? advisorVars!.deficits!.filter(
+        (item): item is string => typeof item === 'string' && item.trim().length > 0,
+      )
+    : [];
+  const metrics = advisorVars?.metrics && typeof advisorVars.metrics === 'object' ? advisorVars.metrics : undefined;
+  const ctx = {
+    outline: JSON.stringify(outline, null, 2),
+    diagnosticsLimit,
+    profile,
+    deficits,
+    metrics: metrics ? JSON.stringify(metrics, null, 2) : undefined,
+  };
+  const user =
+    userTpl ||
+    [
+      '请阅读以下 StoryBlueprint JSON，并返回严格的建议 JSON：',
+      '{{outline}}',
+      '',
+      deficits && deficits.length > 0
+        ? `待重点优化的问题：${deficits.map((item) => item.trim()).join('；')}。`
+        : '若识别到复杂度或误导不足之处，请在 diagnostics 中列出。',
+      metrics ? `（参考指标）\n${metrics}` : '',
+      '',
+      '输出格式：',
+      '{',
+      '  "diagnostics": ["问题描述（≤60字）"],',
+      '  "patch": {',
+      '    "actsCount": 4,',
+      '    "falseSolution": "...",',
+      '    "twists": ["...", { "summary": "...", "chapter": "Chapter 3" }],',
+      '    "secondaryMysteries": [ { "id": "M2", "question": "...", "resolution": "...", "payoffChapter": "Chapter 4" } ],',
+      '    "misdirectionMoments": [ { "chapter": "Chapter 2", "setup": "...", "surfaceInterpretation": "...", "revealHint": "...", "suspect": "..." } ]',
+      '  },',
+      '  "notes": ["补充说明（可选，≤60字）"]',
+      '}',
+      '',
+      `约束：diagnostics 最多 ${diagnosticsLimit} 条；patch 字段仅可包含 actsCount、falseSolution、twists、secondaryMysteries、misdirectionMoments、emotionalBeats、logicChecklist、fairnessNotes 的补充或替换；如无建议请返回空数组/对象。不得重复原蓝图文本，避免超过 120 字的长段。`,
+      '仅返回 JSON，禁止包含 ```json 等标记。',
+    ]
+      .join('\n')
+      .replace('{{outline}}', ctx.outline);
+
+  if (userTpl) {
+    return { system, user: render(userTpl, { ...ctx }), profile };
   }
 
   return { system, user, profile };
@@ -207,6 +311,8 @@ export function buildWriterPrompt(outline: any, options?: PromptBuildOptions): {
     `5) 若蓝图提供机关关键词，请在情节中给出可观察迹象，并在结局解释机关如何运作；误导线索数量不得超过真实线索的 {{profile.writer.maxRedHerringRatio}} 倍。`,
     `6) 第三章需包含对峙与复盘，逐条回收关键线索，揭示凶手动机与机关原理；故事以清晰的善后场景收尾。`,
     '7) 句长目标：≤{{profile.writer.sentenceTarget}}，遇长句请拆分；保持少儿友好语气与中等阅读难度。',
+    '8) 每章结尾需留下未解的疑问或悬念（非终章必须以问句或悬念语结尾），引导读者继续推理。',
+    '9) 当 fairnessNotes 或 secondaryMysteries 指出可提示读者的线索时，请在对应场景加入简短旁白或侦探内心提醒（如“你也许察觉到……”），保持自然表达。',
     '{{themeAnchorsLine}}',
     '{{wordsLine}}',
     '仅返回 JSON。'

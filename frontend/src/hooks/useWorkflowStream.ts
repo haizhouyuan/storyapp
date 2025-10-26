@@ -208,8 +208,29 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
       if (event.category !== 'stage' || !event.stageId) continue;
       map[event.stageId] = event;
     }
+    Object.values(stageActivity).forEach((activity) => {
+      if (!activity?.stageId) return;
+      const current = map[activity.stageId];
+      if (current?.status === activity.status) {
+        return;
+      }
+      map[activity.stageId] = {
+        eventId: current?.eventId ?? `summary-${activity.stageId}`,
+        workflowId: activity.workflowId,
+        category: 'stage',
+        stageId: activity.stageId,
+        status: activity.status,
+        message: current?.message ?? '',
+        timestamp: activity.updatedAt ?? new Date().toISOString(),
+        meta: {
+          ...(current?.meta ?? {}),
+          detailType: 'status',
+          detail: { status: activity.status, source: 'summary' },
+        },
+      } as WorkflowEvent;
+    });
     return map;
-  }, [events]);
+  }, [events, stageActivity]);
 
   useEffect(() => {
     if (!workflowId) {
@@ -260,6 +281,7 @@ export function useWorkflowStream(workflowId?: string | null): UseWorkflowStream
         connectionInterruptedRef.current = false;
       }
       hadInitialConnectionRef.current = true;
+      fetchStageActivity();
     };
     es.onmessage = (event) => {
       try {

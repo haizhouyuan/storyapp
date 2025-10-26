@@ -407,7 +407,8 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
         }
         case 'stage5_validation': {
           const gates = stage5Snapshot?.gates ?? [];
-          if (gates.length === 0 && !clueDiagnostics) return null;
+          const stage5Notes = stage5Snapshot?.notes ?? [];
+          if (gates.length === 0 && !clueDiagnostics && stage5Notes.length === 0) return null;
           return (
             <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 p-3 text-[11px] text-emerald-700">
               <p className="font-medium text-emerald-800">终局 Gate 结果</p>
@@ -431,6 +432,28 @@ export const WorkflowTimelineDrawer: React.FC<WorkflowTimelineDrawerProps> = ({
                 <p className="mt-2 text-rose-700">
                   仍需处理推论 {clueDiagnostics.unsupportedInferences.length} 条、孤立线索 {clueDiagnostics.orphanClues.length} 条。
                 </p>
+              )}
+              {stage5Notes.length > 0 && (
+                <div className="mt-2 border-t border-emerald-100 pt-2">
+                  <p className="font-medium text-emerald-800">系统提示</p>
+                  <ul className="mt-1 space-y-1">
+                    {stage5Notes.slice(0, 3).map((note, index) => {
+                      const tone = note.includes('未支撑') || note.includes('孤立')
+                        ? 'text-rose-700'
+                        : note.includes('修订') || note.includes('must-fix')
+                        ? 'text-amber-700'
+                        : 'text-emerald-700';
+                      return (
+                        <li key={`stage5-note-${index}`} className={`leading-5 ${tone}`}>
+                          {note}
+                        </li>
+                      );
+                    })}
+                    {stage5Notes.length > 3 && (
+                      <li className="text-emerald-600">…… 还有 {stage5Notes.length - 3} 条提示</li>
+                    )}
+                  </ul>
+                </div>
               )}
             </div>
           );

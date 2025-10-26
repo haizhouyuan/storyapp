@@ -59,6 +59,7 @@ const MAX_STATUS_POLL_ATTEMPTS = 200;
 const STATUS_POLL_BACKOFF_FACTOR = 1.5;
 const STATUS_POLL_MAX_INTERVAL_MS = 15000;
 const STATUS_POLL_MIN_INTERVAL_MS = 1000;
+const MAX_STATUS_NOT_FOUND = 12;
 
 const waitFor = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -147,6 +148,7 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
   ): Promise<StoryTtsBatchResponse> => {
     let attempt = 0;
     let delayMs = Math.max(initialDelay ?? DEFAULT_STATUS_POLL_INTERVAL_MS, STATUS_POLL_MIN_INTERVAL_MS);
+    let notFoundCount = 0;
 
     while (attempt < MAX_STATUS_POLL_ATTEMPTS) {
       if (attempt > 0) {
@@ -165,6 +167,13 @@ export function useStoryTts(options: UseStoryTtsOptions = {}): UseStoryTtsResult
       }
 
       if (statusResponse.status === 404) {
+        notFoundCount += 1;
+        if (notFoundCount >= MAX_STATUS_NOT_FOUND) {
+          const message = '朗读服务暂未就绪，请稍后再试。';
+          setStatus('error');
+          setError(message);
+          throw new Error(message);
+        }
         attempt += 1;
         delayMs = Math.min(delayMs * STATUS_POLL_BACKOFF_FACTOR, STATUS_POLL_MAX_INTERVAL_MS);
         continue;

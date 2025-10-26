@@ -42,6 +42,9 @@ export function runStage4Validation(
   ruleResults.push(validateEmotionalBeats(outline, storyDraft));
   ruleResults.push(validateMisdirectionDeployment(outline, storyDraft));
   ruleResults.push(validateEndingResolution(storyDraft));
+  ruleResults.push(validateTruthReconstruction(outline, storyDraft));
+  ruleResults.push(validateClueOrder(outline, storyDraft));
+  ruleResults.push(validateFairnessNotesExposure(outline, storyDraft));
   const summary = ruleResults.reduce(
     (acc, rule) => {
       if (rule.status === 'pass') acc.pass += 1;
@@ -520,6 +523,157 @@ function validateMisdirectionDeployment(
     details: computation.details,
   };
 }
+
+function validateTruthReconstruction(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const keyReveals = Array.isArray(outline.solution?.keyReveals) ? outline.solution!.keyReveals : [];
+  if (keyReveals.length === 0) {
+    return {
+      ruleId: 'truth-reconstruction',
+      status: 'warn',
+      details: [
+        {
+          message: 'solution.keyReveals 为空，建议在蓝图中补充关键推理节点以便逆向验证',
+        },
+      ],
+    };
+  }
+  const chapterTexts = (storyDraft.chapters || []).map(
+    (chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`,
+  );
+  const missing = keyReveals
+    .map((reveal) => String(reveal || '').trim())
+    .filter((reveal) => reveal && !chapterTexts.some((text) => text.includes(reveal)));
+  if (missing.length === 0) {
+    return {
+      ruleId: 'truth-reconstruction',
+      status: 'pass',
+      details: [{ message: '所有关键揭示均在正文中得以呈现' }],
+    };
+  }
+  return {
+    ruleId: 'truth-reconstruction',
+    status: 'fail',
+    details: [
+      {
+        message: `以下关键揭示未在正文中体现：${missing.join('、')}`,
+      },
+    ],
+  };
+}
+
+function validateClueOrder(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const clues = Array.isArray(outline.clueMatrix) ? outline.clueMatrix : [];
+  if (clues.length === 0) {
+    return {
+      ruleId: 'clue-order',
+      status: 'warn',
+      details: [{ message: '大纲缺少 clueMatrix，无法检查线索顺序' }],
+    };
+  }
+  const chapters = (storyDraft.chapters || []).map((chapter, index) => ({
+    title: chapter.title || `Chapter ${index + 1}`,
+    content: chapter.content || '',
+    cluesEmbedded: Array.isArray(chapter.cluesEmbedded)
+      ? chapter.cluesEmbedded.map((clue) => normalizeClueName(clue))
+      : [],
+  }));
+  const redClues = clues.filter((clue) => (clue as any)?.isRedHerring);
+  const realClues = clues.filter((clue) => !(clue as any)?.isRedHerring);
+  if (redClues.length === 0 || realClues.length === 0) {
+    return {
+      ruleId: 'clue-order',
+      status: 'pass',
+      details: [{ message: '线索矩阵缺少红鲱鱼或真实线索，跳过顺序校验' }],
+    };
+  }
+  const earliestReal = realClues.reduce<number | null>((min, clue) => {
+    const idx = findEarliestClueMention(chapters, normalizeClueName(clue.clue));
+    if (idx >= 0 && (min === null || idx < min)) return idx;
+    return min;
+  }, null);
+  const earliestRed = redClues.reduce<number | null>((min, clue) => {
+    const idx = findEarliestClueMention(chapters, normalizeClueName(clue.clue));
+    if (idx >= 0 && (min === null || idx < min)) return idx;
+    return min;
+  }, null);
+  if (earliestReal === null) {
+    return {
+      ruleId: 'clue-order',
+      status: 'warn',
+      details: [{ message: '真实线索未在正文标注，建议在 chapters[].cluesEmbedded 中补录名称' }],
+    };
+  }
+  if (earliestRed === null) {
+    return {
+      ruleId: 'clue-order',
+      status: 'pass',
+      details: [{ message: '正文未标注红鲱鱼线索，跳过顺序检查' }],
+    };
+  }
+  if (earliestReal <= earliestRed) {
+    return {
+      ruleId: 'clue-order',
+      status: 'warn',
+      details: [
+        {
+          message: `真实线索最早出现在 Chapter ${earliestReal + 1}，早于红鲱鱼 Chapter ${earliestRed + 1}，建议调整出场顺序或强化误导`,
+        },
+      ],
+    };
+  }
+  return {
+    ruleId: 'clue-order',
+    status: 'pass',
+    details: [
+      {
+        message: `真实线索在 Chapter ${earliestReal + 1} 出场，晚于红鲱鱼 Chapter ${earliestRed + 1}，顺序合理`,
+      },
+    ],
+  };
+}
+
+function validateFairnessNotesExposure(
+  outline: DetectiveOutline,
+  storyDraft: DetectiveStoryDraft,
+): ValidationRuleResult {
+  const fairnessNotes = Array.isArray(outline.fairnessNotes) ? outline.fairnessNotes : [];
+  if (fairnessNotes.length === 0) {
+    return {
+      ruleId: 'fairness-notes',
+      status: 'pass',
+      details: [{ message: '大纲未提供 fairnessNotes，跳过提示呈现检查' }],
+    };
+  }
+  const chapterTexts = (storyDraft.chapters || []).map(
+    (chapter) => `${chapter.summary || ''}\n${chapter.content || ''}`,
+  );
+  const missing = fairnessNotes
+    .map((note) => String(note || '').trim())
+    .filter((note) => note && !chapterTexts.some((text) => text.includes(note)));
+  if (missing.length === 0) {
+    return {
+      ruleId: 'fairness-notes',
+      status: 'pass',
+      details: [{ message: 'fairnessNotes 中的提示均在正文中有所体现' }],
+    };
+  }
+  return {
+    ruleId: 'fairness-notes',
+    status: 'warn',
+    details: [
+      {
+        message: `以下读者提示未在正文突出：${missing.join('、')}，建议在相关场景加入旁白或描写提醒读者留意。`,
+      },
+    ],
+  };
+}
+
 
 function validateEndingResolution(storyDraft: DetectiveStoryDraft): ValidationRuleResult {
   const chapters = storyDraft?.chapters ?? [];

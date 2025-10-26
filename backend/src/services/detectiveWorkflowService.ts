@@ -263,6 +263,60 @@ function extractHypothesisEvaluation(source: unknown): HypothesisEvaluation | un
   return undefined;
 }
 
+function buildHypothesesFromLightSnapshots(
+  snapshots: LightHypothesisSnapshot[] | undefined,
+): HypothesisEvaluation | undefined {
+  if (!Array.isArray(snapshots) || snapshots.length === 0) return undefined;
+  const latest = snapshots[snapshots.length - 1];
+  if (!latest || !Array.isArray(latest.rank) || latest.rank.length === 0) return undefined;
+  const candidates = latest.rank
+    .filter((entry) => entry && typeof entry.name === 'string')
+    .map((entry) => ({
+      suspect: entry.name,
+      confidence: Math.max(
+        0,
+        Math.min(1, typeof entry.score === 'number' ? entry.score : Number(entry.score) || 0),
+      ),
+      evidence: Array.isArray(entry.evidenceIds)
+        ? entry.evidenceIds.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [],
+    }));
+  if (!candidates.length) return undefined;
+  return {
+    candidates,
+    notes: [`由逐章轻量假说缓存推断（截至第 ${latest.chapterIndex + 1} 章）`],
+  };
+}
+
+function buildBetaReaderFromLightSnapshots(
+  snapshots: LightHypothesisSnapshot[] | undefined,
+): BetaReaderInsight | undefined {
+  if (!Array.isArray(snapshots) || snapshots.length === 0) return undefined;
+  const latest = snapshots[snapshots.length - 1];
+  if (!latest || !Array.isArray(latest.rank) || latest.rank.length === 0) return undefined;
+  const top = latest.rank[0];
+  if (!top || typeof top.name !== 'string') return undefined;
+  const evidence = Array.isArray(top.evidenceIds)
+    ? top.evidenceIds.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  return {
+    topSuspect: top.name,
+    confidence: Math.max(
+      0,
+      Math.min(1, typeof top.score === 'number' ? top.score : Number(top.score) || 0),
+    ),
+    evidence,
+    summary: `逐章轻量评估显示 ${top.name} 置信度约为 ${Math.round(
+      Math.max(0, Math.min(1, top.score || 0)) * 100,
+    )}%`,
+    competingSuspects: latest.rank
+      .slice(1, 3)
+      .map((entry) => entry?.name)
+      .filter((name): name is string => Boolean(name && name.trim().length > 0)),
+  };
+}
+
+
 function setStage3Analysis(
   meta: DetectiveWorkflowMeta | undefined,
   analysis: Stage3AnalysisSnapshot | undefined,
@@ -305,12 +359,14 @@ function setStage5GateSnapshot(
   meta: DetectiveWorkflowMeta | undefined,
   gates: GateLog[],
   generatedAt: string,
+  notes?: string[],
 ): DetectiveWorkflowMeta {
   const stageResults = {
     ...(meta?.stageResults ?? {}),
     stage5: {
       gates,
       generatedAt,
+      ...(notes && notes.length > 0 ? { notes } : {}),
     } satisfies Stage5GateSnapshot,
   };
   return {
@@ -633,6 +689,8 @@ function collectPostRevisionComplianceIssues(
 }
 
 type StageRunnerOutput = Partial<Pick<DetectiveWorkflowDocument, 'outline' | 'storyDraft' | 'review' | 'validation'>>;
+
+type Stage5LogContext = { gates: GateLog[]; durationMs?: number; notes?: string[] };
 
 type WorkflowExecutionOptions = {
   revisionType: WorkflowRevisionType;
@@ -1378,6 +1436,8 @@ async function executeWorkflowPipeline(
     }
   }
 
+  let stage3Analysis: Stage3AnalysisSnapshot | undefined;
+
   // Stage 3
   workingDoc = await runStageWithUpdate(workingDoc, 'stage3_review', async (telemetry) => {
     const outline = workingDoc.outline as DetectiveOutline;
@@ -1394,12 +1454,36 @@ async function executeWorkflowPipeline(
       const reviewObj = workingDoc.review as Record<string, unknown>;
       const previousAnalysis =
         (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.stageResults?.stage3;
-      const betaReader = extractBetaReaderInsight(reviewObj) ?? previousAnalysis?.betaReader;
-      const hypotheses = extractHypothesisEvaluation(reviewObj) ?? previousAnalysis?.hypotheses;
+      const lightSnapshots = Array.isArray((workingDoc.meta as DetectiveWorkflowMeta | undefined)?.lightHypotheses)
+        ? ((workingDoc.meta as DetectiveWorkflowMeta).lightHypotheses as LightHypothesisSnapshot[])
+        : undefined;
+      const directBetaReader = extractBetaReaderInsight(reviewObj);
+      const directHypotheses = extractHypothesisEvaluation(reviewObj);
+      const fallbackBeta = directBetaReader ? undefined : buildBetaReaderFromLightSnapshots(lightSnapshots);
+      const fallbackHypotheses = directHypotheses ? undefined : buildHypothesesFromLightSnapshots(lightSnapshots);
+      const betaReaderSource = directBetaReader
+        ? 'review'
+        : previousAnalysis?.betaReader
+        ? 'previous'
+        : fallbackBeta
+        ? 'fallback'
+        : null;
+      const hypothesesSource = directHypotheses
+        ? 'review'
+        : previousAnalysis?.hypotheses
+        ? 'previous'
+        : fallbackHypotheses
+        ? 'fallback'
+        : null;
+      const betaReader =
+        directBetaReader ?? previousAnalysis?.betaReader ?? fallbackBeta ?? undefined;
+      const hypotheses =
+        directHypotheses ?? previousAnalysis?.hypotheses ?? fallbackHypotheses ?? undefined;
       const analysis: Stage3AnalysisSnapshot | undefined =
         betaReader || hypotheses
           ? { ...(betaReader ? { betaReader } : {}), ...(hypotheses ? { hypotheses } : {}) }
           : previousAnalysis;
+      stage3Analysis = analysis ?? previousAnalysis ?? undefined;
       let nextMeta = setStage3Analysis(workingDoc.meta, analysis);
       nextMeta = upsertPromptVersion(nextMeta, PROMPT_VERSION_KEY_STAGE3, PROMPT_VERSION_STAGE3);
       let modelCalls: number | undefined;
@@ -1421,10 +1505,16 @@ async function executeWorkflowPipeline(
         notes.push(
           `BetaReader：${betaReader.topSuspect} ${(betaReader.confidence * 100).toFixed(0)}%`,
         );
+        if (betaReaderSource === 'fallback') {
+          notes.push('BetaReader 结果来源：逐章轻量假说缓存');
+        }
       }
       const hypothesisCount = analysis?.hypotheses?.candidates?.length ?? 0;
       if (hypothesisCount > 0) {
         notes.push(`竞争假说 ${hypothesisCount} 个`);
+        if (hypothesesSource === 'fallback') {
+          notes.push('竞争假说来源：逐章轻量假说缓存');
+        }
       }
       const mustFixCount = Array.isArray((reviewObj as any)?.mustFixBeforePublish)
         ? (reviewObj as any).mustFixBeforePublish.length
@@ -1451,7 +1541,7 @@ async function executeWorkflowPipeline(
   }
 
   let stage4LogContext: { notes: string[]; durationMs?: number; modelCalls?: number } | null = null;
-  let stage5LogContext: { gates: GateLog[]; durationMs?: number } | null = null;
+  let stage5LogContext: Stage5LogContext | null = null;
 
   // Stage 4
   workingDoc = await runStageWithUpdate(workingDoc, 'stage4_revision', async (telemetry) => {
@@ -1490,6 +1580,7 @@ async function executeWorkflowPipeline(
       plannerPrompt,
       telemetry,
       (workingDoc.meta as DetectiveWorkflowMeta | undefined)?.anchorsSummary ?? null,
+      stage3Analysis ?? null,
     );
     if (!revision.skipped) {
       storyDraft = revision.draft;
@@ -1901,6 +1992,21 @@ async function executeWorkflowPipeline(
       nextMeta = setStage4RevisionSummary(nextMeta, storyDraft.revisionPlan);
     }
     const gates: GateLog[] = [fairGate, complexityGate, revisionGate];
+    const stage5Notes: string[] = [];
+    if (clueDiagnostics.unsupportedInferences.length > 0) {
+      const ids = clueDiagnostics.unsupportedInferences.map((issue) => issue.id).slice(0, 3);
+      const suffix = clueDiagnostics.unsupportedInferences.length > ids.length ? '…' : '';
+      stage5Notes.push(`未支撑推论 ${clueDiagnostics.unsupportedInferences.length} 条：${ids.join('、')}${suffix}`);
+    }
+    if (clueDiagnostics.orphanClues.length > 0) {
+      const ids = clueDiagnostics.orphanClues.map((issue) => issue.id).slice(0, 3);
+      const suffix = clueDiagnostics.orphanClues.length > ids.length ? '…' : '';
+      stage5Notes.push(`孤立线索 ${clueDiagnostics.orphanClues.length} 条：${ids.join('、')}${suffix}`);
+    }
+    const outstandingMustFix = revisionPlan?.mustFix?.length ?? 0;
+    if (outstandingMustFix > 0) {
+      stage5Notes.push(`修订必修项未清理：${outstandingMustFix} 条`);
+    }
     if (workflowIdString) {
       gates
         .filter((gate) => gate.verdict !== 'pass')
@@ -1910,6 +2016,7 @@ async function executeWorkflowPipeline(
             reason: gate.reason,
             nextAction: gate.nextAction ?? 'none',
             metrics: gate.metrics,
+            notes: stage5Notes,
           });
         });
     }
@@ -1917,16 +2024,19 @@ async function executeWorkflowPipeline(
     stage5LogContext = {
       gates,
       durationMs,
+      notes: stage5Notes.length > 0 ? stage5Notes : undefined,
     };
-    nextMeta = setStage5GateSnapshot(nextMeta, gates, gateTimestamp);
+    nextMeta = setStage5GateSnapshot(nextMeta, gates, gateTimestamp, stage5Notes);
     workingDoc = updateWorkflowDocument(workingDoc, { meta: nextMeta });
     await persistWorkflow(workingDoc);
 
     if (revisionGate.verdict === 'block') {
-      throw new Error(revisionGate.reason ?? '修订计划仍存在 must-fix 未处理');
+      const message = revisionGate.reason ?? stage5Notes.find((note) => note.includes('修订')) ?? '修订计划仍存在 must-fix 未处理';
+      throw new Error(message);
     }
     if (fairGate.verdict === 'block') {
-      throw new Error(fairGate.reason ?? 'Fair-Play Gate 未通过，请补充线索支撑');
+      const message = stage5Notes.find((note) => note.startsWith('未支撑推论')) || stage5Notes.find((note) => note.startsWith('孤立线索')) || fairGate.reason || 'Fair-Play Gate 未通过，请补充线索支撑';
+      throw new Error(message);
     }
 
     return { validation: validationWithMetrics, outline: outlineForValidation, storyDraft };
@@ -1965,7 +2075,10 @@ async function executeWorkflowPipeline(
       nextMeta = upsertStageLog(nextMeta, stageLog);
     }
     if (stage5LogContext !== null) {
-      const { gates: stage5Gates, durationMs: stage5Duration } = stage5LogContext;
+      const context = stage5LogContext as Stage5LogContext;
+      const stage5Gates = context.gates;
+      const stage5Duration = context.durationMs;
+      const stage5NotesList = context.notes;
       const stageLog: StageLog = {
         stage: mapStageCode('stage5_validation'),
         stageId: 'stage5_validation',
@@ -1973,6 +2086,7 @@ async function executeWorkflowPipeline(
         gates: stage5Gates,
         durationMs: stage5Duration,
         modelCalls: 0,
+        notes: stage5NotesList && stage5NotesList.length > 0 ? stage5NotesList : undefined,
         timestamp: new Date().toISOString(),
       };
       nextMeta = upsertStageLog(nextMeta, stageLog);
